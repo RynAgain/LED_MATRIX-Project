@@ -45,63 +45,75 @@ def get_frame_from_url(url):
         print(f"Error getting frame: {str(e)}")
         return None
 
-def stream_youtube_videos(urls, matrix):
-    """Stream YouTube videos to LED matrix."""
-    # Configure yt-dlp options for lowest quality to save bandwidth
+def download_video(url, download_path):
+    """Download video from YouTube using yt-dlp."""
     ydl_opts = {
         'format': 'worst[ext=mp4]',  # Get lowest quality mp4
         'quiet': True,
+        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),  # Save to specified path
     }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        print(f"Error downloading video: {str(e)}")
+
+def stream_youtube_videos(urls, matrix):
+    """Stream YouTube videos to LED matrix."""
+    download_path = 'downloaded_videos'
+    os.makedirs(download_path, exist_ok=True)
     
     try:
         for url, title in urls:
             print(f"\nPreparing to play: {title}")
-            print("Fetching video information...")
+            print("Downloading video...")
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                stream_url = info['url']
+            download_video(url, download_path)
+            
+            video_file = os.path.join(download_path, f"{title}.mp4")
+            if not os.path.exists(video_file):
+                print(f"Video file not found: {video_file}")
+                continue
+            
+            print("\nInitializing playback...")
+            
+            # Open video capture
+            cap = cv2.VideoCapture(video_file)
+            
+            print("Playback started!")
+            print("Press Ctrl+C to skip to next video")
+            
+            start_time = time.time()  # Start the timer
+            
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
                 
-                print(f"Video Title: {info.get('title', 'Unknown Title')}")
-                print("\nInitializing playback...")
+                # Check if 3 minutes have passed
+                elapsed_time = time.time() - start_time
+                if elapsed_time > 180:  # 180 seconds = 3 minutes
+                    print("Maximum playback time reached. Stopping video.")
+                    break
                 
-                # Open video capture
-                cap = cv2.VideoCapture(stream_url)
+                # Resize frame to 64x64
+                frame = cv2.resize(frame, (64, 64))
                 
-                print("Playback started!")
-                print("Press Ctrl+C to skip to next video")
+                # Convert from BGR to RGB
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
-                start_time = time.time()  # Start the timer
+                # Convert to PIL Image
+                image = Image.fromarray(frame)
                 
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    
-                    # Check if 3 minutes have passed
-                    elapsed_time = time.time() - start_time
-                    if elapsed_time > 180:  # 180 seconds = 3 minutes
-                        print("Maximum playback time reached. Stopping video.")
-                        break
-                    
-                    # Resize frame to 64x64
-                    frame = cv2.resize(frame, (64, 64))
-                    
-                    # Convert from BGR to RGB
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Convert to PIL Image
-                    image = Image.fromarray(frame)
-                    
-                    # Display on matrix
-                    matrix.SetImage(image)
-                    
-                    # Control playback speed
-                    time.sleep(0.1)
+                # Display on matrix
+                matrix.SetImage(image)
                 
-                cap.release()
-                print("\nPlayback finished.")
-                
+                # Control playback speed
+                time.sleep(0.1)
+            
+            cap.release()
+            print("\nPlayback finished.")
+            
     except KeyboardInterrupt:
         print("\nSkipping to next video...")
     except Exception as e:

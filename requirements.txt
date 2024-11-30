@@ -1,5 +1,4 @@
+yt_dlp
 Pillow
-rgbmatrix
-pafy
-python-vlc
-yt-dlp
+opencv-python==3.4.11.12
+numpy

@@ -32,7 +32,18 @@ restart_program() {
     nohup python3 consolidated_games.py &
 }
 
+# Function to install dependencies
+install_dependencies() {
+    echo "Installing dependencies..."
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-pip
+    sudo apt-get install -y vlc
+    pip3 install -r requirements.txt
+    sudo apt-get install -y libgraphicsmagick++-dev libwebp-dev
+}
+
 # Main script execution
+install_dependencies
 check_for_updates
 
 # Loop to check for updates every 30 minutes

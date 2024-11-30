@@ -5,12 +5,9 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 ## Project Structure
 
 - `consolidated_games.py`: Contains the logic for both Tic-Tac-Toe and Snake games, and now automatically cycles through these games, time display, and YouTube streaming.
-- `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp.
+- `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Downloads videos locally to avoid repeated streaming.
 - `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence.
 - `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
-- `requirements_windows.txt`: Lists Windows-compatible Python dependencies (excludes Raspberry Pi specific packages).
-- `install.sh`: Installs the necessary Python dependencies and system packages (Linux/Raspberry Pi).
-- `install_windows.bat`: Installs Windows-compatible Python dependencies and guides VLC installation.
 - `install_and_update.sh`: Checks for updates from the GitHub repository and restarts the program if updates are found.
 - `add_to_startup.sh`: Adds `install_and_update.sh` to the Raspberry Pi's boot sequence using a cron job.
 
@@ -60,7 +57,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
    ```
 
 2. **Install Dependencies**:
-   Run the `install_windows.bat` script to install Windows-compatible Python dependencies.
+   Follow the instructions in the `requirements.txt` to install Windows-compatible Python dependencies.
 
 3. **Install VLC Media Player**:
    - Download VLC from https://www.videolan.org/vlc/download-windows.html
@@ -100,11 +97,10 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
   3. **Features**:
      - Plays videos in sequence from the CSV file
-     - Window size fixed at 640x640 pixels
-     - Press Ctrl+C to skip to the next video
+     - **New:** Downloads videos locally to `downloaded_videos` directory
      - Videos play automatically in sequence
      - Shows title and quality information for each video
-     - **New:** Each video is limited to a maximum playback time of 3 minutes
+     - Each video is limited to a maximum playback time of 3 minutes
 
 - **Automatic Updates** (Raspberry Pi only):
   The `install_and_update.sh` script will automatically check for updates every 30 minutes and restart the program if updates are found.
@@ -160,5 +156,3 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 - For update issues, verify the GitHub repository URL and network connectivity
 
 ## License
-
-This project is licensed under the MIT License.

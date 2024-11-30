@@ -77,6 +77,22 @@ direction = (0, 1)
 food = (random.randint(0, 63), random.randint(0, 63))
 game_over = False
 
+def generate_hamiltonian_path():
+    """Generate a Hamiltonian path for a 64x64 grid."""
+    path = []
+    for y in range(64):
+        if y % 2 == 0:
+            # Left to right on even rows
+            for x in range(64):
+                path.append((x, y))
+        else:
+            # Right to left on odd rows
+            for x in range(63, -1, -1):
+                path.append((x, y))
+    return path
+
+hamiltonian_path = generate_hamiltonian_path()
+
 def draw_snake():
     """Draw the snake and food on the LED matrix."""
     image = Image.new("RGB", (64, 64))
@@ -96,20 +112,13 @@ def move_snake():
     global game_over, food, direction
     head_x, head_y = snake[0]
     
-    # Improved AI to avoid collisions and prevent 180-degree turns
-    if head_x < food[0] and direction != (-1, 0) and (head_x + 1, head_y) not in snake:
-        direction = (1, 0)
-    elif head_x > food[0] and direction != (1, 0) and (head_x - 1, head_y) not in snake:
-        direction = (-1, 0)
-    elif head_y < food[1] and direction != (0, -1) and (head_x, head_y + 1) not in snake:
-        direction = (0, 1)
-    elif head_y > food[1] and direction != (0, 1) and (head_x, head_y - 1) not in snake:
-        direction = (0, -1)
-    
-    new_head = (head_x + direction[0], head_y + direction[1])
+    # Follow the Hamiltonian path
+    current_index = hamiltonian_path.index((head_x, head_y))
+    next_index = (current_index + 1) % len(hamiltonian_path)
+    new_head = hamiltonian_path[next_index]
     
     # Check for collisions
-    if new_head in snake or not (0 <= new_head[0] < 64) or not (0 <= new_head[1] < 64):
+    if new_head in snake:
         game_over = True
         logging.warning("Snake game over due to collision")
         return
