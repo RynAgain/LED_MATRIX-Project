@@ -4,7 +4,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
 ## Project Structure
 
-- `consolidated_games.py`: Contains the logic for both Tic-Tac-Toe and Snake games.
+- `consolidated_games.py`: Contains the logic for both Tic-Tac-Toe and Snake games, and now automatically cycles through these games, time display, and YouTube streaming.
 - `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp.
 - `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence.
 - `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
@@ -75,8 +75,8 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
 ## Usage
 
-- **Running the Games** (Raspberry Pi Only):
-  Execute the `consolidated_games.py` script to start the games.
+- **Running the Games and Features** (Raspberry Pi Only):
+  Execute the `consolidated_games.py` script to start the automatic cycling through Tic-Tac-Toe, Snake, time display, and YouTube streaming.
   ```bash
   python3 consolidated_games.py
   ```

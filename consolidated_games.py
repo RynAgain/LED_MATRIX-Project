@@ -127,52 +127,40 @@ def main():
     """Main game loop."""
     global game_over
     while True:
-        # Choose which game to play
-        game_choice = input("Enter '1' for Tic-Tac-Toe or '2' for Snake: ")
-        
-        if game_choice == '1':
-            # Play 10 games of Tic-Tac-Toe
-            for _ in range(10):
-                reset_tic_tac_toe_board()
-                print_tic_tac_toe_board()
-                while True:
-                    # AI move for 'X'
-                    tic_tac_toe_ai_move('X')
-                    print_tic_tac_toe_board()
-                    time.sleep(1)  # Slow down the game for visibility
-                    if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
-                        print("AI 'X' wins!")
-                        break
-                    
-                    # AI move for 'O'
-                    tic_tac_toe_ai_move('O')
-                    print_tic_tac_toe_board()
-                    time.sleep(1)  # Slow down the game for visibility
-                    if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
-                        print("AI 'O' wins!")
-                        break
-        
-        elif game_choice == '2':
-            # Snake game loop
-            reset_snake_game()
+        # Play Tic-Tac-Toe
+        for _ in range(10):
+            reset_tic_tac_toe_board()
+            print_tic_tac_toe_board()
             while True:
-                if game_over:
-                    # Display time and date
-                    display_time_and_date()
-                    
-                    # Play YouTube videos
-                    try:
-                        print("\nStarting YouTube video playback...")
-                        youtube_stream.play_videos_on_matrix(matrix)
-                    except Exception as e:
-                        print(f"Error playing videos: {str(e)}")
-                    
-                    # Reset game after videos
-                    reset_snake_game()
+                # AI move for 'X'
+                tic_tac_toe_ai_move('X')
+                print_tic_tac_toe_board()
+                time.sleep(1)  # Slow down the game for visibility
+                if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
+                    break
                 
-                draw_snake()
-                move_snake()
-                time.sleep(0.1)
+                # AI move for 'O'
+                tic_tac_toe_ai_move('O')
+                print_tic_tac_toe_board()
+                time.sleep(1)  # Slow down the game for visibility
+                if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
+                    break
+        
+        # Snake game loop
+        reset_snake_game()
+        while not game_over:
+            draw_snake()
+            move_snake()
+            time.sleep(0.1)
+        
+        # Display time and date
+        display_time_and_date()
+        
+        # Play YouTube videos
+        try:
+            youtube_stream.play_videos_on_matrix(matrix)
+        except Exception as e:
+            print(f"Error playing videos: {str(e)}")
 
 if __name__ == '__main__':
     try:
