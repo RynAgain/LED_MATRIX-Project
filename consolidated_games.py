@@ -1,5 +1,6 @@
 import time
 import random
+import logging
 from datetime import datetime
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 from PIL import Image, ImageDraw, ImageFont
@@ -15,6 +16,9 @@ options.hardware_mapping = 'regular'
 
 # Create the matrix
 matrix = RGBMatrix(options=options)
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Tic-Tac-Toe game variables
 tic_tac_toe_board = [' ' for _ in range(9)]
@@ -55,11 +59,13 @@ def tic_tac_toe_ai_move(player):
     if available_moves:  # Ensure there are available moves
         move = random.choice(available_moves)
         tic_tac_toe_board[move] = player
+        logging.debug(f"Player {player} moved to position {move}")
 
 def reset_tic_tac_toe_board():
     """Reset the Tic-Tac-Toe board for a new game."""
     global tic_tac_toe_board
     tic_tac_toe_board = [' ' for _ in range(9)]
+    logging.info("Tic-Tac-Toe board reset")
 
 # Snake game variables
 snake = [(32, 32)]
@@ -101,12 +107,14 @@ def move_snake():
     # Check for collisions
     if new_head in snake or not (0 <= new_head[0] < 64) or not (0 <= new_head[1] < 64):
         game_over = True
+        logging.warning("Snake game over due to collision")
         return
     
     # Check for food
     if new_head == food:
         snake.insert(0, new_head)
         food = (random.randint(0, 63), random.randint(0, 63))
+        logging.info("Snake ate food")
     else:
         snake.insert(0, new_head)
         snake.pop()
@@ -117,6 +125,7 @@ def reset_snake_game():
     snake = [(32, 32)]
     direction = (0, 1)
     game_over = False
+    logging.info("Snake game reset")
 
 def display_time_and_date():
     """Display the current time and date on the LED matrix."""
@@ -150,6 +159,7 @@ def main():
                 print_tic_tac_toe_board()
                 time.sleep(1)  # Slow down the game for visibility
                 if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
+                    logging.info("Player X wins")
                     break
                 
                 # AI move for 'O'
@@ -157,6 +167,7 @@ def main():
                 print_tic_tac_toe_board()
                 time.sleep(1)  # Slow down the game for visibility
                 if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
+                    logging.info("Player O wins")
                     break
         
         # Snake game loop
@@ -173,12 +184,12 @@ def main():
         try:
             youtube_stream.play_videos_on_matrix(matrix)
         except Exception as e:
-            print(f"Error playing videos: {str(e)}")
+            logging.error(f"Error playing videos: {str(e)}")
 
 if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logging.info("Exiting...")
     finally:
         matrix.Clear()
