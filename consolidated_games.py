@@ -52,8 +52,9 @@ def check_tic_tac_toe_winner(board, player):
 def tic_tac_toe_ai_move(player):
     """Make a move for the AI in Tic-Tac-Toe."""
     available_moves = [i for i, cell in enumerate(tic_tac_toe_board) if cell == ' ']
-    move = random.choice(available_moves)
-    tic_tac_toe_board[move] = player
+    if available_moves:  # Ensure there are available moves
+        move = random.choice(available_moves)
+        tic_tac_toe_board[move] = player
 
 def reset_tic_tac_toe_board():
     """Reset the Tic-Tac-Toe board for a new game."""
