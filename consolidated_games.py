@@ -72,7 +72,7 @@ def reset_tic_tac_toe_board():
     logging.info("Tic-Tac-Toe board reset")
 
 # Snake game variables
-snake = [(32, 32)]
+snake = [(32, 32), (32, 31), (32, 30)]  # Start with a longer snake
 direction = (0, 1)
 food = (random.randint(0, 63), random.randint(0, 63))
 game_over = False
@@ -96,14 +96,14 @@ def move_snake():
     global game_over, food, direction
     head_x, head_y = snake[0]
     
-    # Basic AI to move towards the food
-    if head_x < food[0]:
+    # Improved AI to avoid collisions and prevent 180-degree turns
+    if head_x < food[0] and direction != (-1, 0) and (head_x + 1, head_y) not in snake:
         direction = (1, 0)
-    elif head_x > food[0]:
+    elif head_x > food[0] and direction != (1, 0) and (head_x - 1, head_y) not in snake:
         direction = (-1, 0)
-    elif head_y < food[1]:
+    elif head_y < food[1] and direction != (0, -1) and (head_x, head_y + 1) not in snake:
         direction = (0, 1)
-    elif head_y > food[1]:
+    elif head_y > food[1] and direction != (0, 1) and (head_x, head_y - 1) not in snake:
         direction = (0, -1)
     
     new_head = (head_x + direction[0], head_y + direction[1])
@@ -117,7 +117,9 @@ def move_snake():
     # Check for food
     if new_head == food:
         snake.insert(0, new_head)
-        food = (random.randint(0, 63), random.randint(0, 63))
+        # Ensure food is not placed on the snake
+        while food in snake:
+            food = (random.randint(0, 63), random.randint(0, 63))
         logging.info("Snake ate food")
     else:
         snake.insert(0, new_head)
@@ -126,7 +128,7 @@ def move_snake():
 def reset_snake_game():
     """Reset the Snake game for a new game."""
     global snake, direction, game_over
-    snake = [(32, 32)]
+    snake = [(32, 32), (32, 31), (32, 30)]  # Reset with a longer snake
     direction = (0, 1)
     game_over = False
     logging.info("Snake game reset")
