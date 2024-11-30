@@ -3,6 +3,7 @@ import random
 from datetime import datetime
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 from PIL import Image, ImageDraw, ImageFont
+import youtube_stream
 
 # Configuration for the 64x64 matrix
 options = RGBMatrixOptions()
@@ -169,7 +170,17 @@ def main():
             reset_snake_game()
             while True:
                 if game_over:
+                    # Display time and date
                     display_time_and_date()
+                    
+                    # Play YouTube videos
+                    try:
+                        print("\nStarting YouTube video playback...")
+                        youtube_stream.play_videos_on_matrix(matrix)
+                    except Exception as e:
+                        print(f"Error playing videos: {str(e)}")
+                    
+                    # Reset game after videos
                     reset_snake_game()
                 
                 draw_snake()
@@ -177,4 +188,9 @@ def main():
                 time.sleep(0.1)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nExiting...")
+    finally:
+        matrix.Clear()

@@ -4,6 +4,9 @@
 sudo apt-get update
 sudo apt-get install -y python3 python3-pip
 
+# Install VLC media player
+sudo apt-get install -y vlc
+
 # Install Python dependencies
 pip3 install -r requirements.txt
 

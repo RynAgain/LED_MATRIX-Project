@@ -1,5 +1,3 @@
 Pillow
-rgbmatrix
-pafy
 python-vlc
 yt-dlp
