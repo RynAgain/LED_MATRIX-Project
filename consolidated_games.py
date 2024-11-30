@@ -133,6 +133,75 @@ def reset_snake_game():
     game_over = False
     logging.info("Snake game reset")
 
+# Pong game variables
+paddle1_y = 28
+paddle2_y = 28
+ball_pos = [32, 32]
+ball_dir = [1, 1]
+paddle_height = 8
+
+def draw_pong():
+    """Draw the Pong game on the LED matrix."""
+    image = Image.new("RGB", (64, 64))
+    draw = ImageDraw.Draw(image)
+    
+    # Draw paddles
+    draw.rectangle((2, paddle1_y, 4, paddle1_y + paddle_height), fill=(255, 255, 255))
+    draw.rectangle((60, paddle2_y, 62, paddle2_y + paddle_height), fill=(255, 255, 255))
+    
+    # Draw ball
+    draw.rectangle((ball_pos[0], ball_pos[1], ball_pos[0] + 2, ball_pos[1] + 2), fill=(255, 255, 0))
+    
+    matrix.SetImage(image)
+
+def move_pong():
+    """Move the ball and paddles in the Pong game."""
+    global ball_pos, ball_dir, paddle1_y, paddle2_y
+    
+    # Move ball
+    ball_pos[0] += ball_dir[0]
+    ball_pos[1] += ball_dir[1]
+    
+    # Ball collision with top and bottom
+    if ball_pos[1] <= 0 or ball_pos[1] >= 62:
+        ball_dir[1] = -ball_dir[1]
+    
+    # Ball collision with paddles
+    if ball_pos[0] <= 4 and paddle1_y <= ball_pos[1] <= paddle1_y + paddle_height:
+        ball_dir[0] = -ball_dir[0]
+    elif ball_pos[0] >= 58 and paddle2_y <= ball_pos[1] <= paddle2_y + paddle_height:
+        ball_dir[0] = -ball_dir[0]
+    
+    # Ball out of bounds
+    if ball_pos[0] < 0 or ball_pos[0] > 64:
+        ball_pos = [32, 32]  # Reset ball position
+        ball_dir = [random.choice([-1, 1]), random.choice([-1, 1])]  # Randomize direction
+    
+    # Simple AI for paddle1
+    if ball_pos[1] > paddle1_y + paddle_height // 2:
+        paddle1_y += 1
+    elif ball_pos[1] < paddle1_y + paddle_height // 2:
+        paddle1_y -= 1
+    
+    # Simple AI for paddle2
+    if ball_pos[1] > paddle2_y + paddle_height // 2:
+        paddle2_y += 1
+    elif ball_pos[1] < paddle2_y + paddle_height // 2:
+        paddle2_y -= 1
+    
+    # Ensure paddles stay within bounds
+    paddle1_y = max(0, min(56, paddle1_y))
+    paddle2_y = max(0, min(56, paddle2_y))
+
+def reset_pong_game():
+    """Reset the Pong game for a new game."""
+    global paddle1_y, paddle2_y, ball_pos, ball_dir
+    paddle1_y = 28
+    paddle2_y = 28
+    ball_pos = [32, 32]
+    ball_dir = [1, 1]
+    logging.info("Pong game reset")
+
 def display_time_and_date():
     """Display the current time and date on the LED matrix."""
     end_time = time.time() + 60  # Display for 1 minute
@@ -197,6 +266,13 @@ def main():
             draw_snake()
             move_snake()
             time.sleep(0.1)
+        
+        # Pong game loop
+        reset_pong_game()
+        for _ in range(100):  # Play Pong for 100 iterations
+            draw_pong()
+            move_pong()
+            time.sleep(0.05)
         
         # Display time and date
         display_time_and_date()
