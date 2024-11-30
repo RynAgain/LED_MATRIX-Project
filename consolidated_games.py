@@ -77,22 +77,6 @@ direction = (0, 1)
 food = (random.randint(0, 63), random.randint(0, 63))
 game_over = False
 
-def generate_hamiltonian_path():
-    """Generate a Hamiltonian path for a 64x64 grid."""
-    path = []
-    for y in range(64):
-        if y % 2 == 0:
-            # Left to right on even rows
-            for x in range(64):
-                path.append((x, y))
-        else:
-            # Right to left on odd rows
-            for x in range(63, -1, -1):
-                path.append((x, y))
-    return path
-
-hamiltonian_path = generate_hamiltonian_path()
-
 def draw_snake():
     """Draw the snake and food on the LED matrix."""
     image = Image.new("RGB", (64, 64))
@@ -108,25 +92,19 @@ def draw_snake():
     matrix.SetImage(image)
 
 def move_snake():
-    """Move the snake in the current direction."""
+    """Move the snake towards the food."""
     global game_over, food, direction
     head_x, head_y = snake[0]
     
-    # Aggressively pursue food if within a certain range
-    if abs(head_x - food[0]) + abs(head_y - food[1]) < 20:
-        if head_x < food[0]:
-            new_head = (head_x + 1, head_y)
-        elif head_x > food[0]:
-            new_head = (head_x - 1, head_y)
-        elif head_y < food[1]:
-            new_head = (head_x, head_y + 1)
-        else:
-            new_head = (head_x, head_y - 1)
+    # Always pursue food
+    if head_x < food[0]:
+        new_head = (head_x + 1, head_y)
+    elif head_x > food[0]:
+        new_head = (head_x - 1, head_y)
+    elif head_y < food[1]:
+        new_head = (head_x, head_y + 1)
     else:
-        # Follow the Hamiltonian path
-        current_index = hamiltonian_path.index((head_x, head_y))
-        next_index = (current_index + 1) % len(hamiltonian_path)
-        new_head = hamiltonian_path[next_index]
+        new_head = (head_x, head_y - 1)
     
     # Check for collisions
     if new_head in snake:
@@ -249,6 +227,34 @@ def display_time_and_date():
         matrix.SetImage(image)
         time.sleep(1)
 
+def display_binary_clock():
+    """Display the current time in binary format on the LED matrix."""
+    end_time = time.time() + 60  # Display for 1 minute
+    while time.time() < end_time:
+        now = datetime.now()
+        hours = now.hour
+        minutes = now.minute
+        seconds = now.second
+        
+        # Convert time to binary
+        binary_time = [
+            f"{hours:06b}",
+            f"{minutes:06b}",
+            f"{seconds:06b}"
+        ]
+        
+        image = Image.new("RGB", (64, 64))
+        draw = ImageDraw.Draw(image)
+        
+        # Draw binary time
+        for row, binary in enumerate(binary_time):
+            for col, bit in enumerate(binary):
+                color = (0, 255, 0) if bit == '1' else (0, 0, 0)
+                draw.rectangle((col * 10, row * 20, col * 10 + 9, row * 20 + 19), fill=color)
+        
+        matrix.SetImage(image)
+        time.sleep(1)
+
 def main():
     """Main game loop."""
     global game_over
@@ -296,6 +302,9 @@ def main():
         
         # Display time and date
         display_time_and_date()
+        
+        # Display binary clock
+        display_binary_clock()
         
         # Play YouTube videos
         try:
