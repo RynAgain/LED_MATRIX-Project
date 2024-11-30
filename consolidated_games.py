@@ -127,39 +127,41 @@ def display_time_and_date():
 def main():
     """Main game loop."""
     global game_over
-    for _ in range(10):  # Play 10 games of Tic-Tac-Toe
-        reset_tic_tac_toe_board()
-        print_tic_tac_toe_board()
-        while True:
-            # AI move for 'X'
-            tic_tac_toe_ai_move('X')
+    while True:
+        # Play Tic-Tac-Toe
+        for _ in range(10):  # Play 10 games of Tic-Tac-Toe
+            reset_tic_tac_toe_board()
             print_tic_tac_toe_board()
-            time.sleep(1)  # Slow down the game for visibility
-            if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
-                break
-            
-            # AI move for 'O'
-            tic_tac_toe_ai_move('O')
-            print_tic_tac_toe_board()
-            time.sleep(1)  # Slow down the game for visibility
-            if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
-                break
-    
-    # Snake game loop
-    reset_snake_game()
-    while not game_over:
-        draw_snake()
-        move_snake()
-        time.sleep(0.1)
-    
-    # Display time and date
-    display_time_and_date()
-    
-    # Play YouTube videos
-    try:
-        youtube_stream.play_videos_on_matrix(matrix)
-    except Exception as e:
-        print(f"Error playing videos: {str(e)}")
+            while True:
+                # AI move for 'X'
+                tic_tac_toe_ai_move('X')
+                print_tic_tac_toe_board()
+                time.sleep(1)  # Slow down the game for visibility
+                if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
+                    break
+                
+                # AI move for 'O'
+                tic_tac_toe_ai_move('O')
+                print_tic_tac_toe_board()
+                time.sleep(1)  # Slow down the game for visibility
+                if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
+                    break
+        
+        # Snake game loop
+        reset_snake_game()
+        while not game_over:
+            draw_snake()
+            move_snake()
+            time.sleep(0.1)
+        
+        # Display time and date
+        display_time_and_date()
+        
+        # Play YouTube videos
+        try:
+            youtube_stream.play_videos_on_matrix(matrix)
+        except Exception as e:
+            print(f"Error playing videos: {str(e)}")
 
 if __name__ == '__main__':
     try:
