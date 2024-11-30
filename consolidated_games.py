@@ -32,7 +32,7 @@ def print_tic_tac_toe_board():
     draw.line((21, 0, 21, 64), fill=(255, 255, 255))
     draw.line((42, 0, 42, 64), fill=(255, 255, 255))
     draw.line((0, 21, 64, 21), fill=(255, 255, 255))
-    draw.line((0, 42, 64, 42), fill=(255, 255, 255))
+    draw.line((0, 42, 64, 42, 64), fill=(255, 255, 255))
     
     # Draw the Xs and Os
     for i, cell in enumerate(tic_tac_toe_board):
@@ -112,8 +112,8 @@ def move_snake():
     global game_over, food, direction
     head_x, head_y = snake[0]
     
-    # Check if food is nearby and move towards it
-    if abs(head_x - food[0]) + abs(head_y - food[1]) < 10:
+    # Aggressively pursue food if within a certain range
+    if abs(head_x - food[0]) + abs(head_y - food[1]) < 20:
         if head_x < food[0]:
             new_head = (head_x + 1, head_y)
         elif head_x > food[0]:
