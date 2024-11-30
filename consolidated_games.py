@@ -143,10 +143,19 @@ def display_time_and_date():
         
         image = Image.new("RGB", (64, 64))
         draw = ImageDraw.Draw(image)
-        font = ImageFont.load_default()
         
-        draw.text((0, 0), current_time, font=font, fill=(255, 255, 255))
-        draw.text((0, 32), current_date, font=font, fill=(255, 255, 255))
+        # Load a custom font
+        try:
+            font = ImageFont.truetype("arial.ttf", 10)
+        except IOError:
+            font = ImageFont.load_default()
+        
+        # Draw time with a gradient color
+        for i, char in enumerate(current_time):
+            draw.text((i * 10, 0), char, font=font, fill=(255 - i * 20, 100 + i * 15, 150))
+        
+        # Draw date with a different color
+        draw.text((0, 32), current_date, font=font, fill=(0, 255, 255))
         
         matrix.SetImage(image)
         time.sleep(1)
