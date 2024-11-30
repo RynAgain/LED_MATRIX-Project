@@ -53,6 +53,10 @@ def check_tic_tac_toe_winner(board, player):
                       (0, 4, 8), (2, 4, 6)]
     return any(all(board[i] == player for i in condition) for condition in win_conditions)
 
+def check_tic_tac_toe_draw(board):
+    """Check if the Tic-Tac-Toe game is a draw."""
+    return all(cell != ' ' for cell in board)
+
 def tic_tac_toe_ai_move(player):
     """Make a move for the AI in Tic-Tac-Toe."""
     available_moves = [i for i, cell in enumerate(tic_tac_toe_board) if cell == ' ']
@@ -161,6 +165,9 @@ def main():
                 if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
                     logging.info("Player X wins")
                     break
+                if check_tic_tac_toe_draw(tic_tac_toe_board):
+                    logging.info("Game is a draw")
+                    break
                 
                 # AI move for 'O'
                 tic_tac_toe_ai_move('O')
@@ -168,6 +175,9 @@ def main():
                 time.sleep(1)  # Slow down the game for visibility
                 if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
                     logging.info("Player O wins")
+                    break
+                if check_tic_tac_toe_draw(tic_tac_toe_board):
+                    logging.info("Game is a draw")
                     break
         
         # Snake game loop
