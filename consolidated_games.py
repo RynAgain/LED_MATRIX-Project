@@ -49,18 +49,11 @@ def check_tic_tac_toe_winner(board, player):
                       (0, 4, 8), (2, 4, 6)]
     return any(all(board[i] == player for i in condition) for condition in win_conditions)
 
-def tic_tac_toe_ai_move():
+def tic_tac_toe_ai_move(player):
     """Make a move for the AI in Tic-Tac-Toe."""
     available_moves = [i for i, cell in enumerate(tic_tac_toe_board) if cell == ' ']
     move = random.choice(available_moves)
-    tic_tac_toe_board[move] = 'O'
-
-def tic_tac_toe_player_move(move):
-    """Make a move for the player in Tic-Tac-Toe."""
-    if tic_tac_toe_board[move] == ' ':
-        tic_tac_toe_board[move] = 'X'
-        return True
-    return False
+    tic_tac_toe_board[move] = player
 
 def reset_tic_tac_toe_board():
     """Reset the Tic-Tac-Toe board for a new game."""
@@ -138,32 +131,26 @@ def main():
         game_choice = input("Enter '1' for Tic-Tac-Toe or '2' for Snake: ")
         
         if game_choice == '1':
-            # Tic-Tac-Toe game loop
-            reset_tic_tac_toe_board()
-            print_tic_tac_toe_board()
-            while True:
-                # Player move
-                try:
-                    move = int(input("Enter your move (0-8): "))
-                    if move < 0 or move > 8:
-                        print("Invalid move. Please enter a number between 0 and 8.")
-                        continue
-                except ValueError:
-                    print("Invalid input. Please enter a number between 0 and 8.")
-                    continue
-                
-                if tic_tac_toe_player_move(move):
-                    print_tic_tac_toe_board()
-                    if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
-                        print("Player wins!")
-                        break
-                
-                # AI move
-                tic_tac_toe_ai_move()
+            # Play 10 games of Tic-Tac-Toe
+            for _ in range(10):
+                reset_tic_tac_toe_board()
                 print_tic_tac_toe_board()
-                if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
-                    print("AI wins!")
-                    break
+                while True:
+                    # AI move for 'X'
+                    tic_tac_toe_ai_move('X')
+                    print_tic_tac_toe_board()
+                    time.sleep(1)  # Slow down the game for visibility
+                    if check_tic_tac_toe_winner(tic_tac_toe_board, 'X'):
+                        print("AI 'X' wins!")
+                        break
+                    
+                    # AI move for 'O'
+                    tic_tac_toe_ai_move('O')
+                    print_tic_tac_toe_board()
+                    time.sleep(1)  # Slow down the game for visibility
+                    if check_tic_tac_toe_winner(tic_tac_toe_board, 'O'):
+                        print("AI 'O' wins!")
+                        break
         
         elif game_choice == '2':
             # Snake game loop

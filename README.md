@@ -104,6 +104,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
      - Press Ctrl+C to skip to the next video
      - Videos play automatically in sequence
      - Shows title and quality information for each video
+     - **New:** Each video is limited to a maximum playback time of 3 minutes
 
 - **Automatic Updates** (Raspberry Pi only):
   The `install_and_update.sh` script will automatically check for updates every 30 minutes and restart the program if updates are found.
@@ -119,6 +120,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 ### Windows
 - YouTube video streaming only
 - Useful for development and testing of streaming functionality
+- **Note:** Windows support is intended for debugging and development purposes only.
 
 ## Troubleshooting
 

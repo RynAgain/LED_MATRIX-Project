@@ -71,9 +71,17 @@ def stream_youtube_videos(urls, matrix):
                 print("Playback started!")
                 print("Press Ctrl+C to skip to next video")
                 
+                start_time = time.time()  # Start the timer
+                
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret:
+                        break
+                    
+                    # Check if 3 minutes have passed
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > 180:  # 180 seconds = 3 minutes
+                        print("Maximum playback time reached. Stopping video.")
                         break
                     
                     # Resize frame to 64x64
