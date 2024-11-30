@@ -83,8 +83,20 @@ def draw_snake():
 
 def move_snake():
     """Move the snake in the current direction."""
-    global game_over, food
-    new_head = (snake[0][0] + direction[0], snake[0][1] + direction[1])
+    global game_over, food, direction
+    head_x, head_y = snake[0]
+    
+    # Basic AI to move towards the food
+    if head_x < food[0]:
+        direction = (1, 0)
+    elif head_x > food[0]:
+        direction = (-1, 0)
+    elif head_y < food[1]:
+        direction = (0, 1)
+    elif head_y > food[1]:
+        direction = (0, -1)
+    
+    new_head = (head_x + direction[0], head_y + direction[1])
     
     # Check for collisions
     if new_head in snake or not (0 <= new_head[0] < 64) or not (0 <= new_head[1] < 64):
