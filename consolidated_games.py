@@ -112,10 +112,21 @@ def move_snake():
     global game_over, food, direction
     head_x, head_y = snake[0]
     
-    # Follow the Hamiltonian path
-    current_index = hamiltonian_path.index((head_x, head_y))
-    next_index = (current_index + 1) % len(hamiltonian_path)
-    new_head = hamiltonian_path[next_index]
+    # Check if food is nearby and move towards it
+    if abs(head_x - food[0]) + abs(head_y - food[1]) < 10:
+        if head_x < food[0]:
+            new_head = (head_x + 1, head_y)
+        elif head_x > food[0]:
+            new_head = (head_x - 1, head_y)
+        elif head_y < food[1]:
+            new_head = (head_x, head_y + 1)
+        else:
+            new_head = (head_x, head_y - 1)
+    else:
+        # Follow the Hamiltonian path
+        current_index = hamiltonian_path.index((head_x, head_y))
+        next_index = (current_index + 1) % len(hamiltonian_path)
+        new_head = hamiltonian_path[next_index]
     
     # Check for collisions
     if new_head in snake:
