@@ -32,7 +32,7 @@ def print_tic_tac_toe_board():
     draw.line((21, 0, 21, 64), fill=(255, 255, 255))
     draw.line((42, 0, 42, 64), fill=(255, 255, 255))
     draw.line((0, 21, 64, 21), fill=(255, 255, 255))
-    draw.line((0, 42, 64, 42, 64), fill=(255, 255, 255))
+    draw.line((0, 42, 64, 42), fill=(255, 255, 255))
     
     # Draw the Xs and Os
     for i, cell in enumerate(tic_tac_toe_board):
