@@ -6,6 +6,7 @@ import tic_tac_toe
 import snake
 import pong
 import time_display
+import billiards  # Import the billiards module
 
 # Configuration for the 64x64 matrix
 options = RGBMatrixOptions()
@@ -60,6 +61,9 @@ def main():
         
         # Pong game loop
         pong.play_pong(matrix)
+        
+        # Billiards game loop
+        billiards.main(matrix)  # Call the main function of the billiards game
         
         # Display time and date
         time_display.display_time_and_date(matrix)

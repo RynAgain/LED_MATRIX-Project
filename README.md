@@ -14,6 +14,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 - `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
 - `install_and_update.sh`: Checks for updates from the GitHub repository and restarts the program if updates are found.
 - `add_to_startup.sh`: Adds `install_and_update.sh` to the Raspberry Pi's boot sequence using a cron job.
+- `billiards.py`: Simulates a 2D billiards game with AI, featuring full physics and graphical representation.
 
 ## System Requirements
 
@@ -105,6 +106,12 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
      - Videos play automatically in sequence
      - Shows title and quality information for each video
      - Each video is limited to a maximum playback time of 3 minutes
+
+- **Running the Billiards Game** (Both Platforms):
+  Execute the `billiards.py` script to start the billiards game simulation.
+  ```bash
+  python billiards.py
+  ```
 
 - **Automatic Updates** (Raspberry Pi only):
   The `install_and_update.sh` script will automatically check for updates every 30 minutes and restart the program if updates are found.
