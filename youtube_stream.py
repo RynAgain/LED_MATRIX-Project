@@ -9,13 +9,13 @@ import yt_dlp
 import urllib.request
 
 def read_urls_from_csv(file_path):
-    """Read YouTube URLs from a CSV file."""
+    """Read YouTube URLs and durations from a CSV file."""
     urls = []
     try:
         with open(file_path, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                urls.append((row['url'], row.get('title', 'Unknown')))
+                urls.append((row['url'], row.get('title', 'Unknown'), row.get('duration', 'x')))
         return urls
     except Exception as e:
         print(f"Error reading CSV file: {str(e)}")
@@ -36,7 +36,7 @@ def stream_video(url):
 def stream_youtube_videos(urls, matrix):
     """Stream YouTube videos to LED matrix."""
     try:
-        for url, title in urls:
+        for url, title, duration in urls:
             print(f"\nPreparing to play: {title}")
             
             # Stream video
@@ -55,15 +55,23 @@ def stream_youtube_videos(urls, matrix):
             
             start_time = time.time()  # Start the timer
             
+            # Determine playback duration
+            max_duration = None
+            if duration.lower() != 'x':
+                try:
+                    max_duration = float(duration) * 60  # Convert minutes to seconds
+                except ValueError:
+                    print(f"Invalid duration '{duration}' for video '{title}'. Playing full video.")
+            
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # Check if 3 minutes have passed
+                # Check if the specified duration has passed
                 elapsed_time = time.time() - start_time
-                if elapsed_time > 180:  # 180 seconds = 3 minutes
-                    print("Maximum playback time reached. Stopping video.")
+                if max_duration and elapsed_time > max_duration:
+                    print("Specified playback time reached. Stopping video.")
                     break
                 
                 # Resize frame to 64x64

@@ -1,8 +1,8 @@
-url,title
-https://www.youtube.com/watch?v=a4na2opArGY, dandadan
-https://www.youtube.com/watch?v=Gx5--eK2k6Y, Mario!
-https://www.youtube.com/watch?v=2yJgwwDcgV8, nyancat
-https://www.youtube.com/watch?v=QYU8zydUqD8, TestDemo
-https://www.youtube.com/watch?v=XOfJtJ03_As, gamecube
-https://www.youtube.com/watch?v=lRTtMcx6rSM, NeonLights
-https://www.youtube.com/watch?v=fzKURp_OJV0, colours
+url,title,duration
+https://www.youtube.com/watch?v=a4na2opArGY,dandadan,x
+https://www.youtube.com/watch?v=Gx5--eK2k6Y,Mario!,1
+https://www.youtube.com/watch?v=2yJgwwDcgV8,nyancat,0.5
+https://www.youtube.com/watch?v=QYU8zydUqD8,TestDemo,3
+https://www.youtube.com/watch?v=XOfJtJ03_As,gamecube,x
+https://www.youtube.com/watch?v=lRTtMcx6rSM,NeonLights,1
+https://www.youtube.com/watch?v=fzKURp_OJV0,colours,1

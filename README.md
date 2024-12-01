@@ -9,8 +9,8 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 - `snake.py`: Contains the logic for the Snake game.
 - `pong.py`: Contains the logic for the Pong game. **Updated:** Added randomness to the starting velocity of the ball for varied gameplay.
 - `time_display.py`: Contains functions for displaying the current time and date on the LED matrix.
-- `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Downloads videos locally to avoid repeated streaming.
-- `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence.
+- `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Supports specifying playback duration from CSV.
+- `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence, along with playback duration.
 - `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
 - `install_and_update.sh`: Checks for updates from the GitHub repository and restarts the program if updates are found.
 - `add_to_startup.sh`: Adds `install_and_update.sh` to the Raspberry Pi's boot sequence using a cron job.
@@ -89,10 +89,11 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
   1. **CSV File Format**:
      Create a CSV file (default: youtube_urls.csv) with the following format:
      ```csv
-     url,title
-     https://www.youtube.com/watch?v=example1,Video Title 1
-     https://www.youtube.com/watch?v=example2,Video Title 2
+     url,title,duration
+     https://www.youtube.com/watch?v=example1,Video Title 1,3
+     https://www.youtube.com/watch?v=example2,Video Title 2,x
      ```
+     - `duration`: Specify the playback duration in minutes, or use "x" to play the entire video.
 
   2. **Running the Stream**:
      ```bash
@@ -102,10 +103,10 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
   3. **Features**:
      - Plays videos in sequence from the CSV file
-     - **New:** Downloads videos locally to `downloaded_videos` directory
+     - **New:** Supports specifying playback duration from CSV
      - Videos play automatically in sequence
      - Shows title and quality information for each video
-     - Each video is limited to a maximum playback time of 3 minutes
+     - Each video can be limited to a specified playback time or play in full
 
 - **Running the Billiards Game** (Both Platforms):
   Execute the `billiards.py` script to start the billiards game simulation.
@@ -152,7 +153,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
 ### YouTube Streaming Issues
 1. **CSV File Issues**:
-   - Verify CSV file format is correct (url,title columns)
+   - Verify CSV file format is correct (url,title,duration columns)
    - Check that URLs are valid and accessible
    - Ensure no extra spaces or special characters in the CSV
 
