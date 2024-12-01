@@ -5,6 +5,7 @@ import csv
 from PIL import Image
 import cv2
 import numpy as np
+import yt_dlp
 import urllib.request
 
 def read_urls_from_csv(file_path):
@@ -20,28 +21,17 @@ def read_urls_from_csv(file_path):
         print(f"Error reading CSV file: {str(e)}")
         sys.exit(1)
 
-def get_frame_from_url(url):
-    """Get a frame from a URL as a PIL Image."""
-    try:
-        # Read the image from URL
-        with urllib.request.urlopen(url) as response:
-            image_data = response.read()
-        
-        # Convert to numpy array
-        nparr = np.frombuffer(image_data, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        # Resize to 64x64
-        frame = cv2.resize(frame, (64, 64))
-        
-        # Convert from BGR to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Convert to PIL Image
-        return Image.fromarray(frame)
-    except Exception as e:
-        print(f"Error getting frame: {str(e)}")
-        return None
+def download_video(url):
+    """Download video using yt_dlp and return the file path."""
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': 'downloaded_videos/%(title)s.%(ext)s',
+        'quiet': True
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(url, download=True)
+        video_path = ydl.prepare_filename(info_dict)
+    return video_path
 
 def stream_youtube_videos(urls, matrix):
     """Stream YouTube videos to LED matrix."""
@@ -49,11 +39,15 @@ def stream_youtube_videos(urls, matrix):
         for url, title in urls:
             print(f"\nPreparing to play: {title}")
             
-            # Open video capture from URL
-            cap = cv2.VideoCapture(url)
+            # Download video
+            video_path = download_video(url)
+            print(f"Downloaded video to: {video_path}")
+            
+            # Open video capture from file
+            cap = cv2.VideoCapture(video_path)
             
             if not cap.isOpened():
-                print(f"Failed to open video stream: {url}")
+                print(f"Failed to open video stream: {video_path}")
                 continue
             
             print("Playback started!")
