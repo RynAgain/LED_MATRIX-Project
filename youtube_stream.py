@@ -60,8 +60,12 @@ def download_video(url, download_path):
 
 def stream_youtube_videos(urls, matrix):
     """Stream YouTube videos to LED matrix."""
-    download_path = 'downloaded_videos'
-    os.makedirs(download_path, exist_ok=True)
+    download_path = os.path.abspath('downloaded_videos')
+    try:
+        os.makedirs(download_path, exist_ok=True)
+    except Exception as e:
+        print(f"Error creating directory {download_path}: {str(e)}")
+        return
     
     try:
         for url, title in urls:
