@@ -89,29 +89,30 @@ class Ball:
 
 def ai_play(balls):
     cue_ball = balls[0]
-    target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
-    
-    # Calculate the angle to hit the target ball towards a wall
-    wall_x = WIDTH if target_ball.x < WIDTH / 2 else 0
-    wall_y = HEIGHT if target_ball.y < HEIGHT / 2 else 0
-    
-    # Calculate the angle to hit the target ball towards the wall
-    dx = wall_x - target_ball.x
-    dy = wall_y - target_ball.y
-    angle_to_wall = math.atan2(dy, dx)
-    
-    # Calculate the angle to hit the cue ball towards the target ball
-    dx = target_ball.x - cue_ball.x
-    dy = target_ball.y - cue_ball.y
-    angle_to_target = math.atan2(dy, dx)
-    
-    # Adjust the angle to aim for a bounce
-    angle = angle_to_target + (angle_to_wall - angle_to_target) / 2
-    
-    # Set the strength of the shot
-    strength = random.uniform(AI_STRENGTH_MIN, AI_STRENGTH_MAX)
-    cue_ball.vx = math.cos(angle) * strength
-    cue_ball.vy = math.sin(angle) * strength
+    if len(balls) > 1:
+        target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
+        
+        # Calculate the angle to hit the target ball towards a wall
+        wall_x = WIDTH if target_ball.x < WIDTH / 2 else 0
+        wall_y = HEIGHT if target_ball.y < HEIGHT / 2 else 0
+        
+        # Calculate the angle to hit the target ball towards the wall
+        dx = wall_x - target_ball.x
+        dy = wall_y - target_ball.y
+        angle_to_wall = math.atan2(dy, dx)
+        
+        # Calculate the angle to hit the cue ball towards the target ball
+        dx = target_ball.x - cue_ball.x
+        dy = target_ball.y - cue_ball.y
+        angle_to_target = math.atan2(dy, dx)
+        
+        # Adjust the angle to aim for a bounce
+        angle = angle_to_target + (angle_to_wall - angle_to_target) / 2
+        
+        # Set the strength of the shot
+        strength = random.uniform(AI_STRENGTH_MIN, AI_STRENGTH_MAX)
+        cue_ball.vx = math.cos(angle) * strength
+        cue_ball.vy = math.sin(angle) * strength
 
 def draw_table_edges(canvas):
     for x in range(WIDTH):
@@ -165,5 +166,10 @@ def main(matrix):
         # Check if all balls have stopped moving
         if not any(ball.is_moving() for ball in balls):
             ai_play(balls)
+
+        # Check win condition: all balls except the cue ball are pocketed
+        if len(balls) == 1:
+            print("You win!")
+            running = False
 
         canvas = matrix.SwapOnVSync(canvas)
