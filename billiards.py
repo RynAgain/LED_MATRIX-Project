@@ -91,7 +91,8 @@ class Ball:
 def ai_play(balls, pockets):
     cue_ball = balls[0]
     if len(balls) > 1:
-        target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
+        # Select the target ball with the highest probability of being pocketed
+        target_ball = min(balls[1:], key=lambda b: min(math.hypot(b.x - p[0], b.y - p[1]) for p in pockets))
         
         # Find the nearest pocket to the target ball
         nearest_pocket = min(pockets, key=lambda p: math.hypot(target_ball.x - p[0], target_ball.y - p[1]))
@@ -101,15 +102,21 @@ def ai_play(balls, pockets):
         dy = nearest_pocket[1] - target_ball.y
         angle_to_pocket = math.atan2(dy, dx)
         
-        # Calculate the angle to hit the cue ball towards the target ball
+        # Calculate the optimal angle to hit the cue ball towards the target ball
         dx = target_ball.x - cue_ball.x
         dy = target_ball.y - cue_ball.y
         angle_to_target = math.atan2(dy, dx)
         
-        # Set the strength of the shot
-        strength = random.uniform(AI_STRENGTH_MIN, AI_STRENGTH_MAX)
-        cue_ball.vx = math.cos(angle_to_target) * strength
-        cue_ball.vy = math.sin(angle_to_target) * strength
+        # Adjust the angle slightly to account for the collision
+        angle_offset = math.atan2(math.sin(angle_to_pocket - angle_to_target), math.cos(angle_to_pocket - angle_to_target))
+        optimal_angle = angle_to_target + angle_offset / 2
+        
+        # Set the strength of the shot based on distance
+        distance_to_target = math.hypot(dx, dy)
+        strength = min(max(distance_to_target / 10, AI_STRENGTH_MIN), AI_STRENGTH_MAX)
+        
+        cue_ball.vx = math.cos(optimal_angle) * strength
+        cue_ball.vy = math.sin(optimal_angle) * strength
 
 def draw_table_edges(canvas):
     for x in range(WIDTH):

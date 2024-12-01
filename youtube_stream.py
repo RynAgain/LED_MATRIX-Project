@@ -1,14 +1,11 @@
-import yt_dlp
 import os
 import sys
 import time
 import csv
 from PIL import Image
-import io
 import cv2
 import numpy as np
 import urllib.request
-import threading
 
 def read_urls_from_csv(file_path):
     """Read YouTube URLs from a CSV file."""
@@ -46,68 +43,18 @@ def get_frame_from_url(url):
         print(f"Error getting frame: {str(e)}")
         return None
 
-def loading_animation(stop_event):
-    """Display a loading animation."""
-    animation = "|/-\\"
-    idx = 0
-    while not stop_event.is_set():
-        print(f"\rDownloading video... {animation[idx % len(animation)]}", end="")
-        idx += 1
-        time.sleep(0.1)
-    print("\rDownload complete!          ")
-
-def download_video(url, download_path):
-    """Download video from YouTube using yt-dlp."""
-    # Set cache directory to a writable location
-    cache_dir = os.path.abspath('yt-dlp-cache')
-    os.environ['XDG_CACHE_HOME'] = cache_dir
-    
-    # Ensure the cache directory exists and is writable
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    ydl_opts = {
-        'format': 'worst[ext=mp4]',  # Get lowest quality mp4
-        'quiet': True,
-        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),  # Save to specified path
-    }
-    
-    stop_event = threading.Event()
-    animation_thread = threading.Thread(target=loading_animation, args=(stop_event,))
-    animation_thread.start()
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        print(f"Error downloading video: {str(e)}")
-    finally:
-        stop_event.set()
-        animation_thread.join()
-
 def stream_youtube_videos(urls, matrix):
     """Stream YouTube videos to LED matrix."""
-    download_path = os.path.abspath('downloaded_videos')
-    try:
-        os.makedirs(download_path, exist_ok=True)
-    except Exception as e:
-        print(f"Error creating directory {download_path}: {str(e)}")
-        return
-    
     try:
         for url, title in urls:
             print(f"\nPreparing to play: {title}")
             
-            download_video(url, download_path)
+            # Open video capture from URL
+            cap = cv2.VideoCapture(url)
             
-            video_file = os.path.join(download_path, f"{title}.mp4")
-            if not os.path.exists(video_file):
-                print(f"Video file not found: {video_file}")
+            if not cap.isOpened():
+                print(f"Failed to open video stream: {url}")
                 continue
-            
-            print("\nInitializing playback...")
-            
-            # Open video capture
-            cap = cv2.VideoCapture(video_file)
             
             print("Playback started!")
             print("Press Ctrl+C to skip to next video")
@@ -150,7 +97,6 @@ def stream_youtube_videos(urls, matrix):
         print("\nTroubleshooting tips:")
         print("1. Check your internet connection")
         print("2. Verify the YouTube URLs are valid")
-        print("3. Try updating yt-dlp: pip install --upgrade yt-dlp")
 
 def play_videos_on_matrix(matrix):
     """Main function to play videos on LED matrix."""
