@@ -42,13 +42,20 @@ class Ball:
         distance = math.hypot(dx, dy)
         if distance < 2 * BALL_RADIUS:
             angle = math.atan2(dy, dx)
-            self.vx, self.vy = -math.cos(angle), -math.sin(angle)
-            other.vx, other.vy = math.cos(angle), math.sin(angle)
+            total_vx = self.vx + other.vx
+            total_vy = self.vy + other.vy
+            self.vx = total_vx * math.cos(angle)
+            self.vy = total_vy * math.sin(angle)
+            other.vx = total_vx * -math.cos(angle)
+            other.vy = total_vy * -math.sin(angle)
 
 def ai_play(balls):
-    # Simple AI to hit the cue ball towards a random direction
+    # AI to hit the cue ball towards the nearest ball
     cue_ball = balls[0]
-    angle = random.uniform(0, 2 * math.pi)
+    target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
+    dx = target_ball.x - cue_ball.x
+    dy = target_ball.y - cue_ball.y
+    angle = math.atan2(dy, dx)
     strength = random.uniform(0.5, 1.5)
     cue_ball.vx = math.cos(angle) * strength
     cue_ball.vy = math.sin(angle) * strength

@@ -7,6 +7,7 @@ import snake
 import pong
 import time_display
 import billiards  # Import the billiards module
+import bitcoin_price_display  # Import the bitcoin price display module
 
 # Configuration for the 64x64 matrix
 options = RGBMatrixOptions()
@@ -76,6 +77,9 @@ def main():
             youtube_stream.play_videos_on_matrix(matrix)
         except Exception as e:
             logging.error(f"Error playing videos: {str(e)}")
+        
+        # Display Bitcoin price
+        bitcoin_price_display.main()
 
 if __name__ == '__main__':
     try:
