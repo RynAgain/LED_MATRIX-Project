@@ -13,6 +13,8 @@ max_ball_speed = 3  # Lower the maximum speed of the ball
 paddle_height = 8
 max_paddle_speed = 3  # Increase paddle speed
 pong_game_over = False
+pass_count = 0  # Counter for successful passes
+min_paddle_height = 2  # Minimum paddle height to prevent disappearing
 
 def draw_pong(matrix):
     """Draw the Pong game on the LED matrix."""
@@ -30,7 +32,7 @@ def draw_pong(matrix):
 
 def move_pong():
     """Move the ball and paddles in the Pong game."""
-    global ball_pos, ball_dir, ball_speed, paddle1_y, paddle2_y, pong_game_over
+    global ball_pos, ball_dir, ball_speed, paddle1_y, paddle2_y, pong_game_over, pass_count, paddle_height
     
     # Move ball
     ball_pos[0] += ball_dir[0] * ball_speed
@@ -44,9 +46,16 @@ def move_pong():
     if ball_pos[0] <= 4 and paddle1_y <= ball_pos[1] <= paddle1_y + paddle_height:
         ball_dir[0] = -ball_dir[0]
         ball_speed = min(max_ball_speed, ball_speed + 0.2)  # Reduce speed increment
+        pass_count += 1
     elif ball_pos[0] >= 58 and paddle2_y <= ball_pos[1] <= paddle2_y + paddle_height:
         ball_dir[0] = -ball_dir[0]
         ball_speed = min(max_ball_speed, ball_speed + 0.2)  # Reduce speed increment
+        pass_count += 1
+    
+    # Check if it's time to shrink the paddles
+    if pass_count >= 10:
+        paddle_height = max(min_paddle_height, paddle_height - 1)
+        pass_count = 0
     
     # Ball out of bounds
     if ball_pos[0] < 0 or ball_pos[0] > 64:
@@ -80,13 +89,15 @@ def move_pong():
 
 def reset_pong_game():
     """Reset the Pong game for a new game."""
-    global paddle1_y, paddle2_y, ball_pos, ball_dir, ball_speed, pong_game_over
+    global paddle1_y, paddle2_y, ball_pos, ball_dir, ball_speed, pong_game_over, paddle_height, pass_count
     paddle1_y = 28
     paddle2_y = 28
     ball_pos = [32, 32]
     ball_dir = [random.choice([-1, 1]), random.choice([-1, 1])]  # Randomize initial direction
     ball_speed = 1
     pong_game_over = False
+    paddle_height = 8  # Reset paddle height
+    pass_count = 0  # Reset pass count
     logging.info("Pong game reset")
 
 def play_pong(matrix):
