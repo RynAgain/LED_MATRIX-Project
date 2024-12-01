@@ -9,6 +9,7 @@ POCKET_RADIUS = 3
 FRICTION = 0.99
 AI_STRENGTH_MIN = 0.5
 AI_STRENGTH_MAX = 1.5
+MAX_SHOTS = 100
 
 # Colors
 BLACK = (0, 0, 0)
@@ -87,32 +88,28 @@ class Ball:
         self.vx = 0
         self.vy = 0
 
-def ai_play(balls):
+def ai_play(balls, pockets):
     cue_ball = balls[0]
     if len(balls) > 1:
         target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
         
-        # Calculate the angle to hit the target ball towards a wall
-        wall_x = WIDTH if target_ball.x < WIDTH / 2 else 0
-        wall_y = HEIGHT if target_ball.y < HEIGHT / 2 else 0
+        # Find the nearest pocket to the target ball
+        nearest_pocket = min(pockets, key=lambda p: math.hypot(target_ball.x - p[0], target_ball.y - p[1]))
         
-        # Calculate the angle to hit the target ball towards the wall
-        dx = wall_x - target_ball.x
-        dy = wall_y - target_ball.y
-        angle_to_wall = math.atan2(dy, dx)
+        # Calculate the angle to hit the target ball towards the nearest pocket
+        dx = nearest_pocket[0] - target_ball.x
+        dy = nearest_pocket[1] - target_ball.y
+        angle_to_pocket = math.atan2(dy, dx)
         
         # Calculate the angle to hit the cue ball towards the target ball
         dx = target_ball.x - cue_ball.x
         dy = target_ball.y - cue_ball.y
         angle_to_target = math.atan2(dy, dx)
         
-        # Adjust the angle to aim for a bounce
-        angle = angle_to_target + (angle_to_wall - angle_to_target) / 2
-        
         # Set the strength of the shot
         strength = random.uniform(AI_STRENGTH_MIN, AI_STRENGTH_MAX)
-        cue_ball.vx = math.cos(angle) * strength
-        cue_ball.vy = math.sin(angle) * strength
+        cue_ball.vx = math.cos(angle_to_target) * strength
+        cue_ball.vy = math.sin(angle_to_target) * strength
 
 def draw_table_edges(canvas):
     for x in range(WIDTH):
@@ -141,6 +138,7 @@ def main(matrix):
     pockets = [(0, 0), (WIDTH - 1, 0), (0, HEIGHT - 1), (WIDTH - 1, HEIGHT - 1)]
 
     running = True
+    shot_count = 0
     while running:
         canvas.Fill(*BLACK)
         draw_table_edges(canvas)
@@ -165,11 +163,17 @@ def main(matrix):
 
         # Check if all balls have stopped moving
         if not any(ball.is_moving() for ball in balls):
-            ai_play(balls)
+            ai_play(balls, pockets)
+            shot_count += 1
 
         # Check win condition: all balls except the cue ball are pocketed
         if len(balls) == 1:
             print("You win!")
+            running = False
+
+        # Check if the maximum number of shots has been reached
+        if shot_count >= MAX_SHOTS:
+            print("Game over: Maximum number of shots reached.")
             running = False
 
         canvas = matrix.SwapOnVSync(canvas)
