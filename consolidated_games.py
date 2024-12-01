@@ -59,11 +59,7 @@ def main():
             time.sleep(0.1)
         
         # Pong game loop
-        pong.reset_pong_game()
-        while not pong.pong_game_over:
-            pong.draw_pong(matrix)
-            pong.move_pong()
-            time.sleep(0.05)
+        pong.play_pong(matrix)
         
         # Display time and date
         time_display.display_time_and_date(matrix)

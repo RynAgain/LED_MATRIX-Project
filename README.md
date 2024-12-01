@@ -1,10 +1,14 @@
 # LED Matrix Project
 
-This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix. It includes two games: Tic-Tac-Toe and Snake, as well as YouTube video streaming capabilities. The project also features an automatic update mechanism from a GitHub repository.
+This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix. It includes three games: Tic-Tac-Toe, Snake, and Pong, as well as YouTube video streaming capabilities. The project also features an automatic update mechanism from a GitHub repository.
 
 ## Project Structure
 
-- `consolidated_games.py`: Contains the logic for both Tic-Tac-Toe and Snake games, and now automatically cycles through these games, time display, and YouTube streaming.
+- `consolidated_games.py`: Main script that orchestrates the execution of games and features, cycling through Tic-Tac-Toe, Snake, Pong, time display, and YouTube streaming.
+- `tic_tac_toe.py`: Contains the logic for the Tic-Tac-Toe game.
+- `snake.py`: Contains the logic for the Snake game.
+- `pong.py`: Contains the logic for the Pong game.
+- `time_display.py`: Contains functions for displaying the current time and date on the LED matrix.
 - `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Downloads videos locally to avoid repeated streaming.
 - `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence.
 - `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
@@ -73,7 +77,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 ## Usage
 
 - **Running the Games and Features** (Raspberry Pi Only):
-  Execute the `consolidated_games.py` script to start the automatic cycling through Tic-Tac-Toe, Snake, time display, and YouTube streaming.
+  Execute the `consolidated_games.py` script to start the automatic cycling through Tic-Tac-Toe, Snake, Pong, time display, and YouTube streaming.
   ```bash
   python3 consolidated_games.py
   ```
@@ -109,7 +113,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 
 ### Raspberry Pi
 - Full LED matrix support
-- Games (Tic-Tac-Toe and Snake)
+- Games (Tic-Tac-Toe, Snake, and Pong)
 - YouTube video streaming
 - Automatic updates
 

@@ -86,3 +86,15 @@ def reset_pong_game():
     ball_speed = 1
     pong_game_over = False
     logging.info("Pong game reset")
+
+def play_pong(matrix):
+    """Play the Pong game for 3 full games."""
+    global pong_game_over
+    games_played = 0
+    while games_played < 3:
+        while not pong_game_over:
+            move_pong()
+            draw_pong(matrix)
+        games_played += 1
+        reset_pong_game()
+        logging.info(f"Game {games_played} completed")
