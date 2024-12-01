@@ -6,7 +6,7 @@ import random
 WIDTH, HEIGHT = 64, 64  # LED matrix dimensions
 BALL_RADIUS = 2
 POCKET_RADIUS = 3
-FRICTION = 0.99
+FRICTION = 0.995  # Adjusted friction to prevent ball from stopping too quickly
 AI_STRENGTH_MIN = 0.5
 AI_STRENGTH_MAX = 1.5
 MAX_SHOTS = 100
@@ -68,14 +68,9 @@ class Ball:
         if distance < 2 * BALL_RADIUS:
             # Calculate angle of collision
             angle = math.atan2(dy, dx)
-            # Calculate total velocity
-            total_vx = self.vx + other.vx
-            total_vy = self.vy + other.vy
-            # Calculate new velocities based on mass and angle
-            self.vx = (total_vx * math.cos(angle) * (self.mass - other.mass) + 2 * other.mass * other.vx) / (self.mass + other.mass)
-            self.vy = (total_vy * math.sin(angle) * (self.mass - other.mass) + 2 * other.mass * other.vy) / (self.mass + other.mass)
-            other.vx = (total_vx * -math.cos(angle) * (other.mass - self.mass) + 2 * self.mass * self.vx) / (self.mass + other.mass)
-            other.vy = (total_vy * -math.sin(angle) * (other.mass - self.mass) + 2 * self.mass * self.vy) / (self.mass + other.mass)
+            # Calculate new velocities based on angle
+            self.vx, other.vx = other.vx, self.vx
+            self.vy, other.vy = other.vy, self.vy
 
     def is_in_pocket(self, pockets):
         for pocket in pockets:

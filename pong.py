@@ -104,7 +104,7 @@ def play_pong(matrix):
     """Play the Pong game for 3 full games."""
     global pong_game_over
     games_played = 0
-    while games_played < 3:
+    while games_played < 1:
         reset_pong_game()  # Ensure game state is reset before each game
         while not pong_game_over:
             move_pong()
