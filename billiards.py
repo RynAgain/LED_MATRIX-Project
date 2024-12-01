@@ -1,5 +1,6 @@
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, FrameCanvas
 import math
+import random
 
 # Constants
 WIDTH, HEIGHT = 64, 64  # LED matrix dimensions
@@ -11,6 +12,8 @@ BLACK = (0, 0, 0)
 GREEN = (0, 128, 0)
 BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
 
 # Ball class
 class Ball:
@@ -42,12 +45,26 @@ class Ball:
             self.vx, self.vy = -math.cos(angle), -math.sin(angle)
             other.vx, other.vy = math.cos(angle), math.sin(angle)
 
+def ai_play(balls):
+    # Simple AI to hit the cue ball towards a random direction
+    cue_ball = balls[0]
+    angle = random.uniform(0, 2 * math.pi)
+    strength = random.uniform(0.5, 1.5)
+    cue_ball.vx = math.cos(angle) * strength
+    cue_ball.vy = math.sin(angle) * strength
+
 def main(matrix):
     # Create an offscreen canvas
     canvas = matrix.CreateFrameCanvas()
 
     # Create balls
-    balls = [Ball(WIDTH // 2, HEIGHT // 2, WHITE)]
+    balls = [
+        Ball(WIDTH // 2, HEIGHT // 2, WHITE),  # Cue ball
+        Ball(WIDTH // 4, HEIGHT // 4, RED),
+        Ball(3 * WIDTH // 4, HEIGHT // 4, YELLOW),
+        Ball(WIDTH // 4, 3 * HEIGHT // 4, BLUE),
+        Ball(3 * WIDTH // 4, 3 * HEIGHT // 4, GREEN)
+    ]
 
     # Pockets
     pockets = [(0, 0), (WIDTH - 1, 0), (0, HEIGHT - 1), (WIDTH - 1, HEIGHT - 1)]
@@ -56,6 +73,9 @@ def main(matrix):
     running = True
     while running:
         canvas.Fill(*BLACK)
+
+        # AI makes a move
+        ai_play(balls)
 
         # Draw table edges
         for x in range(WIDTH):
