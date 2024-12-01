@@ -84,7 +84,7 @@ def reset_pong_game():
     paddle1_y = 28
     paddle2_y = 28
     ball_pos = [32, 32]
-    ball_dir = [1, 1]
+    ball_dir = [random.choice([-1, 1]), random.choice([-1, 1])]  # Randomize initial direction
     ball_speed = 1
     pong_game_over = False
     logging.info("Pong game reset")

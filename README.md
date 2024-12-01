@@ -7,7 +7,7 @@ This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix
 - `consolidated_games.py`: Main script that orchestrates the execution of games and features, cycling through Tic-Tac-Toe, Snake, Pong, time display, and YouTube streaming.
 - `tic_tac_toe.py`: Contains the logic for the Tic-Tac-Toe game.
 - `snake.py`: Contains the logic for the Snake game.
-- `pong.py`: Contains the logic for the Pong game.
+- `pong.py`: Contains the logic for the Pong game. **Updated:** Added randomness to the starting velocity of the ball for varied gameplay.
 - `time_display.py`: Contains functions for displaying the current time and date on the LED matrix.
 - `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Downloads videos locally to avoid repeated streaming.
 - `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence.
