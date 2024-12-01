@@ -29,6 +29,7 @@ class Ball:
         self.color = color
         self.vx = 0
         self.vy = 0
+        self.mass = 1  # Assuming all balls have the same mass for simplicity
 
     def draw(self, canvas):
         for dx in range(-BALL_RADIUS, BALL_RADIUS + 1):
@@ -65,13 +66,16 @@ class Ball:
         dy = self.y - other.y
         distance = math.hypot(dx, dy)
         if distance < 2 * BALL_RADIUS:
+            # Calculate angle of collision
             angle = math.atan2(dy, dx)
+            # Calculate total velocity
             total_vx = self.vx + other.vx
             total_vy = self.vy + other.vy
-            self.vx = total_vx * math.cos(angle)
-            self.vy = total_vy * math.sin(angle)
-            other.vx = total_vx * -math.cos(angle)
-            other.vy = total_vy * -math.sin(angle)
+            # Calculate new velocities based on mass and angle
+            self.vx = (total_vx * math.cos(angle) * (self.mass - other.mass) + 2 * other.mass * other.vx) / (self.mass + other.mass)
+            self.vy = (total_vy * math.sin(angle) * (self.mass - other.mass) + 2 * other.mass * other.vy) / (self.mass + other.mass)
+            other.vx = (total_vx * -math.cos(angle) * (other.mass - self.mass) + 2 * self.mass * self.vx) / (self.mass + other.mass)
+            other.vy = (total_vy * -math.sin(angle) * (other.mass - self.mass) + 2 * self.mass * self.vy) / (self.mass + other.mass)
 
     def is_in_pocket(self, pockets):
         for pocket in pockets:
@@ -115,8 +119,10 @@ def ai_play(balls, pockets):
         distance_to_target = math.hypot(dx, dy)
         strength = min(max(distance_to_target / 10, AI_STRENGTH_MIN), AI_STRENGTH_MAX)
         
-        cue_ball.vx = math.cos(optimal_angle) * strength
-        cue_ball.vy = math.sin(optimal_angle) * strength
+        # Add randomness to the AI's shot to simulate human-like behavior
+        randomness_factor = random.uniform(-0.1, 0.1)
+        cue_ball.vx = math.cos(optimal_angle + randomness_factor) * strength
+        cue_ball.vy = math.sin(optimal_angle + randomness_factor) * strength
 
 def draw_table_edges(canvas):
     for x in range(WIDTH):
