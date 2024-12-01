@@ -21,6 +21,8 @@ YELLOW = (255, 255, 0)
 # Ball class
 class Ball:
     def __init__(self, x, y, color):
+        self.initial_x = x
+        self.initial_y = y
         self.x = x
         self.y = y
         self.color = color
@@ -76,6 +78,15 @@ class Ball:
                 return True
         return False
 
+    def is_moving(self):
+        return abs(self.vx) > 0.01 or abs(self.vy) > 0.01
+
+    def reset_position(self):
+        self.x = self.initial_x
+        self.y = self.initial_y
+        self.vx = 0
+        self.vy = 0
+
 def ai_play(balls):
     cue_ball = balls[0]
     target_ball = min(balls[1:], key=lambda b: math.hypot(cue_ball.x - b.x, cue_ball.y - b.y))
@@ -115,19 +126,28 @@ def main(matrix):
     running = True
     while running:
         canvas.Fill(*BLACK)
-        ai_play(balls)
         draw_table_edges(canvas)
         draw_pockets(canvas, pockets)
 
+        # Check if the cue ball is in a pocket and reset its position
+        if balls[0].is_in_pocket(pockets):
+            balls[0].reset_position()
+
+        # Remove other balls that are in pockets
+        balls = [balls[0]] + [ball for ball in balls[1:] if not ball.is_in_pocket(pockets)]
+
+        # Move and draw balls
         for ball in balls:
-            if ball.is_in_pocket(pockets):
-                ball.vx = 0
-                ball.vy = 0
             ball.move()
             ball.draw(canvas)
 
+        # Check for collisions
         for i, ball in enumerate(balls):
             for other in balls[i+1:]:
                 ball.check_collision(other)
+
+        # Check if all balls have stopped moving
+        if not any(ball.is_moving() for ball in balls):
+            ai_play(balls)
 
         canvas = matrix.SwapOnVSync(canvas)
