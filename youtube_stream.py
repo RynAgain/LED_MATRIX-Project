@@ -59,7 +59,11 @@ def loading_animation(stop_event):
 def download_video(url, download_path):
     """Download video from YouTube using yt-dlp."""
     # Set cache directory to a writable location
-    os.environ['XDG_CACHE_HOME'] = os.path.abspath('yt-dlp-cache')
+    cache_dir = os.path.abspath('yt-dlp-cache')
+    os.environ['XDG_CACHE_HOME'] = cache_dir
+    
+    # Ensure the cache directory exists and is writable
+    os.makedirs(cache_dir, exist_ok=True)
     
     ydl_opts = {
         'format': 'worst[ext=mp4]',  # Get lowest quality mp4
