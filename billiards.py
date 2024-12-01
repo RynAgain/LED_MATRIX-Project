@@ -105,8 +105,8 @@ def ai_play(balls):
     dy = target_ball.y - cue_ball.y
     angle_to_target = math.atan2(dy, dx)
     
-    # Adjust the angle slightly to aim for a bounce
-    angle = (angle_to_wall + angle_to_target) / 2
+    # Adjust the angle to aim for a bounce
+    angle = angle_to_wall
     
     # Set the strength of the shot
     strength = random.uniform(AI_STRENGTH_MIN, AI_STRENGTH_MAX)
