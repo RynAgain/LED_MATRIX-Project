@@ -27,7 +27,7 @@ def main():
     """Main game loop."""
     while True:
         # Play Tic-Tac-Toe
-        for _ in range(10):  # Play 10 games of Tic-Tac-Toe
+        for _ in range(3):  # Play 3 games of Tic-Tac-Toe
             tic_tac_toe.reset_tic_tac_toe_board()
             tic_tac_toe.print_tic_tac_toe_board(matrix)
             while True:

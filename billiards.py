@@ -49,6 +49,12 @@ class Ball:
             other.vx = total_vx * -math.cos(angle)
             other.vy = total_vy * -math.sin(angle)
 
+    def is_in_pocket(self, pockets):
+        for pocket in pockets:
+            if math.hypot(self.x - pocket[0], self.y - pocket[1]) <= POCKET_RADIUS:
+                return True
+        return False
+
 def ai_play(balls):
     # AI to hit the cue ball towards the nearest ball
     cue_ball = balls[0]
@@ -101,6 +107,9 @@ def main(matrix):
 
         # Move and draw balls
         for ball in balls:
+            if ball.is_in_pocket(pockets):
+                ball.vx = 0
+                ball.vy = 0
             ball.move()
             ball.draw(canvas)
 
