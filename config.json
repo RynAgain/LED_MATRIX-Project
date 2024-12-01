@@ -1,0 +1,39 @@
+{
+  "sequence": [
+    {
+      "name": "tic_tac_toe",
+      "type": "game",
+      "enabled": false
+    },
+    {
+      "name": "snake",
+      "type": "game",
+      "enabled": false
+    },
+    {
+      "name": "pong",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "billiards",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "time_display",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "youtube_stream",
+      "type": "video",
+      "enabled": true
+    },
+    {
+      "name": "bitcoin_price_display",
+      "type": "utility",
+      "enabled": true
+    }
+  ]
+}
