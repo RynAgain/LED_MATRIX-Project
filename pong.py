@@ -1,5 +1,6 @@
 import random
 import logging
+import time
 from PIL import Image, ImageDraw
 
 # Pong game variables
@@ -8,8 +9,9 @@ paddle2_y = 28
 ball_pos = [32, 32]
 ball_dir = [1, 1]
 ball_speed = 1
+max_ball_speed = 5  # Limit the maximum speed of the ball
 paddle_height = 8
-max_paddle_speed = 2
+max_paddle_speed = 3  # Increase paddle speed
 pong_game_over = False
 
 def draw_pong(matrix):
@@ -41,10 +43,10 @@ def move_pong():
     # Ball collision with paddles
     if ball_pos[0] <= 4 and paddle1_y <= ball_pos[1] <= paddle1_y + paddle_height:
         ball_dir[0] = -ball_dir[0]
-        ball_speed += 0.5  # Increase speed on collision
+        ball_speed = min(max_ball_speed, ball_speed + 0.5)  # Increase speed on collision
     elif ball_pos[0] >= 58 and paddle2_y <= ball_pos[1] <= paddle2_y + paddle_height:
         ball_dir[0] = -ball_dir[0]
-        ball_speed += 0.5  # Increase speed on collision
+        ball_speed = min(max_ball_speed, ball_speed + 0.5)  # Increase speed on collision
     
     # Ball out of bounds
     if ball_pos[0] < 0 or ball_pos[0] > 64:
@@ -92,9 +94,10 @@ def play_pong(matrix):
     global pong_game_over
     games_played = 0
     while games_played < 3:
+        reset_pong_game()  # Ensure game state is reset before each game
         while not pong_game_over:
             move_pong()
             draw_pong(matrix)
+            time.sleep(0.05)  # Add delay to control game speed
         games_played += 1
-        reset_pong_game()
         logging.info(f"Game {games_played} completed")

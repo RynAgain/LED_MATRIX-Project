@@ -8,6 +8,7 @@ import io
 import cv2
 import numpy as np
 import urllib.request
+import threading
 
 def read_urls_from_csv(file_path):
     """Read YouTube URLs from a CSV file."""
@@ -45,18 +46,39 @@ def get_frame_from_url(url):
         print(f"Error getting frame: {str(e)}")
         return None
 
+def loading_animation(stop_event):
+    """Display a loading animation."""
+    animation = "|/-\\"
+    idx = 0
+    while not stop_event.is_set():
+        print(f"\rDownloading video... {animation[idx % len(animation)]}", end="")
+        idx += 1
+        time.sleep(0.1)
+    print("\rDownload complete!          ")
+
 def download_video(url, download_path):
     """Download video from YouTube using yt-dlp."""
+    # Set cache directory to a writable location
+    os.environ['XDG_CACHE_HOME'] = os.path.abspath('yt-dlp-cache')
+    
     ydl_opts = {
         'format': 'worst[ext=mp4]',  # Get lowest quality mp4
         'quiet': True,
         'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),  # Save to specified path
     }
+    
+    stop_event = threading.Event()
+    animation_thread = threading.Thread(target=loading_animation, args=(stop_event,))
+    animation_thread.start()
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:
         print(f"Error downloading video: {str(e)}")
+    finally:
+        stop_event.set()
+        animation_thread.join()
 
 def stream_youtube_videos(urls, matrix):
     """Stream YouTube videos to LED matrix."""
@@ -70,7 +92,6 @@ def stream_youtube_videos(urls, matrix):
     try:
         for url, title in urls:
             print(f"\nPreparing to play: {title}")
-            print("Downloading video...")
             
             download_video(url, download_path)
             
