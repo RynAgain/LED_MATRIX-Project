@@ -2,3 +2,4 @@ yt_dlp
 Pillow
 opencv-python==3.4.11.12
 numpy
+requests

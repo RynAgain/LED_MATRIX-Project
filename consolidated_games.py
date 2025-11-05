@@ -83,7 +83,10 @@ def main():
                     time_display.display_time_and_date(matrix)
                     time_display.display_binary_clock(matrix)
                 elif name == "bitcoin_price_display":
-                    bitcoin_price_display.main(matrix, canvas)
+                    try:
+                        bitcoin_price_display.main(matrix, canvas)
+                    except Exception as e:
+                        logging.error(f"Error displaying Bitcoin price: {str(e)}")
             
             elif item_type == "video":
                 if name == "youtube_stream":

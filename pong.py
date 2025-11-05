@@ -83,9 +83,9 @@ def move_pong():
         elif ball_pos[1] < paddle2_y + paddle_height // 2:
             paddle2_y -= min(max_paddle_speed, (paddle2_y + paddle_height // 2) - ball_pos[1])
     
-    # Ensure paddles stay within bounds
-    paddle1_y = max(0, min(56, paddle1_y))
-    paddle2_y = max(0, min(56, paddle2_y))
+    # Ensure paddles stay within bounds (64 - paddle_height)
+    paddle1_y = max(0, min(64 - paddle_height, paddle1_y))
+    paddle2_y = max(0, min(64 - paddle_height, paddle2_y))
 
 def reset_pong_game():
     """Reset the Pong game for a new game."""

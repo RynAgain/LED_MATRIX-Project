@@ -24,7 +24,7 @@ def draw_snake(matrix):
 
 def move_snake():
     """Move the snake towards the food."""
-    global game_over, food, direction
+    global game_over, food, direction, snake
     head_x, head_y = snake[0]
     
     # Always pursue food
@@ -46,7 +46,8 @@ def move_snake():
     # Check for food
     if new_head == food:
         snake.insert(0, new_head)
-        # Ensure food is not placed on the snake
+        # Generate new food position not on the snake
+        food = (random.randint(0, 63), random.randint(0, 63))
         while food in snake:
             food = (random.randint(0, 63), random.randint(0, 63))
         logging.info("Snake ate food")

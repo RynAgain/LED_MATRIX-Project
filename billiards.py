@@ -185,3 +185,5 @@ def main(matrix):
             running = False
 
         canvas = matrix.SwapOnVSync(canvas)
+    
+    return  # Ensure function returns after game ends
