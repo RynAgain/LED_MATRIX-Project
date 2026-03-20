@@ -1,0 +1,33 @@
+{
+  "networks": [
+    {
+      "ssid": "YOUR_WIFI_SSID",
+      "password": "",
+      "priority": 1,
+      "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
+      "priority": 1,
+      "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
+      "priority": 1,
+      "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
+      "priority": 1,
+      "hidden": false
+    }
+  ],
+  "connection_timeout": 30,
+  "retry_attempts": 3,
+  "retry_delay": 10,
+  "connectivity_check_url": "http://detectportal.firefox.com/success.txt",
+  "connectivity_check_expected": "success"
+}

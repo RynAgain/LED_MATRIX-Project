@@ -1,0 +1,11 @@
+[Unit]
+Description=LED Matrix Auto-Updater Timer
+Documentation=https://github.com/RynAgain/LED_MATRIX-Project
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,29 @@
+[Unit]
+Description=LED Matrix Display Service
+Documentation=https://github.com/RynAgain/LED_MATRIX-Project
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/LED_MATRIX-Project
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/pi/LED_MATRIX-Project/venv/bin/python3 /home/pi/LED_MATRIX-Project/src/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=led-matrix
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/pi/LED_MATRIX-Project
+
+# Hardening
+ProtectHome=read-only
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

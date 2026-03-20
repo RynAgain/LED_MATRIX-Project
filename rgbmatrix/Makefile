@@ -3,13 +3,15 @@
 #
 # Please check in modified *.cpp files with distribution to not require cython
 # to be installed on the users' machine.
-# for python3: make PYTHON=$(which python3) CYTHON=$(which cython3)
-CYTHON ?= cython3
+CYTHON ?= cython
 
 all : core.cpp graphics.cpp
 
-%.cpp : %.pyx
-	$(CYTHON) --cplus -o $@ $^
+core.cpp : core.pyx core.pxd cppinc.pxd
+	$(CYTHON) --cplus -o $@ $<
+
+graphics.cpp : graphics.pyx graphics.pxd cppinc.pxd core.pxd
+	$(CYTHON) --cplus -o $@ $<
 
 clean:
 	rm -rf core.cpp graphics.cpp

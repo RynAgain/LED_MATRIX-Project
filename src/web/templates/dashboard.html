@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="card">
+    <h2>Display Status</h2>
+    <div class="status-grid" id="status-display">
+        <div class="status-item">
+            <span class="status-label">Status</span>
+            <span class="status-value" id="status-state">{{ status.get('status', 'unknown') }}</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Current Feature</span>
+            <span class="status-value" id="status-feature">{{ status.get('current_feature', 'N/A') }}</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Uptime</span>
+            <span class="status-value" id="status-uptime">{{ status.get('uptime', 'N/A') }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Quick Actions</h2>
+    <div class="action-grid">
+        <button class="btn btn-warning" onclick="restartService()">Restart Display</button>
+        <button class="btn btn-info" onclick="checkUpdate()">Check for Updates</button>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Active Features</h2>
+    <div class="feature-list">
+        {% for feature in config.get('sequence', []) %}
+        <div class="feature-item {% if feature.enabled %}enabled{% else %}disabled{% endif %}">
+            <span class="feature-indicator"></span>
+            <span class="feature-name">{{ feature.name | replace('_', ' ') | title }}</span>
+            <span class="feature-type">{{ feature.type }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+function restartService() {
+    if (confirm('Restart the display service?')) {
+        fetch('{{ url_for("api_restart") }}', {method: 'POST'})
+            .then(r => r.json())
+            .then(d => alert(d.message))
+            .catch(e => alert('Error: ' + e));
+    }
+}
+
+function checkUpdate() {
+    fetch('{{ url_for("api_update") }}', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => alert(d.message))
+        .catch(e => alert('Error: ' + e));
+}
+
+// Auto-refresh status every 5 seconds
+setInterval(function() {
+    fetch('{{ url_for("api_status") }}')
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('status-state').textContent = d.status || 'unknown';
+            document.getElementById('status-feature').textContent = d.current_feature || 'N/A';
+            document.getElementById('status-uptime').textContent = d.uptime || 'N/A';
+        })
+        .catch(() => {});
+}, 5000);
+</script>
+{% endblock %}

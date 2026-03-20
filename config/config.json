@@ -1,0 +1,42 @@
+{
+  "github_branch": "main",
+  "display_duration": 30,
+  "log_level": "DEBUG",
+  "sequence": [
+    {
+      "name": "tic_tac_toe",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "snake",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "pong",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "billiards",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "time_display",
+      "type": "utility",
+      "enabled": true
+    },
+    {
+      "name": "bitcoin_price",
+      "type": "utility",
+      "enabled": true
+    },
+    {
+      "name": "youtube_stream",
+      "type": "video",
+      "enabled": true
+    }
+  ]
+}

@@ -1,5 +1,34 @@
-yt_dlp
-Pillow
-opencv-python==3.4.11.12
-numpy
-requests
+# LED Matrix Project - Python Dependencies
+# Install: pip install -r requirements.txt
+#
+# Tested platforms:
+#   - Raspberry Pi OS (Bookworm, Python 3.11, ARM64)
+#   - Windows 10/11 (Python 3.9-3.12, x64)
+#   - macOS (Python 3.9-3.12, Apple Silicon / Intel)
+#
+# Note: On Raspberry Pi, opencv-python-headless is used instead of
+# opencv-python to avoid Qt/GTK GUI dependencies. Both provide
+# identical cv2 API for frame processing.
+
+# Image processing
+Pillow>=10.0.0,<11.0
+
+# Video processing (for YouTube stream feature)
+# On Raspberry Pi: if pip install fails, use system package instead:
+#   sudo apt-get install python3-opencv
+opencv-python-headless>=4.8.0,<5.0
+numpy>=1.24.0,<2.0
+yt-dlp>=2024.1.1
+
+# HTTP requests (for Bitcoin price, connectivity checks)
+requests>=2.31.0,<3.0
+
+# Development: LED matrix simulator (not needed on Raspberry Pi)
+# Install on dev machines: pip install pygame
+pygame>=2.5.0; sys_platform == "win32" or sys_platform == "darwin"
+
+# Web control panel
+Flask>=3.0.0,<4.0
+
+# Testing (install with: pip install -r requirements.txt)
+pytest>=7.4.0

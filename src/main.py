@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""
+LED Matrix Project - Main Entry Point
+
+Reads config/config.json and cycles through enabled display features
+on a 64x64 RGB LED matrix. Designed for Raspberry Pi with rpi-rgb-led-matrix.
+"""
+
+import json
+import importlib
+import logging
+import os
+import sys
+import time
+import signal
+
+logger = logging.getLogger(__name__)
+
+# Project root is one level up from this file
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Add project root to path for imports
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+def write_status(feature_name=None, status="running"):
+    """Write current display status to logs/status.json for the web panel."""
+    status_path = os.path.join(PROJECT_ROOT, "logs", "status.json")
+    try:
+        data = {
+            "status": status,
+            "current_feature": feature_name,
+            "timestamp": time.time(),
+            "uptime": "N/A"
+        }
+        if hasattr(write_status, '_start_time'):
+            elapsed = time.time() - write_status._start_time
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            data["uptime"] = f"{hours}h {minutes}m"
+        with open(status_path, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def write_pid():
+    """Write the current PID for web panel communication."""
+    pid_path = os.path.join(PROJECT_ROOT, "logs", "display.pid")
+    try:
+        with open(pid_path, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
+
+# Flag for graceful shutdown
+_shutdown = False
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global _shutdown
+    logger.info("Received signal %d, shutting down...", signum)
+    _shutdown = True
+
+
+def sighup_handler(signum, frame):
+    """Handle SIGHUP for config reload."""
+    logger.info("Received SIGHUP, config will reload on next cycle")
+
+
+def load_config():
+    """
+    Load display sequence configuration.
+
+    Returns:
+        dict: Configuration dictionary with sequence and settings.
+    """
+    config_path = os.path.join(PROJECT_ROOT, "config", "config.json")
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        logger.info("Loaded config from %s", config_path)
+        return config
+    except FileNotFoundError:
+        logger.error("Config file not found: %s", config_path)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON in config: %s", e)
+        sys.exit(1)
+
+
+def _create_simulator_matrix(options=None):
+    """Create a simulator matrix for development/testing."""
+    from src.simulator import RGBMatrix as SimRGBMatrix
+    from src.simulator import RGBMatrixOptions as SimOptions
+
+    if options is None:
+        options = SimOptions()
+        options.rows = 64
+        options.cols = 64
+
+    matrix = SimRGBMatrix(options=options)
+    logger.info("Using LED Matrix Simulator (pygame window)")
+    return matrix
+
+
+def init_matrix():
+    """
+    Initialize the RGB LED matrix.
+    On Raspberry Pi: uses the real rgbmatrix library.
+    On other platforms: falls back to pygame-based simulator.
+    """
+    try:
+        from rgbmatrix import RGBMatrix, RGBMatrixOptions
+
+        options = RGBMatrixOptions()
+        options.rows = 64
+        options.cols = 64
+        options.chain_length = 1
+        options.parallel = 1
+        options.hardware_mapping = "regular"
+        options.gpio_slowdown = 4
+        options.brightness = 80
+        options.drop_privileges = False
+
+        matrix = RGBMatrix(options=options)
+        logger.info("RGB LED Matrix initialized (64x64)")
+        return matrix
+    except ImportError:
+        logger.warning("rgbmatrix not available - using simulator")
+        return _create_simulator_matrix()
+    except Exception as e:
+        logger.error("Failed to initialize matrix: %s", e)
+        logger.warning("Falling back to simulator")
+        return _create_simulator_matrix()
+
+
+def _register_simulator_modules():
+    """
+    Register the simulator as 'rgbmatrix' in sys.modules.
+    This allows display modules that do 'from rgbmatrix import ...' to work
+    on platforms where the real rgbmatrix C library is not available.
+    """
+    try:
+        import rgbmatrix
+        # Real rgbmatrix is available, no need to patch
+        return
+    except ImportError:
+        pass
+
+    import src.simulator as sim
+    import src.simulator.matrix as sim_matrix
+    import src.simulator.graphics as sim_graphics
+
+    # Create a mock rgbmatrix module
+    import types
+    mock_rgbmatrix = types.ModuleType("rgbmatrix")
+    mock_rgbmatrix.RGBMatrix = sim_matrix.RGBMatrix
+    mock_rgbmatrix.RGBMatrixOptions = sim_matrix.RGBMatrixOptions
+    mock_rgbmatrix.FrameCanvas = sim_matrix.FrameCanvas
+    mock_rgbmatrix.graphics = sim_graphics
+
+    sys.modules["rgbmatrix"] = mock_rgbmatrix
+    sys.modules["rgbmatrix.graphics"] = sim_graphics
+
+    logger.info("Registered simulator as rgbmatrix module")
+
+
+# Map of feature names to their module paths
+FEATURE_MODULES = {
+    "tic_tac_toe": "src.display.tic_tac_toe",
+    "snake": "src.display.snake",
+    "pong": "src.display.pong",
+    "billiards": "src.display.billiards",
+    "time_display": "src.display.time_display",
+    "bitcoin_price": "src.display.bitcoin_price",
+    "youtube_stream": "src.display.youtube_stream",
+}
+
+
+def run_feature(feature_name, matrix, duration):
+    """
+    Run a single display feature.
+
+    Args:
+        feature_name: Name of the feature to run (must be in FEATURE_MODULES).
+        matrix: RGBMatrix instance.
+        duration: How long to run the feature in seconds.
+
+    Returns:
+        True if feature completed successfully, False on error.
+    """
+    module_path = FEATURE_MODULES.get(feature_name)
+    if not module_path:
+        logger.warning("Unknown feature: %s", feature_name)
+        return False
+
+    try:
+        logger.info("Starting feature: %s (duration: %ds)", feature_name, duration)
+        module = importlib.import_module(module_path)
+
+        # Each display module should have a run(matrix, duration) function
+        if hasattr(module, "run"):
+            module.run(matrix, duration)
+        elif hasattr(module, "main"):
+            # Fallback to main() for legacy modules
+            module.main(matrix, duration)
+        else:
+            logger.warning("Feature '%s' has no run() or main() function, skipping", feature_name)
+            return False
+
+        logger.info("Feature '%s' completed", feature_name)
+        return True
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:
+        logger.error("Feature '%s' crashed: %s", feature_name, e, exc_info=True)
+        # Clear the matrix on crash
+        try:
+            matrix.Clear()
+        except Exception:
+            pass
+        return False
+
+
+def ensure_wifi():
+    """
+    Ensure WiFi connectivity before starting display loop.
+
+    Returns:
+        True if connected, False if connection failed.
+    """
+    try:
+        from src.wifi import WiFiManager
+        wifi = WiFiManager()
+        return wifi.ensure_connection()
+    except ImportError:
+        logger.warning("WiFi manager not available, assuming connected")
+        return True
+    except Exception as e:
+        logger.warning("WiFi check failed: %s, continuing anyway", e)
+        return True
+
+
+def main():
+    """Main entry point: initialize matrix and run feature loop."""
+    # Setup logging
+    log_dir = os.path.join(PROJECT_ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(
+                os.path.join(log_dir, "display.log"),
+                mode="a"
+            )
+        ]
+    )
+
+    logger.info("=" * 60)
+    logger.info("LED Matrix Project starting up")
+    logger.info("=" * 60)
+
+    # Register simulator as rgbmatrix if real hardware library is unavailable.
+    # Must happen before any display modules are imported, since they do
+    # 'from rgbmatrix import ...' at the top level.
+    _register_simulator_modules()
+
+    # Validate configuration
+    from src.config_validator import validate_all
+    validation_results = validate_all()
+    for config_name, errors in validation_results.items():
+        for err in errors:
+            if err.severity == "error":
+                logger.error("Config validation: %s -> %s", config_name, err)
+            else:
+                logger.warning("Config validation: %s -> %s", config_name, err)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Web panel integration: write PID, start uptime timer, register SIGHUP
+    write_pid()
+    write_status._start_time = time.time()
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, sighup_handler)
+
+    # Ensure WiFi connectivity
+    logger.info("Checking WiFi connectivity...")
+    if ensure_wifi():
+        logger.info("WiFi connectivity confirmed")
+    else:
+        logger.warning("WiFi connection failed - some features may not work")
+
+    # Load configuration
+    config = load_config()
+    duration = config.get("display_duration", 60)
+    sequence = config.get("sequence", [])
+
+    # Filter to enabled features only
+    enabled_features = [f for f in sequence if f.get("enabled", False)]
+
+    if not enabled_features:
+        logger.error("No features enabled in config. Enable at least one feature in config/config.json")
+        sys.exit(1)
+
+    logger.info("Enabled features: %s", [f["name"] for f in enabled_features])
+
+    # Initialize the matrix
+    matrix = init_matrix()
+
+    # Main display loop
+    logger.info("Entering display loop...")
+    while not _shutdown:
+        for feature in enabled_features:
+            if _shutdown:
+                break
+
+            name = feature.get("name", "unknown")
+            write_status(name, "running")
+            run_feature(name, matrix, duration)
+
+            # Brief pause between features
+            if not _shutdown:
+                time.sleep(1)
+
+        # Reload config between full cycles to pick up changes
+        if not _shutdown:
+            config = load_config()
+            duration = config.get("display_duration", 60)
+            sequence = config.get("sequence", [])
+            enabled_features = [f for f in sequence if f.get("enabled", False)]
+
+            if not enabled_features:
+                logger.warning("No features enabled after config reload, waiting 30s...")
+                time.sleep(30)
+
+    write_status(None, "stopped")
+
+    # Cleanup
+    logger.info("Shutting down, clearing matrix...")
+    try:
+        matrix.Clear()
+    except Exception:
+        pass
+    logger.info("LED Matrix Project stopped")
+
+
+if __name__ == "__main__":
+    main()

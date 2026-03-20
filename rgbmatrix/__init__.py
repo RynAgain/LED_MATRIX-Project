@@ -1,7 +1,10 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import
+"""
+Python bindings for rpi-rgb-led-matrix library.
+Vendored from https://github.com/hzeller/rpi-rgb-led-matrix
+"""
 
-__version__ = "0.0.1"
-__author__ = "Christoph Friedrich <christoph.friedrich@vonaffenfels.de>"
+__version__ = "0.1.0"
 
-from .core import RGBMatrix, FrameCanvas, RGBMatrixOptions
+from .core import RGBMatrix, RGBMatrixOptions, FrameCanvas
+
+__all__ = ["RGBMatrix", "RGBMatrixOptions", "FrameCanvas"]

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}WiFi - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>WiFi Networks</h1>
+
+<div class="card">
+    <h2>Configured Networks</h2>
+    {% if config.get('networks') %}
+    <div class="wifi-list">
+        {% for network in config.get('networks', []) %}
+        <div class="wifi-item">
+            <div class="wifi-info">
+                <span class="wifi-ssid">{{ network.ssid }}</span>
+                <span class="wifi-details">
+                    Priority: {{ network.get('priority', 'N/A') }}
+                    {% if network.get('password') %} | Secured{% else %} | Open{% endif %}
+                    {% if network.get('hidden') %} | Hidden{% endif %}
+                </span>
+            </div>
+            <form method="POST" action="{{ url_for('wifi') }}" class="inline-form">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="index" value="{{ loop.index0 }}">
+                <button type="submit" class="btn btn-danger btn-small" 
+                        onclick="return confirm('Remove {{ network.ssid }}?')">Remove</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No WiFi networks configured.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Add Network</h2>
+    <form method="POST" action="{{ url_for('wifi') }}">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+            <label for="ssid">Network Name (SSID)</label>
+            <input type="text" id="ssid" name="ssid" required placeholder="Enter WiFi name">
+        </div>
+        <div class="form-group">
+            <label for="password">Password (leave empty for open networks)</label>
+            <input type="password" id="password" name="password" placeholder="Enter password or leave empty">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="priority">Priority</label>
+                <input type="number" id="priority" name="priority" value="1" min="0" max="99">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="hidden">
+                    Hidden Network
+                </label>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Add Network</button>
+    </form>
+</div>
+{% endblock %}

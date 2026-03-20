@@ -1,2 +1,44 @@
-# Ignore log files
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
 *.log
+
+# PID files
+*.pid
+
+# Downloaded media
+downloaded_videos/*.mp4
+downloaded_videos/*.webm
+downloaded_videos/*.mkv
+downloaded_videos/*.avi
+!downloaded_videos/placeholder.txt.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Sensitive config (uncomment if wifi.json contains passwords you don't want in repo)
+# config/wifi.json

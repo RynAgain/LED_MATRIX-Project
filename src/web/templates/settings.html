@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Settings - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<form method="POST" action="{{ url_for('settings') }}">
+    <div class="card">
+        <h2>Update Settings</h2>
+        <div class="form-group">
+            <label for="github_branch">GitHub Branch</label>
+            <input type="text" id="github_branch" name="github_branch" 
+                   value="{{ config.get('github_branch', 'main') }}">
+            <span class="form-hint">Branch to pull updates from</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Logging</h2>
+        <div class="form-group">
+            <label for="log_level">Log Level</label>
+            <select id="log_level" name="log_level">
+                {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR'] %}
+                <option value="{{ level }}" {% if config.get('log_level') == level %}selected{% endif %}>
+                    {{ level }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full">Save Settings</button>
+</form>
+
+<div class="card">
+    <h2>System Actions</h2>
+    <div class="action-grid">
+        <button class="btn btn-warning" onclick="restartService()">Restart Display</button>
+        <button class="btn btn-info" onclick="checkUpdate()">Force Update Check</button>
+    </div>
+</div>
+
+<script>
+function restartService() {
+    if (confirm('Restart the display service?')) {
+        fetch('{{ url_for("api_restart") }}', {method: 'POST'})
+            .then(r => r.json())
+            .then(d => alert(d.message))
+            .catch(e => alert('Error: ' + e));
+    }
+}
+
+function checkUpdate() {
+    fetch('{{ url_for("api_update") }}', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => alert(d.message))
+        .catch(e => alert('Error: ' + e));
+}
+</script>
+{% endblock %}

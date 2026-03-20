@@ -1,0 +1,21 @@
+[Unit]
+Description=LED Matrix Auto-Updater Service
+Documentation=https://github.com/RynAgain/LED_MATRIX-Project
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/LED_MATRIX-Project
+ExecStart=/bin/bash /home/pi/LED_MATRIX-Project/scripts/update.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=led-matrix-updater
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/pi/LED_MATRIX-Project
+
+[Install]
+WantedBy=multi-user.target

@@ -1,170 +1,305 @@
 # LED Matrix Project
 
-This project is designed to run on a Raspberry Pi and control a 64x64 LED matrix. It includes three games: Tic-Tac-Toe, Snake, and Pong, as well as YouTube video streaming capabilities. The project also features an automatic update mechanism from a GitHub repository.
+A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through games, utilities, and video features -- auto-updates from GitHub, connects to WiFi, and runs unattended from boot.
 
-## Project Structure
+---
 
-- `consolidated_games.py`: Main script that orchestrates the execution of games and features, cycling through Tic-Tac-Toe, Snake, Pong, time display, and YouTube streaming.
-- `tic_tac_toe.py`: Contains the logic for the Tic-Tac-Toe game.
-- `snake.py`: Contains the logic for the Snake game.
-- `pong.py`: Contains the logic for the Pong game. **Updated:** Added randomness to the starting velocity of the ball for varied gameplay.
-- `time_display.py`: Contains functions for displaying the current time and date on the LED matrix.
-- `youtube_stream.py`: Handles YouTube video streaming functionality using yt-dlp. **New:** Supports specifying playback duration from CSV.
-- `youtube_urls.csv`: Contains list of YouTube URLs to play in sequence, along with playback duration.
-- `requirements.txt`: Lists all Python dependencies (for Raspberry Pi deployment).
-- `install_and_update.sh`: Checks for updates from the GitHub repository and restarts the program if updates are found.
-- `add_to_startup.sh`: Adds `install_and_update.sh` to the Raspberry Pi's boot sequence using a cron job.
-- `billiards.py`: Simulates a 2D billiards game with AI, featuring full physics and graphical representation. **Updated:** Improved collision handling for more realistic physics.
+## Features
 
-## System Requirements
+| Feature | Type | Description |
+|---------|------|-------------|
+| Tic Tac Toe | Game | AI vs AI on a 3x3 grid |
+| Snake | Game | Autonomous AI pathfinding |
+| Pong | Game | AI vs AI with increasing difficulty |
+| Billiards | Game | Physics simulation with AI player |
+| Time Display | Utility | Clock with gradient colors + binary clock mode |
+| Bitcoin Price | Utility | Live BTC/USD from CoinDesk API |
+| YouTube Stream | Video | Streams from playlist, resized to 64x64 |
 
-### Raspberry Pi
-- Raspberry Pi (any model with sufficient GPIO pins)
-- Python 3
-- VLC media player
-- LED Matrix (64x64)
-- Internet connection for YouTube streaming and updates
+### Web Control Panel
 
-### Windows
-- Python 3
-- VLC media player (architecture must match Python installation)
-- Internet connection for YouTube streaming
-- Note: LED Matrix functionality is NOT available on Windows
+A password-protected web interface accessible from any device (phone, tablet, laptop) on the same network:
 
-## Setup Instructions
+- **Dashboard**: Live display status, current feature, uptime, quick restart/update actions
+- **Features**: Toggle features on/off with iOS-style switches, set display duration
+- **WiFi**: Add/remove WiFi networks, set priorities
+- **Settings**: Configure GitHub branch, log level
+- **Authentication**: Username/password login with session timeout
 
-### For Raspberry Pi (Full Functionality)
+Default credentials: `admin` / `ledmatrix` (change in `config/web.json`)
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/RynAgain/LED_MATRIX-Project.git
-   cd LED_MATRIX-Project
-   ```
+## Architecture
 
-2. **Install Dependencies**:
-   Run the `install.sh` script to install Python dependencies and necessary system packages (including VLC).
-   ```bash
-   ./install.sh
-   ```
+```
+LED_MATRIX-Project/
+  config/              # All configuration files
+    config.json        # Feature sequence, update interval, display settings
+    web.json           # Web control panel settings and credentials
+    wifi.json          # WiFi network credentials and connection settings
+    youtube_urls.csv   # YouTube playlist for the stream feature
+  scripts/             # Operational scripts
+    install.sh         # One-time Raspberry Pi setup
+    update.sh          # Called by systemd timer to check for updates
+  services/            # systemd unit files
+    led-matrix.service             # Main display service
+    led-matrix-updater.service     # Update check service (oneshot)
+    led-matrix-updater.timer       # Triggers update checks every 30 min
+    led-matrix-web.service         # Web control panel service
+  src/                 # Application code
+    main.py            # Entry point - config loader, feature loop, matrix init
+    config_validator.py # JSON schema validation for config files
+    display/           # Display feature modules
+    simulator/         # Pygame LED matrix emulator (dev only)
+    wifi/              # WiFi connection manager (nmcli/NetworkManager)
+    updater/           # Git-based auto-updater
+    web/               # Flask web control panel
+      app.py           # Routes, auth, API endpoints
+      templates/       # Jinja2 HTML templates
+      static/          # CSS styles
+  rgbmatrix/           # RGB LED matrix Cython library
+  tests/               # Test suite (runs in simulator, no Pi needed)
+  plans/               # Project planning documents
+    FEATURES.md        # Feature tracker with checkboxes
+    ARCHITECTURE.md    # System architecture documentation
+  pytest.ini           # Pytest configuration
+```
 
-3. **Add to Startup**:
-   Run the `add_to_startup.sh` script to ensure the program updates and restarts on boot.
-   ```bash
-   ./add_to_startup.sh
-   ```
+## Quick Start (Raspberry Pi)
 
-### For Windows (Limited Functionality - YouTube Streaming Only)
+### 1. Clone the repository
 
-1. **Clone the Repository**:
-   ```cmd
-   git clone https://github.com/RynAgain/LED_MATRIX-Project.git
-   cd LED_MATRIX-Project
-   ```
+```bash
+cd /home/pi
+git clone https://github.com/RynAgain/LED_MATRIX-Project.git
+cd LED_MATRIX-Project
+```
 
-2. **Install Dependencies**:
-   Follow the instructions in the `requirements.txt` to install Windows-compatible Python dependencies.
+### 2. Configure WiFi
 
-3. **Install VLC Media Player**:
-   - Download VLC from https://www.videolan.org/vlc/download-windows.html
-   - **IMPORTANT**: Match VLC architecture with Python
-     - If using 64-bit Python (recommended), install 64-bit VLC
-     - If using 32-bit Python, install 32-bit VLC
-   - During installation:
-     - Select "Add VLC to PATH" option
-     - Use default installation directory (usually in Program Files)
-   - After installation:
-     - Restart your computer to ensure PATH changes take effect
+Edit `config/wifi.json` with your network details:
 
-## Usage
+```json
+{
+  "networks": [
+    {
+      "ssid": "YourWiFiName",
+      "password": "",
+      "priority": 1,
+      "hidden": false
+    }
+  ],
+  "connection_timeout": 30,
+  "retry_attempts": 3,
+  "retry_delay": 10
+}
+```
 
-- **Running the Games and Features** (Raspberry Pi Only):
-  Execute the `consolidated_games.py` script to start the automatic cycling through Tic-Tac-Toe, Snake, Pong, time display, and YouTube streaming.
-  ```bash
-  python3 consolidated_games.py
-  ```
+- For open/public WiFi: leave `password` as `""`
+- For secured WiFi: enter the password
+- Add multiple networks with different priorities (lower number = higher priority)
 
-- **Streaming YouTube Videos** (Both Platforms):
-  The YouTube streaming feature now supports playing videos from a CSV file in sequence.
+### 3. Run the installer
 
-  1. **CSV File Format**:
-     Create a CSV file (default: youtube_urls.csv) with the following format:
-     ```csv
-     url,title,duration
-     https://www.youtube.com/watch?v=example1,Video Title 1,3
-     https://www.youtube.com/watch?v=example2,Video Title 2,x
-     ```
-     - `duration`: Specify the playback duration in minutes, or use "x" to play the entire video.
+```bash
+sudo bash scripts/install.sh
+```
 
-  2. **Running the Stream**:
-     ```bash
-     python youtube_stream.py                  # Uses default youtube_urls.csv
-     python youtube_stream.py custom_list.csv  # Uses custom CSV file
-     ```
+This will:
+- Install system dependencies (Python 3, pip, git, NetworkManager)
+- Create a Python virtual environment
+- Install Python packages from `requirements.txt`
+- Set up systemd services for auto-start and auto-update
+- Enable services to start on boot
 
-  3. **Features**:
-     - Plays videos in sequence from the CSV file
-     - **New:** Supports specifying playback duration from CSV
-     - Videos play automatically in sequence
-     - Shows title and quality information for each video
-     - Each video can be limited to a specified playback time or play in full
+### 4. Reboot
 
-- **Running the Billiards Game** (Both Platforms):
-  Execute the `billiards.py` script to start the billiards game simulation.
-  ```bash
-  python billiards.py
-  ```
+```bash
+sudo reboot
+```
 
-- **Automatic Updates** (Raspberry Pi only):
-  The `install_and_update.sh` script will automatically check for updates every 30 minutes and restart the program if updates are found.
+The system will:
+1. Connect to WiFi on boot
+2. Start the LED matrix display automatically
+3. Check for GitHub updates every 30 minutes
+4. Auto-restart if the display process crashes
 
-## Platform-Specific Features
+**You should never need to touch the Pi again.**
 
-### Raspberry Pi
-- Full LED matrix support
-- Games (Tic-Tac-Toe, Snake, and Pong)
-- YouTube video streaming
-- Automatic updates
+### 5. Access the Web Control Panel
 
-### Windows
-- YouTube video streaming only
-- Useful for development and testing of streaming functionality
-- **Note:** Windows support is intended for debugging and development purposes only.
+Open a browser on your phone/laptop and go to:
+```
+http://<pi-ip-address>:5000
+```
 
-## Troubleshooting
+Login with default credentials:
+- Username: `admin`
+- Password: `ledmatrix`
 
-### VLC Installation Issues (Windows)
-1. **Architecture Mismatch**:
-   - Check Python architecture: Run `python -c "import platform; print(platform.architecture()[0])"` in command prompt
-   - Install matching VLC version (32-bit or 64-bit)
-   - If unsure, uninstall current VLC and install 64-bit version (recommended)
+Change credentials by editing `config/web.json`.
 
-2. **VLC Not Found**:
-   - Verify VLC is installed in one of these locations:
-     - C:\Program Files\VideoLAN\VLC (64-bit)
-     - C:\Program Files (x86)\VideoLAN\VLC (32-bit)
-   - Ensure libvlc.dll exists in the VLC installation directory
-   - Try uninstalling and reinstalling VLC
-   - Make sure to restart your computer after installation
+## Configuration
 
-3. **DLL Load Issues**:
-   - Run the script as administrator
-   - Check Windows Defender or antivirus isn't blocking VLC
-   - Verify PATH environment variable includes VLC directory
+### Feature Sequence (`config/config.json`)
 
-### YouTube Streaming Issues
-1. **CSV File Issues**:
-   - Verify CSV file format is correct (url,title,duration columns)
-   - Check that URLs are valid and accessible
-   - Ensure no extra spaces or special characters in the CSV
+```json
+{
+  "update_interval": 1800,
+  "github_branch": "main",
+  "display_duration": 60,
+  "log_level": "INFO",
+  "sequence": [
+    {"name": "tic_tac_toe", "type": "game", "enabled": true},
+    {"name": "snake", "type": "game", "enabled": true},
+    {"name": "pong", "type": "game", "enabled": true},
+    {"name": "billiards", "type": "game", "enabled": true},
+    {"name": "time_display", "type": "utility", "enabled": true},
+    {"name": "bitcoin_price", "type": "utility", "enabled": false},
+    {"name": "youtube_stream", "type": "video", "enabled": false}
+  ]
+}
+```
 
-2. **Playback Issues**:
-   - Check internet connection
-   - Verify VLC is properly installed
-   - Try updating yt-dlp: `pip install --upgrade yt-dlp`
-   - Check if videos are available in your region
+- `display_duration`: seconds each feature runs before cycling to the next
+- `enabled`: toggle features on/off
+- Config is reloaded between full cycles -- changes take effect without restart
 
-### Raspberry Pi Issues
-- If the program does not start, check the connections to the LED matrix
-- For update issues, verify the GitHub repository URL and network connectivity
+### WiFi Networks (`config/wifi.json`)
+
+- `networks`: array of WiFi networks to try, in priority order
+- `connection_timeout`: seconds to wait for a connection attempt
+- `retry_attempts`: number of retries per network
+- `connectivity_check_url`: URL used to verify internet access
+
+## Managing the System
+
+### Service Commands
+
+```bash
+# Display service
+sudo systemctl status led-matrix.service
+sudo systemctl start led-matrix.service
+sudo systemctl stop led-matrix.service
+sudo systemctl restart led-matrix.service
+
+# Auto-updater timer
+sudo systemctl status led-matrix-updater.timer
+sudo systemctl list-timers led-matrix-updater.timer
+
+# Force an update check now
+sudo systemctl start led-matrix-updater.service
+```
+
+### Viewing Logs
+
+```bash
+# Display service logs
+journalctl -u led-matrix.service -f
+
+# Updater logs
+journalctl -u led-matrix-updater.service -f
+
+# Application logs
+tail -f logs/display.log
+tail -f logs/updater.log
+```
+
+### WiFi Management
+
+```bash
+# Check current WiFi status
+cd /home/pi/LED_MATRIX-Project
+venv/bin/python3 -m src.wifi.manager status
+
+# Scan for networks
+venv/bin/python3 -m src.wifi.manager scan
+
+# Reconnect to WiFi
+venv/bin/python3 -m src.wifi.manager connect
+```
+
+### Web Control Panel
+
+```bash
+# Web panel service
+sudo systemctl status led-matrix-web.service
+sudo systemctl restart led-matrix-web.service
+
+# View web panel logs
+journalctl -u led-matrix-web.service -f
+```
+
+Access at `http://<pi-ip>:5000` from any device on the same network.
+
+## How Auto-Update Works
+
+1. A systemd timer triggers every 30 minutes (configurable)
+2. The updater script ensures WiFi connectivity
+3. Runs `git fetch` to check for remote changes
+4. If the remote branch has new commits:
+   - Stashes local changes
+   - Pulls updates (`git pull --ff-only`)
+   - Reinstalls Python dependencies
+   - Restarts the display service
+5. All activity is logged to `logs/updater.log`
+
+## Development (Windows/macOS)
+
+The project includes a pygame-based LED matrix simulator for development without Pi hardware:
+
+```bash
+# Install dependencies (pygame installs automatically on Windows/macOS)
+pip install -r requirements.txt
+
+# Run with simulator
+python src/main.py
+```
+
+A window will open showing a virtual 64x64 LED matrix. Each pixel is rendered as a small square with gaps to simulate the LED grid appearance.
+
+### Config Validation
+
+Validate your configuration files before deploying:
+
+```bash
+python -m src.config_validator
+```
+
+### WiFi Diagnostics
+
+Test WiFi connectivity and captive portal detection:
+
+```bash
+python -m src.wifi.manager status
+python -m src.wifi.manager portal
+python -m src.wifi.manager scan
+```
+
+### Testing
+
+Run the test suite (uses the simulator, no Pi hardware needed):
+
+```bash
+pytest
+```
+
+80 tests across 5 files. Tests cover:
+- Simulator API compliance (pixel buffer, matrix, canvas, graphics)
+- Config validation (schema errors, warnings, edge cases)
+- Display module interface (all 7 modules have `run(matrix, duration)`)
+- Integration (full feature cycle, crash recovery, config validation)
+- Web endpoints (authentication, routes, API, config management)
+
+Test files: `test_simulator.py`, `test_config_validator.py`, `test_display_modules.py`, `test_integration.py`, `test_web.py`
+
+## Hardware Requirements
+
+- Raspberry Pi (any model with GPIO headers)
+- 64x64 RGB LED Matrix panel
+- Adafruit RGB Matrix HAT or Bonnet
+- 5V power supply (4A+ recommended)
+- WiFi connectivity (built-in or USB adapter)
 
 ## License
+
+See repository for license information.
