@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}YouTube - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>YouTube Player</h1>
+
+<div class="card">
+    <h2>Play a URL</h2>
+    <form id="custom-url-form" onsubmit="playCustomUrl(event)">
+        <div class="form-group">
+            <label for="custom_url">YouTube URL</label>
+            <input type="text" id="custom_url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Play Now</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Playlist</h2>
+    <p class="card-hint">Tap a video to play it instantly on the LED matrix.</p>
+
+    {% if videos %}
+    <div class="video-list">
+        {% for video in videos %}
+        <div class="video-item" onclick="playVideo('{{ video.url }}', '{{ video.title }}')">
+            <div class="video-info">
+                <span class="video-title">{{ video.title }}</span>
+                <span class="video-url">{{ video.url | truncate(50) }}</span>
+            </div>
+            <span class="video-play-btn">&#9654;</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No videos in playlist. Add URLs to config/youtube_urls.csv</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Manage Playlist</h2>
+    <form method="POST" action="{{ url_for('youtube') }}">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+            <label for="new_url">YouTube URL</label>
+            <input type="text" id="new_url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="new_title">Title</label>
+                <input type="text" id="new_title" name="title" placeholder="Video name" required>
+            </div>
+            <div class="form-group">
+                <label for="new_duration">Duration (min, x=full)</label>
+                <input type="text" id="new_duration" name="duration" value="x" placeholder="x">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Add to Playlist</button>
+    </form>
+
+    {% if videos %}
+    <div class="video-manage-list" style="margin-top: 1rem;">
+        {% for video in videos %}
+        <div class="video-manage-item">
+            <span>{{ video.title }}</span>
+            <form method="POST" action="{{ url_for('youtube') }}" class="inline-form">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="index" value="{{ loop.index0 }}">
+                <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Remove {{ video.title }}?')">Remove</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function playVideo(url, title) {
+    if (confirm('Play "' + title + '" now?')) {
+        fetch('{{ url_for("api_play_video") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: url, title: title})
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                document.querySelector('.container').insertAdjacentHTML('afterbegin',
+                    '<div class="alert alert-success">Now playing: ' + title + '</div>');
+            } else {
+                alert('Error: ' + d.message);
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+    }
+}
+
+function playCustomUrl(e) {
+    e.preventDefault();
+    var url = document.getElementById('custom_url').value;
+    fetch('{{ url_for("api_play_video") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url, title: 'Custom URL'})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.success) {
+            document.querySelector('.container').insertAdjacentHTML('afterbegin',
+                '<div class="alert alert-success">Now playing custom URL</div>');
+        } else {
+            alert('Error: ' + d.message);
+        }
+    })
+    .catch(e => alert('Error: ' + e));
+}
+</script>
+{% endblock %}

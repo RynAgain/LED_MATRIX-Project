@@ -16,10 +16,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Known feature names that map to display modules
 VALID_FEATURE_NAMES = {
     "tic_tac_toe", "snake", "pong", "billiards",
-    "time_display", "bitcoin_price", "youtube_stream"
+    "time_display", "bitcoin_price", "youtube_stream",
+    "fire", "plasma", "matrix_rain", "starfield",
+    "game_of_life", "rainbow_waves", "weather", "text_scroller",
+    "stock_ticker", "sp500_heatmap", "binary_clock"
 }
 
-VALID_FEATURE_TYPES = {"game", "utility", "video"}
+VALID_FEATURE_TYPES = {"game", "utility", "video", "effect"}
 
 
 class ConfigValidationError:

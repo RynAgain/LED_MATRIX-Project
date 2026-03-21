@@ -478,6 +478,77 @@ body {
     padding: 1.5rem;
 }
 
+/* --- Video List (YouTube page) --- */
+.video-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.video-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.video-item:hover {
+    background: #1e2a4a;
+}
+
+.video-item:active {
+    background: #243050;
+}
+
+.video-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.video-title {
+    font-weight: 500;
+    display: block;
+}
+
+.video-url {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.video-play-btn {
+    font-size: 1.5rem;
+    color: var(--accent-primary);
+    flex-shrink: 0;
+    margin-left: 0.75rem;
+}
+
+.video-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.video-manage-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.video-manage-item:last-child {
+    border-bottom: none;
+}
+
 /* --- Headings --- */
 h1 {
     font-size: 1.5rem;

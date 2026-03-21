@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Stocks - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>Stock Ticker</h1>
+
+<div class="card">
+    <h2>Tracked Stocks</h2>
+    <p class="card-hint">These symbols cycle on the stock ticker display (5 seconds each).</p>
+
+    {% if symbols %}
+    <div class="video-list">
+        {% for sym in symbols %}
+        <div class="video-item" style="cursor: default;">
+            <div class="video-info">
+                <span class="video-title">{{ sym }}</span>
+            </div>
+            <form method="POST" action="{{ url_for('stocks') }}" class="inline-form">
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="index" value="{{ loop.index0 }}">
+                <button type="submit" class="btn btn-danger btn-small">Remove</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No stocks tracked. Add some below.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Add Stock Symbol</h2>
+    <form method="POST" action="{{ url_for('stocks') }}">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+            <label for="symbol">Ticker Symbol</label>
+            <input type="text" id="symbol" name="symbol" required placeholder="e.g., AMZN, AAPL, TSLA" 
+                   style="text-transform: uppercase;" maxlength="10">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Add Symbol</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Quick Actions</h2>
+    <form method="POST" action="{{ url_for('stocks') }}">
+        <input type="hidden" name="action" value="play">
+        <button type="submit" class="btn btn-info btn-full">Show Stock Ticker Now</button>
+    </form>
+</div>
+{% endblock %}

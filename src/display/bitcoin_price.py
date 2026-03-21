@@ -31,14 +31,30 @@ def display_bitcoin_price_on_matrix(matrix, canvas, price):
     matrix.SetImage(image)
 
 def fetch_bitcoin_price():
-    url = "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
+    """Fetch current Bitcoin price in USD.
+    
+    Tries CoinGecko free API first, falls back to alternative sources.
+    """
+    # CoinGecko free API (no key required)
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10, headers={"Accept": "application/json"})
+        response.raise_for_status()
         data = response.json()
-        price = data['bpi']['USD']['rate']
-        return price
+        price = data["bitcoin"]["usd"]
+        return f"{price:,.2f}"
     except Exception as e:
-        print(f"Error fetching Bitcoin price: {e}")
+        logging.getLogger(__name__).warning("CoinGecko API failed: %s", e)
+
+    # Fallback: CoinCap API
+    try:
+        response = requests.get("https://api.coincap.io/v2/assets/bitcoin", timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        price = float(data["data"]["priceUsd"])
+        return f"{price:,.2f}"
+    except Exception as e:
+        logging.getLogger(__name__).error("All price APIs failed: %s", e)
         return None
 
 def main(matrix, canvas):

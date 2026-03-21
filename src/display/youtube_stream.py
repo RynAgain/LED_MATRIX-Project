@@ -24,12 +24,23 @@ def read_urls_from_csv(file_path):
         print(f"Error reading CSV file: {str(e)}")
         sys.exit(1)
 
+# Target frame rate for video playback
+TARGET_FPS = 30
+FRAME_INTERVAL = 1.0 / TARGET_FPS  # ~0.033s per frame
+
+
 def stream_video(url):
-    """Stream video using yt_dlp and return the video URL."""
+    """Stream video using yt_dlp and return the video URL.
+    
+    Requests the lowest reasonable quality since we resize to 64x64 anyway.
+    This reduces bandwidth and decode time significantly.
+    """
     ydl_opts = {
-        'format': 'best',
+        # Prefer lowest resolution with video+audio, fallback to best
+        'format': 'worst[ext=mp4]/worst/best[height<=480]/best',
         'quiet': True,
-        'nocache': True
+        'nocache': True,
+        'no_warnings': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=False)
@@ -67,6 +78,8 @@ def stream_youtube_videos(urls, matrix):
                     print(f"Invalid duration '{duration}' for video '{title}'. Playing full video.")
             
             while cap.isOpened():
+                frame_start = time.time()
+                
                 ret, frame = cap.read()
                 if not ret:
                     break
@@ -77,8 +90,8 @@ def stream_youtube_videos(urls, matrix):
                     print("Specified playback time reached. Stopping video.")
                     break
                 
-                # Resize frame to 64x64
-                frame = cv2.resize(frame, (64, 64))
+                # Resize frame to 64x64 (INTER_NEAREST is fastest for downscale)
+                frame = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_NEAREST)
                 
                 # Convert from BGR to RGB
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -89,8 +102,11 @@ def stream_youtube_videos(urls, matrix):
                 # Display on matrix
                 matrix.SetImage(image)
                 
-                # Control playback speed
-                time.sleep(0.1)
+                # Maintain target frame rate (~30 FPS)
+                elapsed = time.time() - frame_start
+                sleep_time = FRAME_INTERVAL - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
             
             cap.release()
             print("\nPlayback finished.")
@@ -161,6 +177,8 @@ def run(matrix, duration=60):
 
             vid_start = time.time()
             while cap.isOpened():
+                frame_start = time.time()
+                
                 if time.time() - start_time >= duration:
                     break
                 if max_vid_duration and time.time() - vid_start >= max_vid_duration:
@@ -170,11 +188,17 @@ def run(matrix, duration=60):
                 if not ret:
                     break
 
-                frame = cv2.resize(frame, (64, 64))
+                # INTER_NEAREST is fastest for extreme downscaling
+                frame = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_NEAREST)
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = Image.fromarray(frame)
                 matrix.SetImage(image)
-                time.sleep(0.1)
+                
+                # Maintain target frame rate (~30 FPS)
+                elapsed = time.time() - frame_start
+                sleep_time = FRAME_INTERVAL - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
             cap.release()
 

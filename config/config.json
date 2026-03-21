@@ -1,27 +1,27 @@
 {
   "github_branch": "main",
-  "display_duration": 30,
-  "log_level": "DEBUG",
+  "display_duration": 60,
+  "log_level": "INFO",
   "sequence": [
     {
       "name": "tic_tac_toe",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "snake",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "pong",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "billiards",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "time_display",
@@ -31,11 +31,66 @@
     {
       "name": "bitcoin_price",
       "type": "utility",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "youtube_stream",
       "type": "video",
+      "enabled": false
+    },
+    {
+      "name": "fire",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "plasma",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "matrix_rain",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "starfield",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "game_of_life",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "rainbow_waves",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "weather",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "text_scroller",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "stock_ticker",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "sp500_heatmap",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "binary_clock",
+      "type": "utility",
       "enabled": true
     }
   ]

@@ -70,6 +70,98 @@ def sighup_handler(signum, frame):
     logger.info("Received SIGHUP, config will reload on next cycle")
 
 
+COMMAND_PATH = os.path.join(PROJECT_ROOT, "logs", "command.json")
+
+
+def check_command():
+    """Check for and consume a command from the web panel.
+    
+    Returns:
+        dict with 'command' and 'data' keys, or None if no command.
+    """
+    try:
+        if os.path.exists(COMMAND_PATH):
+            mtime = os.path.getmtime(COMMAND_PATH)
+            # Only process commands less than 30 seconds old
+            if time.time() - mtime < 30:
+                with open(COMMAND_PATH, "r") as f:
+                    cmd = json.load(f)
+                # Delete the command file so it's not processed again
+                os.remove(COMMAND_PATH)
+                logger.info("Command received: %s", cmd.get("command"))
+                return cmd
+            else:
+                # Stale command, remove it
+                os.remove(COMMAND_PATH)
+    except (json.JSONDecodeError, OSError, KeyError):
+        pass
+    return None
+
+
+def handle_play_video(matrix, url, title="Unknown", duration=300):
+    """Handle a play_video command by streaming a YouTube video.
+    
+    Args:
+        matrix: RGBMatrix instance.
+        url: YouTube video URL.
+        title: Video title for logging.
+        duration: Max playback duration in seconds.
+    """
+    logger.info("Playing video: %s (%s)", title, url)
+    write_status(f"YouTube: {title}", "running")
+    try:
+        from src.display.youtube_stream import stream_video, FRAME_INTERVAL
+        import cv2
+        from PIL import Image
+
+        video_url = stream_video(url)
+        cap = cv2.VideoCapture(video_url)
+        if not cap.isOpened():
+            logger.error("Failed to open video stream: %s", video_url)
+            return
+
+        start = time.time()
+        while cap.isOpened() and not _shutdown:
+            frame_start = time.time()
+
+            # Check for new commands (allows interrupting)
+            new_cmd = check_command()
+            if new_cmd:
+                # Re-write the command for the main loop to pick up
+                try:
+                    with open(COMMAND_PATH, "w") as f:
+                        json.dump(new_cmd, f)
+                except Exception:
+                    pass
+                break
+
+            if time.time() - start >= duration:
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_NEAREST)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            image = Image.fromarray(frame)
+            matrix.SetImage(image)
+
+            elapsed = time.time() - frame_start
+            sleep_time = FRAME_INTERVAL - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        cap.release()
+    except Exception as e:
+        logger.error("Video playback error: %s", e, exc_info=True)
+    finally:
+        try:
+            matrix.Clear()
+        except Exception:
+            pass
+
+
 def load_config():
     """
     Load display sequence configuration.
@@ -170,6 +262,7 @@ def _register_simulator_modules():
 
 # Map of feature names to their module paths
 FEATURE_MODULES = {
+    # Existing
     "tic_tac_toe": "src.display.tic_tac_toe",
     "snake": "src.display.snake",
     "pong": "src.display.pong",
@@ -177,6 +270,19 @@ FEATURE_MODULES = {
     "time_display": "src.display.time_display",
     "bitcoin_price": "src.display.bitcoin_price",
     "youtube_stream": "src.display.youtube_stream",
+    # New visual effects
+    "fire": "src.display.fire",
+    "plasma": "src.display.plasma",
+    "matrix_rain": "src.display.matrix_rain",
+    "starfield": "src.display.starfield",
+    "game_of_life": "src.display.game_of_life",
+    "rainbow_waves": "src.display.rainbow_waves",
+    # New info displays
+    "weather": "src.display.weather",
+    "text_scroller": "src.display.text_scroller",
+    "stock_ticker": "src.display.stock_ticker",
+    "sp500_heatmap": "src.display.sp500_heatmap",
+    "binary_clock": "src.display.binary_clock",
 }
 
 
@@ -321,6 +427,27 @@ def main():
         for feature in enabled_features:
             if _shutdown:
                 break
+
+            # Check for commands from the web panel before each feature
+            cmd = check_command()
+            if cmd:
+                cmd_type = cmd.get("command")
+                cmd_data = cmd.get("data", {})
+
+                if cmd_type == "play_video":
+                    url = cmd_data.get("url")
+                    title = cmd_data.get("title", "Unknown")
+                    if url:
+                        handle_play_video(matrix, url, title, duration=duration)
+                    continue  # Skip to next iteration to check for more commands
+
+                elif cmd_type == "play_feature":
+                    feat_name = cmd_data.get("feature")
+                    if feat_name:
+                        logger.info("Switching to feature: %s", feat_name)
+                        write_status(feat_name, "running")
+                        run_feature(feat_name, matrix, duration)
+                    continue
 
             name = feature.get("name", "unknown")
             write_status(name, "running")
