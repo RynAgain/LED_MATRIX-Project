@@ -21,7 +21,8 @@ VALID_FEATURE_NAMES = {
     "game_of_life", "rainbow_waves", "weather", "text_scroller",
     "stock_ticker", "sp500_heatmap", "binary_clock", "countdown",
     "lava_lamp", "qr_code", "slideshow",
-    "galaga", "space_invaders", "logo_wholefoods"
+    "galaga", "space_invaders", "logo_wholefoods",
+    "github_stats", "tanks"
 }
 
 VALID_FEATURE_TYPES = {"game", "utility", "video", "effect"}

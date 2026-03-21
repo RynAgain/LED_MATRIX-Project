@@ -76,7 +76,7 @@
     {
       "name": "text_scroller",
       "type": "utility",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "stock_ticker",
@@ -127,7 +127,17 @@
     {
       "name": "logo_wholefoods",
       "type": "utility",
+      "enabled": true
+    },
+    {
+      "name": "github_stats",
+      "type": "utility",
       "enabled": false
+    },
+    {
+      "name": "tanks",
+      "type": "game",
+      "enabled": true
     }
   ]
 }
