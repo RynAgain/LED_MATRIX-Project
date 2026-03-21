@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}QR Code - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>QR Code Display</h1>
+
+<div class="card">
+    <h2>Configure QR Code</h2>
+    <form method="POST" action="{{ url_for('qr_page') }}">
+        <div class="form-group">
+            <label for="content">Content (URL or text)</label>
+            <input type="text" id="content" name="content" value="{{ config.get('content', '') }}" 
+                   placeholder="https://example.com" required>
+        </div>
+        <div class="form-group">
+            <label for="label">Label (optional, shown below QR)</label>
+            <input type="text" id="label" name="label" value="{{ config.get('label', '') }}" 
+                   placeholder="Scan Me" maxlength="10">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Show QR Code</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Quick QR Codes</h2>
+    <div class="action-grid">
+        <button class="btn btn-info" onclick="quickQR('WIFI:T:WPA;S:MyWiFi;P:password;;', 'WiFi')">WiFi QR</button>
+        <button class="btn btn-info" onclick="quickQR('https://github.com/RynAgain/LED_MATRIX-Project', 'GitHub')">GitHub</button>
+    </div>
+</div>
+
+<script>
+function quickQR(content, label) {
+    fetch('{{ url_for("api_qr") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content: content, label: label})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.success) {
+            document.querySelector('.container').insertAdjacentHTML('afterbegin',
+                '<div class="alert alert-success">QR code displayed!</div>');
+        }
+    });
+}
+</script>
+{% endblock %}

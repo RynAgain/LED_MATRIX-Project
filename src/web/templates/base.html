@@ -18,6 +18,8 @@
             <a href="{{ url_for('youtube') }}" class="{% if request.endpoint == 'youtube' %}active{% endif %}">YouTube</a>
             <a href="{{ url_for('messages') }}" class="{% if request.endpoint == 'messages' %}active{% endif %}">Messages</a>
             <a href="{{ url_for('stocks') }}" class="{% if request.endpoint == 'stocks' %}active{% endif %}">Stocks</a>
+            <a href="{{ url_for('countdown_page') }}" class="{% if request.endpoint == 'countdown_page' %}active{% endif %}">Timer</a>
+            <a href="{{ url_for('pixel_editor') }}" class="{% if request.endpoint == 'pixel_editor' %}active{% endif %}">Draw</a>
             <a href="{{ url_for('wifi') }}" class="{% if request.endpoint == 'wifi' %}active{% endif %}">WiFi</a>
             <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}">Settings</a>
             <a href="{{ url_for('logout') }}" class="nav-logout">Logout</a>

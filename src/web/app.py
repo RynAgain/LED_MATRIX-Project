@@ -22,6 +22,65 @@ from flask import (
 
 logger = logging.getLogger(__name__)
 
+
+# --- Password hashing utilities ---
+
+def _hash_password(password, salt=None):
+    """Hash a password with SHA-256 + salt."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}:{hashed}"
+
+
+def _verify_password(password, stored_hash):
+    """Verify a password against a stored hash. Also accepts plaintext for migration."""
+    if ':' in stored_hash and len(stored_hash) > 40:
+        # Hashed format: salt:hash
+        salt = stored_hash.split(':')[0]
+        return _hash_password(password, salt) == stored_hash
+    else:
+        # Plaintext (legacy) - verify directly
+        return password == stored_hash
+
+
+# --- Rate limiting for login attempts ---
+
+_login_attempts = {}  # IP -> (count, last_attempt_time)
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_SECONDS = 300  # 5 minutes
+
+
+def _check_rate_limit(ip):
+    """Check if IP is rate limited. Returns (allowed, message)."""
+    now = time.time()
+    if ip in _login_attempts:
+        count, last_time = _login_attempts[ip]
+        # Reset if lockout period passed
+        if now - last_time > LOCKOUT_SECONDS:
+            del _login_attempts[ip]
+            return True, ""
+        if count >= MAX_LOGIN_ATTEMPTS:
+            remaining = int(LOCKOUT_SECONDS - (now - last_time))
+            return False, f"Too many failed attempts. Try again in {remaining}s."
+    return True, ""
+
+
+def _record_failed_login(ip):
+    """Record a failed login attempt."""
+    now = time.time()
+    if ip in _login_attempts:
+        count, _ = _login_attempts[ip]
+        _login_attempts[ip] = (count + 1, now)
+    else:
+        _login_attempts[ip] = (1, now)
+
+
+def _clear_login_attempts(ip):
+    """Clear failed attempts on successful login."""
+    _login_attempts.pop(ip, None)
+
+
 # Project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,6 +92,10 @@ COMMAND_PATH = os.path.join(PROJECT_ROOT, "logs", "command.json")
 WIFI_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "wifi.json")
 MESSAGES_PATH = os.path.join(PROJECT_ROOT, "config", "messages.json")
 STOCKS_PATH = os.path.join(PROJECT_ROOT, "config", "stocks.json")
+COUNTDOWN_PATH = os.path.join(PROJECT_ROOT, "config", "countdown.json")
+QR_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "qr.json")
+WEATHER_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "weather.json")
+SCHEDULE_PATH = os.path.join(PROJECT_ROOT, "config", "schedule.json")
 STATUS_PATH = os.path.join(PROJECT_ROOT, "logs", "status.json")
 PID_PATH = os.path.join(PROJECT_ROOT, "logs", "display.pid")
 
@@ -132,6 +195,79 @@ def save_stocks(symbols):
         return True
     except Exception as e:
         logger.error("Failed to save stocks: %s", e)
+        return False
+
+
+def load_countdown():
+    """Load countdown timer configuration."""
+    try:
+        with open(COUNTDOWN_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"label": "Timer", "seconds": 300}
+
+
+def save_countdown(data):
+    """Save countdown timer configuration."""
+    try:
+        with open(COUNTDOWN_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def load_weather_config():
+    """Load weather location configuration."""
+    try:
+        with open(WEATHER_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"lat": 30.27, "lon": -97.74, "city": "Austin, TX"}
+
+
+def save_weather_config(data):
+    """Save weather location configuration."""
+    try:
+        with open(WEATHER_CONFIG_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def load_qr_config():
+    """Load QR code configuration."""
+    try:
+        with open(QR_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"content": "https://github.com/RynAgain/LED_MATRIX-Project", "label": "Scan Me"}
+
+
+def save_qr_config(data):
+    """Save QR code configuration."""
+    try:
+        with open(QR_CONFIG_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def load_schedule():
+    try:
+        with open(SCHEDULE_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"enabled": False, "night_mode": {"enabled": False, "start_hour": 22, "end_hour": 7, "brightness": 20}}
+
+def save_schedule(data):
+    try:
+        with open(SCHEDULE_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
         return False
 
 
@@ -264,17 +400,27 @@ def create_app():
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
+            ip = request.remote_addr
+
+            # Check rate limit
+            allowed, msg = _check_rate_limit(ip)
+            if not allowed:
+                flash(msg, "error")
+                return render_template("login.html")
+
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
 
-            if username in users and users[username] == password:
+            if username in users and _verify_password(password, users[username]):
                 session.permanent = True
                 session["user"] = username
-                logger.info("User '%s' logged in from %s", username, request.remote_addr)
+                _clear_login_attempts(ip)
+                logger.info("User '%s' logged in from %s", username, ip)
                 return redirect(url_for("dashboard"))
             else:
+                _record_failed_login(ip)
                 flash("Invalid username or password", "error")
-                logger.warning("Failed login attempt for '%s' from %s", username, request.remote_addr)
+                logger.warning("Failed login attempt for '%s' from %s", username, ip)
 
         return render_template("login.html")
 
@@ -306,6 +452,17 @@ def create_app():
             for feature in sequence:
                 key = f"feature_{feature['name']}"
                 feature["enabled"] = key in request.form
+
+                # Per-feature duration
+                dur_key = f"duration_{feature['name']}"
+                dur_val = request.form.get(dur_key, "").strip()
+                if dur_val:
+                    try:
+                        feature["duration"] = int(dur_val)
+                    except ValueError:
+                        pass
+                elif "duration" in feature:
+                    del feature["duration"]  # Remove if cleared
 
             # Update display duration
             try:
@@ -370,13 +527,40 @@ def create_app():
         config = load_display_config()
 
         if request.method == "POST":
+            section = request.form.get("section")
+            if section == "weather":
+                try:
+                    lat = float(request.form.get("lat", 30.27))
+                    lon = float(request.form.get("lon", -97.74))
+                    save_weather_config({"lat": lat, "lon": lon})
+                    flash("Weather location saved", "success")
+                except ValueError:
+                    flash("Invalid coordinates", "error")
+                return redirect(url_for("settings"))
+
+            elif section == "schedule":
+                sched = load_schedule()
+                sched["enabled"] = True
+                sched["night_mode"] = {
+                    "enabled": "night_enabled" in request.form,
+                    "start_hour": int(request.form.get("night_start", 22)),
+                    "end_hour": int(request.form.get("night_end", 7)),
+                    "brightness": int(request.form.get("night_brightness", 20)),
+                    "allowed_features": ["time_display", "binary_clock"]
+                }
+                save_schedule(sched)
+                flash("Night mode settings saved", "success")
+                return redirect(url_for("settings"))
+
             config["github_branch"] = request.form.get("github_branch", "main").strip()
             config["log_level"] = request.form.get("log_level", "INFO")
             save_display_config(config)
             flash("Settings saved", "success")
             return redirect(url_for("settings"))
 
-        return render_template("settings.html", config=config, user=session.get("user"))
+        weather_config = load_weather_config()
+        schedule_config = load_schedule()
+        return render_template("settings.html", config=config, weather_config=weather_config, schedule_config=schedule_config, user=session.get("user"))
 
     @app.route("/api/status")
     @login_required
@@ -547,6 +731,181 @@ def create_app():
             return redirect(url_for("stocks"))
 
         return render_template("stocks.html", symbols=symbols, user=session.get("user"))
+
+    @app.route("/api/brightness", methods=["POST"])
+    @login_required
+    def api_brightness():
+        """Set display brightness."""
+        data = request.get_json()
+        if not data or "brightness" not in data:
+            return jsonify({"success": False, "message": "Missing 'brightness'"})
+
+        brightness = max(10, min(100, int(data["brightness"])))
+        success = send_command("set_brightness", {"brightness": brightness})
+        if success:
+            return jsonify({"success": True, "message": f"Brightness set to {brightness}%"})
+        return jsonify({"success": False, "message": "Failed to send command"})
+
+    @app.route("/countdown", methods=["GET", "POST"])
+    @login_required
+    def countdown_page():
+        config = load_countdown()
+        if request.method == "POST":
+            label = request.form.get("label", "Timer").strip()[:10]
+            hours = int(request.form.get("hours", 0))
+            minutes = int(request.form.get("minutes", 5))
+            secs = int(request.form.get("secs", 0))
+            total = hours * 3600 + minutes * 60 + secs
+            save_countdown({"label": label, "seconds": total})
+            send_command("play_feature", {"feature": "countdown"})
+            flash(f"Countdown started: {label}", "success")
+            return redirect(url_for("countdown_page"))
+        return render_template("countdown.html", config=config, user=session.get("user"))
+
+    @app.route("/api/countdown", methods=["POST"])
+    @login_required
+    def api_countdown():
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False})
+        seconds = data.get("seconds", 300)
+        label = data.get("label", "Timer")
+        save_countdown({"label": label, "seconds": seconds})
+        send_command("play_feature", {"feature": "countdown"})
+        return jsonify({"success": True, "message": f"Countdown: {label}"})
+
+    @app.route("/qr", methods=["GET", "POST"])
+    @login_required
+    def qr_page():
+        config = load_qr_config()
+        if request.method == "POST":
+            content = request.form.get("content", "").strip()
+            label = request.form.get("label", "").strip()[:10]
+            if content:
+                save_qr_config({"content": content, "label": label})
+                send_command("play_feature", {"feature": "qr_code"})
+                flash("QR code displayed", "success")
+            return redirect(url_for("qr_page"))
+        return render_template("qr.html", config=config, user=session.get("user"))
+
+    @app.route("/api/qr", methods=["POST"])
+    @login_required
+    def api_qr():
+        data = request.get_json()
+        if not data or "content" not in data:
+            return jsonify({"success": False})
+        save_qr_config({"content": data["content"], "label": data.get("label", "")})
+        send_command("play_feature", {"feature": "qr_code"})
+        return jsonify({"success": True, "message": "QR code displayed"})
+
+    @app.route("/api/preview")
+    @login_required
+    def api_preview():
+        """Get a base64 PNG of the current matrix display."""
+        try:
+            import src.main as main_module
+            matrix = getattr(main_module, '_matrix_ref', None)
+            if matrix and hasattr(matrix, 'get_frame_base64'):
+                data = matrix.get_frame_base64()
+                return jsonify({"success": True, "image": data})
+        except Exception as e:
+            logger.debug("Preview failed: %s", e)
+        return jsonify({"success": False, "message": "Preview not available"})
+
+    @app.route("/pixel-editor")
+    @login_required
+    def pixel_editor():
+        return render_template("pixel_editor.html", user=session.get("user"))
+
+    @app.route("/api/pixel-art", methods=["POST"])
+    @login_required
+    def api_pixel_art():
+        """Send pixel art directly to the matrix."""
+        data = request.get_json()
+        if not data or "pixels" not in data:
+            return jsonify({"success": False})
+        
+        # Save pixel data as a command
+        pixel_path = os.path.join(PROJECT_ROOT, "logs", "pixel_art.json")
+        try:
+            with open(pixel_path, "w") as f:
+                json.dump({"pixels": data["pixels"]}, f)
+            send_command("show_pixel_art", {})
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
+    @app.route("/api/save-pixel-art", methods=["POST"])
+    @login_required
+    def api_save_pixel_art():
+        """Save pixel art as an image file for the slideshow."""
+        data = request.get_json()
+        if not data or "pixels" not in data:
+            return jsonify({"success": False})
+        
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.new("RGB", (64, 64))
+            img_pixels = img.load()
+            for y in range(64):
+                for x in range(64):
+                    if y < len(data["pixels"]) and x < len(data["pixels"][y]):
+                        c = data["pixels"][y][x]
+                        img_pixels[x, y] = (c[0], c[1], c[2])
+            
+            images_dir = os.path.join(PROJECT_ROOT, "config", "images")
+            os.makedirs(images_dir, exist_ok=True)
+            
+            import datetime
+            fname = f"pixel_art_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            img.save(os.path.join(images_dir, fname))
+            return jsonify({"success": True, "filename": fname})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
+    @app.route("/change-password", methods=["GET", "POST"])
+    @login_required
+    def change_password():
+        if request.method == "POST":
+            current = request.form.get("current_password", "")
+            new_pass = request.form.get("new_password", "")
+            confirm = request.form.get("confirm_password", "")
+
+            username = session.get("user")
+            if not username or username not in users:
+                flash("Invalid session", "error")
+                return redirect(url_for("login"))
+
+            if not _verify_password(current, users[username]):
+                flash("Current password is incorrect", "error")
+                return redirect(url_for("change_password"))
+
+            if len(new_pass) < 4:
+                flash("Password must be at least 4 characters", "error")
+                return redirect(url_for("change_password"))
+
+            if new_pass != confirm:
+                flash("New passwords don't match", "error")
+                return redirect(url_for("change_password"))
+
+            # Hash and save
+            hashed = _hash_password(new_pass)
+            web_config = load_web_config()
+            web_config["users"][username] = hashed
+            try:
+                with open(WEB_CONFIG_PATH, "w") as f:
+                    json.dump(web_config, f, indent=2)
+                # Update in-memory users dict
+                users[username] = hashed
+                flash("Password changed successfully", "success")
+                logger.info("Password changed for user '%s'", username)
+            except Exception as e:
+                flash("Failed to save password", "error")
+                logger.error("Failed to save password: %s", e)
+
+            return redirect(url_for("settings"))
+
+        return render_template("change_password.html", user=session.get("user"))
 
     return app
 

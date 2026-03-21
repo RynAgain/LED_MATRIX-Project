@@ -42,3 +42,13 @@ Thumbs.db
 
 # Sensitive config (uncomment if wifi.json contains passwords you don't want in repo)
 # config/wifi.json
+
+# Stray files
+$null
+
+# Pixel art and uploaded images (optional, user may want to track these)
+# config/images/*.png
+
+# Cache
+logs/sp500_cache.json
+logs/pixel_art.json

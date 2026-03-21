@@ -19,7 +19,9 @@ VALID_FEATURE_NAMES = {
     "time_display", "bitcoin_price", "youtube_stream",
     "fire", "plasma", "matrix_rain", "starfield",
     "game_of_life", "rainbow_waves", "weather", "text_scroller",
-    "stock_ticker", "sp500_heatmap", "binary_clock"
+    "stock_ticker", "sp500_heatmap", "binary_clock", "countdown",
+    "lava_lamp", "qr_code", "slideshow",
+    "galaga", "space_invaders", "logo_wholefoods"
 }
 
 VALID_FEATURE_TYPES = {"game", "utility", "video", "effect"}

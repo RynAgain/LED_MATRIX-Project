@@ -329,6 +329,26 @@ class RGBMatrix:
         new_canvas = FrameCanvas(self._cols, self._rows)
         return new_canvas
 
+    def get_frame_base64(self):
+        """Export current frame as base64-encoded PNG for web preview."""
+        import io
+        import base64
+        from PIL import Image as PILImage
+        
+        snapshot = self._buffer.get_snapshot()
+        img = PILImage.new("RGB", (self._cols, self._rows))
+        pixels = img.load()
+        for y in range(self._rows):
+            for x in range(self._cols):
+                pixels[x, y] = snapshot[y][x]
+        
+        # Scale up for visibility (64x64 -> 256x256)
+        img = img.resize((256, 256), PILImage.NEAREST)
+        
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
     def __del__(self):
         """Cleanup when the matrix is destroyed."""
         try:

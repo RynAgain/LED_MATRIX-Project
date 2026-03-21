@@ -13,8 +13,14 @@ import os
 import sys
 import time
 import signal
+import threading
+
+from src.display._shared import request_stop, clear_stop, should_stop
 
 logger = logging.getLogger(__name__)
+
+# Global reference for web panel preview access
+_matrix_ref = None
 
 # Project root is one level up from this file
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -283,6 +289,13 @@ FEATURE_MODULES = {
     "stock_ticker": "src.display.stock_ticker",
     "sp500_heatmap": "src.display.sp500_heatmap",
     "binary_clock": "src.display.binary_clock",
+    "countdown": "src.display.countdown",
+    "lava_lamp": "src.display.lava_lamp",
+    "qr_code": "src.display.qr_code",
+    "slideshow": "src.display.slideshow",
+    "galaga": "src.display.galaga",
+    "space_invaders": "src.display.space_invaders",
+    "logo_wholefoods": "src.display.logo_wholefoods",
 }
 
 
@@ -329,6 +342,93 @@ def run_feature(feature_name, matrix, duration):
         except Exception:
             pass
         return False
+
+
+def _check_schedule():
+    """Check if night mode or scheduling should override current settings.
+    
+    Returns:
+        dict with 'brightness' and 'allowed_features' keys, or None for normal mode.
+    """
+    schedule_path = os.path.join(PROJECT_ROOT, "config", "schedule.json")
+    try:
+        with open(schedule_path, "r") as f:
+            sched = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    
+    if not sched.get("enabled", False):
+        return None
+    
+    night = sched.get("night_mode", {})
+    if night.get("enabled", False):
+        from datetime import datetime
+        hour = datetime.now().hour
+        start = night.get("start_hour", 22)
+        end = night.get("end_hour", 7)
+        
+        # Check if current hour is in night range
+        is_night = False
+        if start > end:  # Crosses midnight (e.g., 22-7)
+            is_night = hour >= start or hour < end
+        else:  # Same day (e.g., 1-5)
+            is_night = start <= hour < end
+        
+        if is_night:
+            return {
+                "brightness": night.get("brightness", 20),
+                "allowed_features": night.get("allowed_features", [])
+            }
+    
+    return None
+
+
+def _show_pixel_art(matrix):
+    """Display pixel art from the web editor."""
+    pixel_path = os.path.join(PROJECT_ROOT, "logs", "pixel_art.json")
+    try:
+        with open(pixel_path, "r") as f:
+            data = json.load(f)
+        from PIL import Image as PILImage
+        img = PILImage.new("RGB", (64, 64))
+        pixels = img.load()
+        for y in range(64):
+            for x in range(64):
+                if y < len(data["pixels"]) and x < len(data["pixels"][y]):
+                    c = data["pixels"][y][x]
+                    pixels[x, y] = (c[0], c[1], c[2])
+        matrix.SetImage(img)
+        time.sleep(30)  # Show for 30 seconds
+    except Exception as e:
+        logger.error("Failed to show pixel art: %s", e)
+
+
+def _handle_command(cmd, matrix, duration):
+    """Handle a web panel command."""
+    cmd_type = cmd.get("command")
+    cmd_data = cmd.get("data", {})
+
+    if cmd_type == "play_video":
+        url = cmd_data.get("url")
+        title = cmd_data.get("title", "Unknown")
+        if url:
+            handle_play_video(matrix, url, title, duration=duration)
+    elif cmd_type == "play_feature":
+        feat_name = cmd_data.get("feature")
+        if feat_name:
+            logger.info("Command: switch to %s", feat_name)
+            clear_stop()
+            write_status(feat_name, "running")
+            run_feature(feat_name, matrix, duration)
+    elif cmd_type == "set_brightness":
+        brightness = cmd_data.get("brightness", 100)
+        try:
+            matrix.brightness = brightness
+            logger.info("Brightness set to %d", brightness)
+        except Exception:
+            pass
+    elif cmd_type == "show_pixel_art":
+        _show_pixel_art(matrix)
 
 
 def ensure_wifi():
@@ -421,6 +521,10 @@ def main():
     # Initialize the matrix
     matrix = init_matrix()
 
+    # Store matrix reference for web panel preview
+    import src.main as _self_module
+    _self_module._matrix_ref = matrix
+
     # Main display loop
     logger.info("Entering display loop...")
     while not _shutdown:
@@ -428,34 +532,24 @@ def main():
             if _shutdown:
                 break
 
-            # Check for commands from the web panel before each feature
+            # Check for commands before each feature
             cmd = check_command()
             if cmd:
-                cmd_type = cmd.get("command")
-                cmd_data = cmd.get("data", {})
-
-                if cmd_type == "play_video":
-                    url = cmd_data.get("url")
-                    title = cmd_data.get("title", "Unknown")
-                    if url:
-                        handle_play_video(matrix, url, title, duration=duration)
-                    continue  # Skip to next iteration to check for more commands
-
-                elif cmd_type == "play_feature":
-                    feat_name = cmd_data.get("feature")
-                    if feat_name:
-                        logger.info("Switching to feature: %s", feat_name)
-                        write_status(feat_name, "running")
-                        run_feature(feat_name, matrix, duration)
-                    continue
+                _handle_command(cmd, matrix, duration)
+                continue
 
             name = feature.get("name", "unknown")
+            feat_duration = feature.get("duration", duration)  # Per-feature or global
+            clear_stop()
             write_status(name, "running")
-            run_feature(name, matrix, duration)
+            run_feature(name, matrix, feat_duration)
 
-            # Brief pause between features
+            # Brief pause + command check between features
             if not _shutdown:
-                time.sleep(1)
+                time.sleep(0.5)
+                cmd = check_command()
+                if cmd:
+                    _handle_command(cmd, matrix, duration)
 
         # Reload config between full cycles to pick up changes
         if not _shutdown:
@@ -463,6 +557,22 @@ def main():
             duration = config.get("display_duration", 60)
             sequence = config.get("sequence", [])
             enabled_features = [f for f in sequence if f.get("enabled", False)]
+
+            # Check night mode / scheduling
+            schedule_override = _check_schedule()
+            if schedule_override:
+                # Apply brightness
+                try:
+                    matrix.brightness = schedule_override["brightness"]
+                except Exception:
+                    pass
+                # Filter features if night mode specifies allowed list
+                allowed = schedule_override.get("allowed_features", [])
+                if allowed:
+                    enabled_features = [f for f in enabled_features if f.get("name") in allowed]
+                    if not enabled_features:
+                        # Fallback to time display
+                        enabled_features = [{"name": "time_display", "type": "utility", "enabled": True}]
 
             if not enabled_features:
                 logger.warning("No features enabled after config reload, waiting 30s...")

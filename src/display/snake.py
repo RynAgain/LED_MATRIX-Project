@@ -2,13 +2,13 @@
 Snake -- AI-driven with visual effects on 64x64 LED matrix.
 
 Features:
-- Gradient-colored snake body (bright green head -> dark green tail)
-- Pulsing food effect (grows/shrinks slightly each frame)
+- Uniform 1x1 pixel segments for classic snake look
+- Head distinguished by bright white color, body gradient green
+- Pulsing food effect (color pulse, 1x1 pixel)
 - Food color: bright red, occasional golden food worth double points
 - Death animation (body turns red one segment at a time)
 - Score/length display in corner using small pixel font
 - Faster frame rate for smoother movement
-- Head drawn as 2x2 pixels, body as 1x1 for visual distinction
 - Autonomous AI gameplay
 """
 
@@ -27,7 +27,8 @@ FRAME_DUR = 1.0 / FPS
 BG_COLOR = (0, 0, 0)
 
 # Snake colors (gradient from head to tail)
-HEAD_COLOR = (0, 255, 50)
+HEAD_COLOR = (255, 255, 255)  # Bright white head for visibility
+BODY_COLOR_HEAD = (0, 255, 50)  # Bright green near head
 TAIL_COLOR = (0, 60, 15)
 
 # Food colors
@@ -201,43 +202,30 @@ class SnakeGame:
         """Render the game state."""
         image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
 
-        # Draw snake body with gradient (skip head, draw as 1x1)
+        # Draw snake body with gradient (all 1x1 pixels)
         num_segments = len(self.snake)
         for i, (sx, sy) in enumerate(self.snake):
             if i == 0:
-                continue  # head drawn separately
+                continue  # head drawn separately with distinct color
             t = i / max(num_segments - 1, 1)
-            color = _lerp_color(HEAD_COLOR, TAIL_COLOR, t)
+            color = _lerp_color(BODY_COLOR_HEAD, TAIL_COLOR, t)
             if 0 <= sx < SIZE and 0 <= sy < SIZE:
                 image.putpixel((sx, sy), color)
 
-        # Draw head as 2x2 pixels
+        # Draw head as 1x1 pixel with bright white color
         hx, hy = self.snake[0]
-        for ox in range(2):
-            for oy in range(2):
-                px, py = hx + ox, hy + oy
-                if 0 <= px < SIZE and 0 <= py < SIZE:
-                    image.putpixel((px, py), HEAD_COLOR)
+        if 0 <= hx < SIZE and 0 <= hy < SIZE:
+            image.putpixel((hx, hy), HEAD_COLOR)
 
-        # Draw food with pulsing effect
+        # Draw food as 1x1 pixel with pulsing color
         if self.food:
             fx, fy = self.food
             base_color = FOOD_GOLD if self.food_is_gold else FOOD_RED
             pulse = 0.6 + 0.4 * math.sin(pulse_phase)
             food_color = tuple(int(c * pulse) for c in base_color)
 
-            # Core pixel
             if 0 <= fx < SIZE and 0 <= fy < SIZE:
-                image.putpixel((fx, fy), base_color)
-
-            # Pulsing surrounding pixels
-            pulse_size = 1 if math.sin(pulse_phase) > 0 else 0
-            if pulse_size:
-                dim_color = tuple(c // 3 for c in base_color)
-                for ox, oy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    px, py = fx + ox, fy + oy
-                    if 0 <= px < SIZE and 0 <= py < SIZE:
-                        image.putpixel((px, py), dim_color)
+                image.putpixel((fx, fy), food_color)
 
         # Draw score in top-left corner
         score_color = (200, 200, 200)
@@ -251,10 +239,10 @@ class SnakeGame:
 
         # Draw full snake in current colors first
         num_segments = len(self.snake)
-        colors = []
-        for i in range(num_segments):
+        colors = [HEAD_COLOR]  # head color
+        for i in range(1, num_segments):
             t = i / max(num_segments - 1, 1)
-            colors.append(_lerp_color(HEAD_COLOR, TAIL_COLOR, t))
+            colors.append(_lerp_color(BODY_COLOR_HEAD, TAIL_COLOR, t))
 
         # Animate each segment turning red
         segments_per_frame = max(1, num_segments // 20)  # complete in ~20 frames

@@ -15,6 +15,21 @@ DISPLAY_MODULES = [
     "src.display.time_display",
     "src.display.bitcoin_price",
     "src.display.youtube_stream",
+    "src.display.fire",
+    "src.display.plasma",
+    "src.display.matrix_rain",
+    "src.display.starfield",
+    "src.display.game_of_life",
+    "src.display.rainbow_waves",
+    "src.display.weather",
+    "src.display.text_scroller",
+    "src.display.stock_ticker",
+    "src.display.sp500_heatmap",
+    "src.display.binary_clock",
+    "src.display.countdown",
+    "src.display.lava_lamp",
+    "src.display.qr_code",
+    "src.display.slideshow",
 ]
 
 
@@ -69,6 +84,7 @@ class TestMainModule:
     def test_feature_modules_mapping(self):
         """All feature module paths should be importable."""
         from src.main import FEATURE_MODULES
+        assert len(FEATURE_MODULES) == 22, f"Expected 22 features, got {len(FEATURE_MODULES)}"
         for name, path in FEATURE_MODULES.items():
             mod = importlib.import_module(path)
             assert hasattr(mod, "run"), f"{name} ({path}) missing run()"

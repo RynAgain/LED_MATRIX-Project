@@ -22,11 +22,31 @@
 </div>
 
 <div class="card">
+    <h2>Live Preview</h2>
+    <div style="text-align: center;">
+        <img id="matrix-preview" src="" alt="Matrix Preview"
+             style="width: 200px; height: 200px; image-rendering: pixelated; border: 1px solid var(--border-color); background: black;">
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">Updates every 3 seconds</p>
+    </div>
+</div>
+
+<div class="card">
     <h2>Quick Actions</h2>
     <div class="action-grid">
         <button class="btn btn-warning" onclick="restartService()">Restart Display</button>
         <button class="btn btn-info" onclick="checkUpdate()">Check for Updates</button>
     </div>
+</div>
+
+<div class="card">
+    <h2>Brightness</h2>
+    <div class="form-group">
+        <input type="range" id="brightness-slider" min="10" max="100" value="80"
+               style="width: 100%; accent-color: var(--accent-primary);"
+               oninput="document.getElementById('brightness-val').textContent = this.value + '%'">
+        <span id="brightness-val" style="color: var(--text-secondary);">80%</span>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="setBrightness()">Apply</button>
 </div>
 
 <div class="card">
@@ -59,6 +79,19 @@ function checkUpdate() {
         .catch(e => alert('Error: ' + e));
 }
 
+function setBrightness() {
+    var val = document.getElementById('brightness-slider').value;
+    fetch('{{ url_for("api_brightness") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({brightness: parseInt(val)})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (!d.success) alert(d.message);
+    });
+}
+
 // Auto-refresh status every 5 seconds
 setInterval(function() {
     fetch('{{ url_for("api_status") }}')
@@ -70,5 +103,18 @@ setInterval(function() {
         })
         .catch(() => {});
 }, 5000);
+
+function updatePreview() {
+    fetch('/api/preview')
+        .then(r => r.json())
+        .then(d => {
+            if (d.success && d.image) {
+                document.getElementById('matrix-preview').src = 'data:image/png;base64,' + d.image;
+            }
+        })
+        .catch(() => {});
+}
+setInterval(updatePreview, 3000);
+updatePreview();
 </script>
 {% endblock %}

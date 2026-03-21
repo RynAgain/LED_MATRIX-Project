@@ -168,3 +168,108 @@ class TestAPI:
     def test_api_requires_auth(self, client):
         response = client.get("/api/status")
         assert response.status_code == 302  # Redirect to login
+
+
+class TestNewPages:
+    """Test new web pages."""
+
+    def test_youtube_page(self, auth_client):
+        response = auth_client.get("/youtube")
+        assert response.status_code == 200
+
+    def test_messages_page(self, auth_client):
+        response = auth_client.get("/messages")
+        assert response.status_code == 200
+
+    def test_stocks_page(self, auth_client):
+        response = auth_client.get("/stocks")
+        assert response.status_code == 200
+
+    def test_countdown_page(self, auth_client):
+        response = auth_client.get("/countdown")
+        assert response.status_code == 200
+
+    def test_qr_page(self, auth_client):
+        response = auth_client.get("/qr")
+        assert response.status_code == 200
+
+    def test_pixel_editor(self, auth_client):
+        response = auth_client.get("/pixel-editor")
+        assert response.status_code == 200
+
+    def test_change_password_page(self, auth_client):
+        response = auth_client.get("/change-password")
+        assert response.status_code == 200
+
+
+class TestNewAPIs:
+    """Test new API endpoints."""
+
+    def test_brightness_api(self, auth_client):
+        response = auth_client.post(
+            "/api/brightness",
+            json={"brightness": 50}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+
+    def test_preview_api(self, auth_client):
+        response = auth_client.get("/api/preview")
+        assert response.status_code == 200
+
+    def test_countdown_api(self, auth_client):
+        response = auth_client.post(
+            "/api/countdown",
+            json={"seconds": 60, "label": "Test"}
+        )
+        assert response.status_code == 200
+
+    def test_qr_api(self, auth_client):
+        response = auth_client.post(
+            "/api/qr",
+            json={"content": "https://example.com", "label": "Test"}
+        )
+        assert response.status_code == 200
+
+    def test_play_video_api(self, auth_client):
+        response = auth_client.post(
+            "/api/play",
+            json={"url": "https://youtube.com/watch?v=test", "title": "Test"}
+        )
+        assert response.status_code == 200
+
+
+class TestSecurity:
+    """Test security features."""
+
+    def test_rate_limiting(self, client):
+        """After 5 failed attempts, should be locked out."""
+        for i in range(5):
+            client.post("/login", data={"username": "admin", "password": "wrong"})
+        
+        response = client.post(
+            "/login",
+            data={"username": "admin", "password": "wrong"},
+            follow_redirects=True
+        )
+        assert b"Too many" in response.data
+
+    def test_password_change_wrong_current(self, client):
+        # Clear rate limit state from previous test
+        from src.web.app import _login_attempts
+        _login_attempts.clear()
+        
+        # Log in fresh
+        client.post("/login", data={"username": "admin", "password": "ledmatrix"})
+        
+        response = client.post(
+            "/change-password",
+            data={
+                "current_password": "wrongpassword",
+                "new_password": "newpass",
+                "confirm_password": "newpass"
+            },
+            follow_redirects=True
+        )
+        assert b"incorrect" in response.data.lower()

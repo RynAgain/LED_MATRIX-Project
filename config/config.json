@@ -1,7 +1,7 @@
 {
   "github_branch": "main",
-  "display_duration": 60,
-  "log_level": "INFO",
+  "display_duration": 30,
+  "log_level": "DEBUG",
   "sequence": [
     {
       "name": "tic_tac_toe",
@@ -26,7 +26,7 @@
     {
       "name": "time_display",
       "type": "utility",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "bitcoin_price",
@@ -76,7 +76,7 @@
     {
       "name": "text_scroller",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "stock_ticker",
@@ -91,7 +91,43 @@
     {
       "name": "binary_clock",
       "type": "utility",
-      "enabled": true
+      "enabled": false
+    },
+    {
+      "name": "countdown",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "lava_lamp",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "qr_code",
+      "type": "utility",
+      "enabled": false,
+      "duration": 20
+    },
+    {
+      "name": "slideshow",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "galaga",
+      "type": "game",
+      "enabled": false
+    },
+    {
+      "name": "space_invaders",
+      "type": "game",
+      "enabled": false
+    },
+    {
+      "name": "logo_wholefoods",
+      "type": "utility",
+      "enabled": false
     }
   ]
 }

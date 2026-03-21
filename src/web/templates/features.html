@@ -4,34 +4,56 @@
 <h1>Display Features</h1>
 
 <form method="POST" action="{{ url_for('features') }}">
+    {% set types = {'game': 'Games', 'effect': 'Visual Effects', 'utility': 'Utilities', 'video': 'Media'} %}
+    
+    {% for type_key, type_label in types.items() %}
+    {% set type_features = config.get('sequence', []) | selectattr('type', 'equalto', type_key) | list %}
+    {% if type_features %}
     <div class="card">
-        <h2>Feature Sequence</h2>
-        <p class="card-hint">Toggle features on/off. Changes apply on the next display cycle.</p>
-
+        <h2>{{ type_label }}</h2>
         <div class="feature-toggles">
-            {% for feature in config.get('sequence', []) %}
-            <label class="toggle-row">
+            {% for feature in type_features %}
+            <div class="toggle-row">
                 <div class="toggle-info">
                     <span class="toggle-name">{{ feature.name | replace('_', ' ') | title }}</span>
-                    <span class="toggle-type">{{ feature.type }}</span>
                 </div>
-                <input type="checkbox" name="feature_{{ feature.name }}" 
-                       {% if feature.enabled %}checked{% endif %}>
-                <span class="toggle-switch"></span>
-            </label>
+                <input type="number" name="duration_{{ feature.name }}" 
+                       value="{{ feature.get('duration', '') }}" 
+                       placeholder="{{ config.get('display_duration', 60) }}" 
+                       min="5" max="600" class="duration-input" title="Duration (sec)">
+                <label class="toggle-label">
+                    <input type="checkbox" name="feature_{{ feature.name }}" 
+                           {% if feature.enabled %}checked{% endif %}>
+                    <span class="toggle-switch"></span>
+                </label>
+            </div>
             {% endfor %}
         </div>
     </div>
+    {% endif %}
+    {% endfor %}
 
     <div class="card">
-        <h2>Display Duration</h2>
+        <h2>Global Settings</h2>
         <div class="form-group">
-            <label for="display_duration">Seconds per feature</label>
+            <label for="display_duration">Default duration per feature (seconds)</label>
             <input type="number" id="display_duration" name="display_duration" 
                    value="{{ config.get('display_duration', 60) }}" min="5" max="600">
+        </div>
+        <div class="action-grid" style="margin-top: 0.75rem;">
+            <button type="button" class="btn btn-info btn-small" onclick="toggleAll(true)">Enable All</button>
+            <button type="button" class="btn btn-small" style="background: var(--toggle-off); color: white;" onclick="toggleAll(false)">Disable All</button>
         </div>
     </div>
 
     <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
 </form>
+
+<script>
+function toggleAll(state) {
+    document.querySelectorAll('.toggle-label input[type="checkbox"]').forEach(function(cb) {
+        cb.checked = state;
+    });
+}
+</script>
 {% endblock %}

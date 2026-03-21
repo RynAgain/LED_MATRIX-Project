@@ -3,6 +3,8 @@
 
 import time
 import logging
+import json
+import os
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
@@ -11,9 +13,20 @@ logger = logging.getLogger(__name__)
 WIDTH, HEIGHT = 64, 64
 
 # Open-Meteo free API (no key required)
-# Default: Austin, TX area. User can override via config later.
-DEFAULT_LAT = 30.27
-DEFAULT_LON = -97.74
+
+
+def _load_location():
+    """Load weather location from config."""
+    config_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config", "weather.json"
+    )
+    try:
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        return data.get("lat", 30.27), data.get("lon", -97.74)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 30.27, -97.74
 
 WMO_CODES = {
     0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
@@ -39,8 +52,10 @@ WMO_COLORS = {
 }
 
 
-def _fetch_weather(lat=DEFAULT_LAT, lon=DEFAULT_LON):
+def _fetch_weather(lat=None, lon=None):
     """Fetch current weather from Open-Meteo (free, no API key)."""
+    if lat is None or lon is None:
+        lat, lon = _load_location()
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}"

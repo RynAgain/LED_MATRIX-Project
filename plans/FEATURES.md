@@ -45,15 +45,33 @@
 
 ---
 
-## Display Features (existing -- preserve and migrate)
+## Display Features (19 modes)
 
+### Games
 - [x] Tic Tac Toe (AI vs AI)
 - [x] Snake (autonomous AI)
 - [x] Pong (AI vs AI)
 - [x] Billiards (physics simulation)
-- [x] Time Display (clock + binary clock)
+
+### Original Displays
+- [x] Time Display (clock)
 - [x] Bitcoin Price Display (live API via requests)
 - [x] YouTube Stream (yt-dlp + OpenCV)
+
+### Visual Effects
+- [x] Fire (procedural flame simulation)
+- [x] Plasma (sine-based color cycling)
+- [x] Matrix Rain (falling green characters)
+- [x] Starfield (3D star parallax)
+- [x] Game of Life (Conway's cellular automaton)
+- [x] Rainbow Waves (animated color gradients)
+
+### Utilities
+- [x] Weather (live weather display)
+- [x] Text Scroller (scrolling message display)
+- [x] Stock Ticker (live stock prices)
+- [x] S&P 500 Heatmap (sector-based market heatmap)
+- [x] Binary Clock (binary-encoded time display)
 
 ---
 
@@ -142,3 +160,36 @@
 - [x] Replace Pillow unsafe_ptrs with tobytes() for forward compatibility
 - [x] Expose DrawText with background_color parameter
 - [x] Expose VerticalDrawText
+
+---
+
+## Planned Improvements
+
+### High Impact Features
+- [ ] Instant feature switching (interrupt current feature mid-display via web command)
+- [ ] Brightness control from web panel
+- [ ] Per-feature duration settings (different duration for each feature)
+- [ ] Countdown timer (configurable from web panel)
+- [ ] Image slideshow (upload images via web panel)
+- [ ] Live matrix preview in dashboard (screenshot of current display)
+- [ ] Pixel art editor (draw on matrix from phone in real-time)
+- [ ] Feature scheduling (time-based: games during day, ambient at night)
+
+### New Display Modes
+- [ ] Lava lamp / metaball effect
+- [ ] QR code display (show WiFi password, custom URLs)
+
+### Security
+- [ ] Password hashing (replace plaintext passwords in web.json)
+- [ ] Login rate limiting (prevent brute force)
+- [ ] HTTPS/TLS support for web panel
+
+### Web Panel Polish
+- [ ] Drag-and-drop feature reordering
+- [ ] Weather location configurable from web settings
+- [ ] Night mode (auto-dim/off schedule)
+- [ ] WebSocket for real-time status (replace polling)
+
+### Code Quality
+- [ ] Update test suite for all 19+ display modules
+- [ ] Clean up stray files ($null in project root)
