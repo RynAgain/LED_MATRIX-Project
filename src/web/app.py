@@ -96,6 +96,7 @@ COUNTDOWN_PATH = os.path.join(PROJECT_ROOT, "config", "countdown.json")
 QR_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "qr.json")
 WEATHER_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "weather.json")
 SCHEDULE_PATH = os.path.join(PROJECT_ROOT, "config", "schedule.json")
+WIREFRAME_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "wireframe.json")
 STATUS_PATH = os.path.join(PROJECT_ROOT, "logs", "status.json")
 PID_PATH = os.path.join(PROJECT_ROOT, "logs", "display.pid")
 
@@ -265,6 +266,33 @@ def load_schedule():
 def save_schedule(data):
     try:
         with open(SCHEDULE_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def load_wireframe_config():
+    """Load wireframe shape configuration."""
+    defaults = {
+        "shapes": {
+            "cube": True, "tetrahedron": True, "octahedron": True,
+            "icosahedron": True, "diamond": True, "pyramid": True,
+            "star": True, "torus": True,
+        },
+        "seconds_per_shape": 10,
+        "rotation_speed": 1.0,
+    }
+    try:
+        with open(WIREFRAME_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return defaults
+
+def save_wireframe_config(data):
+    """Save wireframe shape configuration."""
+    try:
+        with open(WIREFRAME_CONFIG_PATH, "w") as f:
             json.dump(data, f, indent=2)
         return True
     except Exception:
@@ -797,6 +825,29 @@ def create_app():
         save_qr_config({"content": data["content"], "label": data.get("label", "")})
         send_command("play_feature", {"feature": "qr_code"})
         return jsonify({"success": True, "message": "QR code displayed"})
+
+    @app.route("/wireframe", methods=["GET", "POST"])
+    @login_required
+    def wireframe_page():
+        """Wireframe polygon configuration page."""
+        cfg = load_wireframe_config()
+        shape_names = ["cube", "tetrahedron", "octahedron", "icosahedron",
+                       "diamond", "pyramid", "star", "torus"]
+
+        if request.method == "POST":
+            shapes = {}
+            for s in shape_names:
+                shapes[s] = request.form.get(f"shape_{s}") == "on"
+            cfg["shapes"] = shapes
+            cfg["seconds_per_shape"] = max(3, int(request.form.get("seconds_per_shape", 10)))
+            cfg["rotation_speed"] = max(0.1, min(5.0, float(request.form.get("rotation_speed", 1.0))))
+            save_wireframe_config(cfg)
+            signal_display_reload()
+            flash("Wireframe settings saved", "success")
+            return redirect(url_for("wireframe_page"))
+
+        return render_template("wireframe.html", config=cfg,
+                               shape_names=shape_names, user=session.get("user"))
 
     @app.route("/api/preview")
     @login_required

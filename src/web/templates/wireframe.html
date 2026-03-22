@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Wireframe Shapes - LED Matrix{% endblock %}
+{% block content %}
+<h2>Wireframe 3D Shapes</h2>
+<form method="POST" action="{{ url_for('wireframe_page') }}">
+    <div class="card">
+        <h3>Active Shapes</h3>
+        <p style="color:#999;font-size:0.85rem;margin-bottom:0.75rem;">Toggle which shapes appear in the rotation cycle.</p>
+        <div class="feature-toggles">
+            {% for name in shape_names %}
+            <div class="toggle-row">
+                <span class="feature-name">{{ name | replace('_', ' ') | title }}</span>
+                <label class="toggle-label">
+                    <input type="checkbox" name="shape_{{ name }}"
+                           {% if config.get('shapes', {}).get(name, true) %}checked{% endif %}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Timing &amp; Speed</h3>
+        <div class="form-group">
+            <label for="seconds_per_shape">Seconds per shape</label>
+            <input type="number" id="seconds_per_shape" name="seconds_per_shape"
+                   value="{{ config.get('seconds_per_shape', 10) }}" min="3" max="120"
+                   class="form-control" style="width:6rem;">
+        </div>
+        <div class="form-group">
+            <label for="rotation_speed">Rotation speed multiplier</label>
+            <input type="number" id="rotation_speed" name="rotation_speed"
+                   value="{{ config.get('rotation_speed', 1.0) }}" min="0.1" max="5.0" step="0.1"
+                   class="form-control" style="width:6rem;">
+        </div>
+    </div>
+
+    <div class="action-grid" style="margin-top:1rem;">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+</form>
+{% endblock %}

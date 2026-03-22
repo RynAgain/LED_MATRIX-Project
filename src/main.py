@@ -298,6 +298,9 @@ FEATURE_MODULES = {
     "logo_wholefoods": "src.display.logo_wholefoods",
     "github_stats": "src.display.github_stats",
     "tanks": "src.display.tanks",
+    "wireframe": "src.display.wireframe",
+    "maze_3d": "src.display.maze_3d",
+    "terrain_ball": "src.display.terrain_ball",
 }
 
 

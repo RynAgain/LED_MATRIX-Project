@@ -127,7 +127,7 @@
     {
       "name": "logo_wholefoods",
       "type": "utility",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "github_stats",
@@ -137,6 +137,21 @@
     {
       "name": "tanks",
       "type": "game",
+      "enabled": false
+    },
+    {
+      "name": "wireframe",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "maze_3d",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "terrain_ball",
+      "type": "effect",
       "enabled": true
     }
   ]

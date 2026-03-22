@@ -74,7 +74,7 @@ class Tank:
     def shoot(self):
         if self.cooldown > 0:
             return None
-        self.cooldown = 30
+        self.cooldown = 20
         
         angle_rad = math.radians(self.angle)
         bx = self.x + 5 * math.cos(angle_rad)
@@ -84,42 +84,98 @@ class Tank:
         
         return Bullet(bx, by, vx, vy, self.turret_color)
     
+    def _calc_firing_angle(self, target_x, target_y):
+        """Calculate the firing angle to hit a target using ballistic physics.
+        
+        Uses the projectile motion equation to find the correct launch angle.
+        """
+        dx = target_x - self.x
+        dy = self.y - target_y  # Positive = target is higher
+        g = 0.15  # Gravity constant (must match Bullet.update)
+        v = self.power
+        
+        # Ballistic equation: angle = atan((v^2 +/- sqrt(v^4 - g*(g*dx^2 + 2*dy*v^2))) / (g*dx))
+        v2 = v * v
+        v4 = v2 * v2
+        discriminant = v4 - g * (g * dx * dx + 2 * dy * v2)
+        
+        if discriminant < 0:
+            # Can't reach - increase power or use 45 degrees
+            return 45 if self.facing_right else 135
+        
+        sqrt_disc = math.sqrt(discriminant)
+        
+        # Two solutions - pick the lower angle (flatter trajectory) for faster hits
+        angle1 = math.degrees(math.atan2(v2 - sqrt_disc, g * abs(dx)))
+        angle2 = math.degrees(math.atan2(v2 + sqrt_disc, g * abs(dx)))
+        
+        # Pick angle based on strategy
+        if random.random() < 0.7:
+            angle = angle1  # Flat shot (faster, more direct)
+        else:
+            angle = angle2  # High arc (lob shot)
+        
+        # Clamp to valid range
+        angle = max(15, min(80, angle))
+        
+        # Mirror for left-facing tank
+        if not self.facing_right or dx < 0:
+            angle = 180 - angle
+        
+        return angle
+    
     def ai_update(self, other_tank, terrain):
+        """Smart AI: calculates trajectories, moves strategically, shoots accurately."""
         if self.health <= 0:
             return None
         
         self.cooldown = max(0, self.cooldown - 1)
         
-        # Move randomly sometimes
-        if random.random() < 0.02:
-            dx = self.speed if self.facing_right else -self.speed
-            if random.random() < 0.3:
-                dx *= -1
-            new_x = self.x + dx
-            if 3 < new_x < WIDTH - 3:
+        if other_tank.health <= 0:
+            return None
+        
+        # Calculate distance to enemy
+        dx = other_tank.x - self.x
+        dist = abs(dx)
+        
+        # --- Movement AI ---
+        # Move if too close or to get better angle
+        if random.random() < 0.05:
+            if dist < 15:
+                # Too close - back away
+                move_dir = -1 if dx > 0 else 1
+            elif dist > 45:
+                # Too far - get closer
+                move_dir = 1 if dx > 0 else -1
+            else:
+                # Random repositioning
+                move_dir = random.choice([-1, 1])
+            
+            new_x = self.x + move_dir * self.speed
+            if 4 < new_x < WIDTH - 4:
                 self.x = new_x
                 self.place_on_terrain(terrain)
         
-        # Adjust aim toward opponent
-        if other_tank.health > 0:
-            dx = other_tank.x - self.x
-            dy = self.y - other_tank.y
-            target_angle = math.degrees(math.atan2(dy + random.uniform(-5, 5), abs(dx)))
-            target_angle = max(20, min(160, target_angle))
-            
-            # Gradually adjust angle
-            if self.angle < target_angle:
-                self.angle = min(target_angle, self.angle + 1)
-            elif self.angle > target_angle:
-                self.angle = max(target_angle, self.angle - 1)
-            
-            # Adjust power based on distance
-            dist = abs(dx)
-            self.power = max(2, min(5, dist * 0.08))
-            
-            # Shoot when roughly aimed
-            if self.cooldown <= 0 and random.random() < 0.15:
-                return self.shoot()
+        # --- Aiming AI ---
+        # Calculate proper firing solution
+        self.power = max(2.5, min(5.5, dist * 0.1 + random.uniform(-0.3, 0.3)))
+        target_angle = self._calc_firing_angle(other_tank.x, other_tank.y)
+        
+        # Smooth angle adjustment (faster than before)
+        angle_diff = target_angle - self.angle
+        if abs(angle_diff) > 1:
+            self.angle += angle_diff * 0.3  # Converge quickly
+        else:
+            self.angle = target_angle
+        
+        # --- Shooting AI ---
+        if self.cooldown <= 0:
+            # Shoot when aim is close enough
+            if abs(self.angle - target_angle) < 5:
+                bullet = self.shoot()
+                if bullet:
+                    self.cooldown = 15 + random.randint(0, 10)  # Faster fire rate
+                return bullet
         
         return None
 

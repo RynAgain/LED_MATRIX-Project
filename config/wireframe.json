@@ -1,0 +1,14 @@
+{
+  "shapes": {
+    "cube": true,
+    "tetrahedron": true,
+    "octahedron": true,
+    "icosahedron": true,
+    "diamond": true,
+    "pyramid": true,
+    "star": true,
+    "torus": true
+  },
+  "seconds_per_shape": 5,
+  "rotation_speed": 1.0
+}
