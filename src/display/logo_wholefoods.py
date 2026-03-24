@@ -5,6 +5,7 @@ import time
 import math
 import logging
 from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,8 @@ def run(matrix, duration=60):
 
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             matrix.SetImage(logo)
             time.sleep(1)
     except Exception as e:

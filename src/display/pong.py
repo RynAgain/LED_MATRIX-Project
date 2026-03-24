@@ -17,6 +17,7 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -296,9 +297,13 @@ def run(matrix, duration=60):
     start_time = time.time()
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             game = PongGame()
 
             while not game.round_over and time.time() - start_time < duration:
+                if should_stop():
+                    break
                 frame_start = time.time()
                 game.step()
                 game.draw(matrix)

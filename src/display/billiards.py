@@ -23,6 +23,7 @@ except ImportError:
 
 import logging
 import math
+from src.display._shared import should_stop
 import random
 import time
 
@@ -338,6 +339,8 @@ def main(matrix, _deadline=None):
     while running:
         if _deadline is not None and time.time() >= _deadline:
             break
+        if should_stop():
+            break
 
         # Fill background
         canvas.Fill(*BLACK)
@@ -419,6 +422,8 @@ def run(matrix, duration=60):
     deadline = start_time + duration
     try:
         while time.time() < deadline:
+            if should_stop():
+                break
             main(matrix, _deadline=deadline)
             time.sleep(1)
     except Exception as e:

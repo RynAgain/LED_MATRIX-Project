@@ -16,7 +16,7 @@
     {
       "name": "pong",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "billiards",
@@ -104,10 +104,15 @@
       "enabled": false
     },
     {
+      "name": "living_world",
+      "type": "effect",
+      "enabled": true,
+      "duration": 3600
+    },
+    {
       "name": "qr_code",
       "type": "utility",
-      "enabled": false,
-      "duration": 20
+      "enabled": false
     },
     {
       "name": "slideshow",
@@ -152,7 +157,7 @@
     {
       "name": "terrain_ball",
       "type": "effect",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

@@ -20,7 +20,7 @@ VALID_FEATURE_NAMES = {
     "fire", "plasma", "matrix_rain", "starfield",
     "game_of_life", "rainbow_waves", "weather", "text_scroller",
     "stock_ticker", "sp500_heatmap", "binary_clock", "countdown",
-    "lava_lamp", "qr_code", "slideshow",
+    "lava_lamp", "living_world", "qr_code", "slideshow",
     "galaga", "space_invaders", "logo_wholefoods",
     "github_stats", "tanks", "wireframe", "maze_3d",
     "terrain_ball"

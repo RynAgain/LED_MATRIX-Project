@@ -7,6 +7,7 @@ import time
 import math
 import logging
 from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -74,6 +75,8 @@ def run(matrix, duration=60):
     
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             frame_start = time.time()
             
             message = messages[msg_idx % len(messages)]

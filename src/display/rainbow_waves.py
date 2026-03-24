@@ -5,6 +5,7 @@ import time
 import math
 import logging
 from PIL import Image
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ def run(matrix, duration=60):
     
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             frame_start = time.time()
             
             # Switch patterns periodically

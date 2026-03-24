@@ -17,6 +17,7 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,8 @@ def run(matrix, duration=60):
 
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             board = [' '] * 9
             current_player = 'X'
             game_over = False
@@ -225,6 +228,8 @@ def run(matrix, duration=60):
             time.sleep(0.5)
 
             while not game_over and time.time() - start_time < duration:
+                if should_stop():
+                    break
                 # AI picks a move
                 move = _ai_move(board, current_player)
                 if move < 0:

@@ -17,6 +17,7 @@ import time
 import math
 from datetime import datetime
 from PIL import Image, ImageDraw
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -514,6 +515,8 @@ def run(matrix, duration=60):
         last_mode_switch = start_time
 
         while time.time() < deadline:
+            if should_stop():
+                break
             frame_start = time.time()
             now = datetime.now()
 

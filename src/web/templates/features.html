@@ -17,10 +17,10 @@
                 <div class="toggle-info">
                     <span class="toggle-name">{{ feature.name | replace('_', ' ') | title }}</span>
                 </div>
-                <input type="number" name="duration_{{ feature.name }}" 
-                       value="{{ feature.get('duration', '') }}" 
-                       placeholder="{{ config.get('display_duration', 60) }}" 
-                       min="5" max="600" class="duration-input" title="Duration (sec)">
+                <input type="number" name="duration_{{ feature.name }}"
+                       value="{{ feature.get('duration', '') }}"
+                       placeholder="{{ config.get('display_duration', 60) }}"
+                       min="5" max="3600" class="duration-input" title="Duration (sec)">
                 <label class="toggle-label">
                     <input type="checkbox" name="feature_{{ feature.name }}" 
                            {% if feature.enabled %}checked{% endif %}>
@@ -37,8 +37,8 @@
         <h2>Global Settings</h2>
         <div class="form-group">
             <label for="display_duration">Default duration per feature (seconds)</label>
-            <input type="number" id="display_duration" name="display_duration" 
-                   value="{{ config.get('display_duration', 60) }}" min="5" max="600">
+            <input type="number" id="display_duration" name="display_duration"
+                   value="{{ config.get('display_duration', 60) }}" min="5" max="3600">
         </div>
         <div class="action-grid" style="margin-top: 0.75rem;">
             <button type="button" class="btn btn-info btn-small" onclick="toggleAll(true)">Enable All</button>

@@ -2,6 +2,7 @@ import logging
 import requests
 import time
 from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop
 
 try:
     from rgbmatrix import graphics
@@ -77,12 +78,16 @@ def run(matrix, duration=60):
     start_time = time.time()
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             price = fetch_bitcoin_price()
             if price:
                 display_bitcoin_price_on_matrix(matrix, None, price)
             # Sleep in small increments to allow timely exit
             sleep_end = time.time() + 10
             while time.time() < sleep_end and time.time() - start_time < duration:
+                if should_stop():
+                    break
                 time.sleep(1)
     except Exception as e:
         logger.error("Error in bitcoin_price: %s", e, exc_info=True)

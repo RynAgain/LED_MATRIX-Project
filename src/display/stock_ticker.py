@@ -7,6 +7,7 @@ import os
 import logging
 import requests
 from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,8 @@ def run(matrix, duration=60):
 
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             now = time.time()
 
             # Fetch all quotes every 30 seconds

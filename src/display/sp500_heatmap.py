@@ -12,6 +12,7 @@ import os
 import logging
 import requests
 from PIL import Image
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -303,6 +304,8 @@ def run(matrix, duration=60):
     
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             # Get latest data (non-blocking, triggers bg fetch if stale)
             quotes = _ensure_data()
             

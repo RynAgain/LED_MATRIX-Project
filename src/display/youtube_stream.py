@@ -4,6 +4,7 @@ import time
 import csv
 import logging
 from PIL import Image
+from src.display._shared import should_stop
 import cv2
 import numpy as np
 import yt_dlp
@@ -154,6 +155,8 @@ def run(matrix, duration=60):
         for url, title, dur in urls:
             if time.time() - start_time >= duration:
                 break
+            if should_stop():
+                break
 
             logger.info("Preparing to play: %s", title)
             try:
@@ -180,6 +183,8 @@ def run(matrix, duration=60):
                 frame_start = time.time()
                 
                 if time.time() - start_time >= duration:
+                    break
+                if should_stop():
                     break
                 if max_vid_duration and time.time() - vid_start >= max_vid_duration:
                     break

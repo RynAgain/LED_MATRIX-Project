@@ -5,6 +5,7 @@ import time
 import os
 import logging
 from PIL import Image
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ def run(matrix, duration=60):
         draw.text((6, 49), "web panel", fill=(80, 80, 80))
         
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             matrix.SetImage(img)
             time.sleep(1)
         return
@@ -57,6 +60,8 @@ def run(matrix, duration=60):
     
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             fname, img = images[idx % len(images)]
             logger.info("Showing image: %s", fname)
             
@@ -65,6 +70,8 @@ def run(matrix, duration=60):
             # Hold image for show_time seconds
             img_start = time.time()
             while time.time() - img_start < show_time and time.time() - start_time < duration:
+                if should_stop():
+                    break
                 time.sleep(0.5)
             
             idx += 1

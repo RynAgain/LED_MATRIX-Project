@@ -78,13 +78,31 @@ def sighup_handler(signum, frame):
 
 COMMAND_PATH = os.path.join(PROJECT_ROOT, "logs", "command.json")
 
+# Pending command detected by the background watcher thread
+_pending_command = None
+_pending_lock = threading.Lock()
+
 
 def check_command():
     """Check for and consume a command from the web panel.
     
+    First checks the pending command buffer (set by the background watcher),
+    then falls back to reading the command file directly.
+    
     Returns:
         dict with 'command' and 'data' keys, or None if no command.
     """
+    global _pending_command
+
+    # Check pending command from background watcher first
+    with _pending_lock:
+        if _pending_command is not None:
+            cmd = _pending_command
+            _pending_command = None
+            logger.info("Command consumed from pending buffer: %s", cmd.get("command"))
+            return cmd
+
+    # Fallback: direct file check (for commands arriving between watcher polls)
     try:
         if os.path.exists(COMMAND_PATH):
             mtime = os.path.getmtime(COMMAND_PATH)
@@ -102,6 +120,42 @@ def check_command():
     except (json.JSONDecodeError, OSError, KeyError):
         pass
     return None
+
+
+def _command_watcher():
+    """Background thread that polls command.json every 0.5s.
+
+    When a new command arrives, it stores the command in the pending buffer
+    and calls request_stop() so the currently-running display module breaks
+    out of its render loop immediately (within one frame / ~55ms).
+    """
+    global _pending_command
+    logger.info("Command watcher thread started")
+    while not _shutdown:
+        try:
+            if os.path.exists(COMMAND_PATH):
+                mtime = os.path.getmtime(COMMAND_PATH)
+                if time.time() - mtime < 30:
+                    with open(COMMAND_PATH, "r") as f:
+                        cmd = json.load(f)
+                    os.remove(COMMAND_PATH)
+                    with _pending_lock:
+                        _pending_command = cmd
+                    # Signal the running display module to stop NOW
+                    request_stop()
+                    logger.info("Command watcher: detected '%s', requested stop",
+                                cmd.get("command"))
+                else:
+                    # Stale command, remove it
+                    try:
+                        os.remove(COMMAND_PATH)
+                    except OSError:
+                        pass
+        except (json.JSONDecodeError, OSError, KeyError):
+            pass
+        # Poll interval: 0.5 seconds for responsive UI
+        time.sleep(0.5)
+    logger.info("Command watcher thread stopped")
 
 
 def handle_play_video(matrix, url, title="Unknown", duration=300):
@@ -291,6 +345,7 @@ FEATURE_MODULES = {
     "binary_clock": "src.display.binary_clock",
     "countdown": "src.display.countdown",
     "lava_lamp": "src.display.lava_lamp",
+    "living_world": "src.display.living_world",
     "qr_code": "src.display.qr_code",
     "slideshow": "src.display.slideshow",
     "galaga": "src.display.galaga",
@@ -530,6 +585,12 @@ def main():
     import src.main as _self_module
     _self_module._matrix_ref = matrix
 
+    # Start background command watcher thread
+    # This thread polls command.json every 0.5s and calls request_stop()
+    # so the currently running display module breaks out immediately.
+    watcher = threading.Thread(target=_command_watcher, daemon=True)
+    watcher.start()
+
     # Main display loop
     logger.info("Entering display loop...")
     while not _shutdown:
@@ -548,6 +609,13 @@ def main():
             clear_stop()
             write_status(name, "running")
             run_feature(name, matrix, feat_duration)
+
+            # After a feature returns (naturally or via should_stop()),
+            # check if the watcher detected a command that caused the stop.
+            cmd = check_command()
+            if cmd:
+                _handle_command(cmd, matrix, duration)
+                continue
 
             # Brief pause + command check between features
             if not _shutdown:

@@ -6,6 +6,7 @@ import json
 import os
 import logging
 from PIL import Image, ImageDraw
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,8 @@ def run(matrix, duration=60):
         
         # Display (static image, just hold it)
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             matrix.SetImage(image)
             time.sleep(1)
     

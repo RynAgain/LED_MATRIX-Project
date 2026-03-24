@@ -12,6 +12,7 @@ import logging
 import requests
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,8 @@ def run(matrix, duration=60):
     
     try:
         while time.time() - start_time < duration:
+            if should_stop():
+                break
             image = _render_stats(username, contributions)
             matrix.SetImage(image)
             time.sleep(2)
