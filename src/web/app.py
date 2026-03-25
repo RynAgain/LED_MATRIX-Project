@@ -863,6 +863,67 @@ def create_app():
             logger.debug("Preview failed: %s", e)
         return jsonify({"success": False, "message": "Preview not available"})
 
+    # --- Living World routes ---
+
+    @app.route("/living-world")
+    @login_required
+    def living_world():
+        """Living World viewer with minimap, villager inspector, and controls."""
+        return render_template("living_world.html", user=session.get("user"))
+
+    @app.route("/api/living-world/state")
+    @login_required
+    def api_living_world_state():
+        """API: get current living world snapshot for the minimap."""
+        try:
+            from src.display.living_world.world_api import get_world_snapshot
+            snapshot = get_world_snapshot()
+            if snapshot is not None:
+                return jsonify({"success": True, "data": snapshot})
+            return jsonify({"success": False, "message": "No world state available"})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
+    @app.route("/api/living-world/events")
+    @login_required
+    def api_living_world_events():
+        """API: get recent event log entries."""
+        try:
+            count = int(request.args.get("count", 100))
+            category = request.args.get("category")
+            if category == "":
+                category = None
+            from src.display.living_world.world_api import get_event_log_snapshot
+            events = get_event_log_snapshot(count=count, category=category)
+            return jsonify({"success": True, "events": events})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
+    @app.route("/api/living-world/command", methods=["POST"])
+    @login_required
+    def api_living_world_command():
+        """API: send a command directly to the living world simulation.
+
+        Uses a separate command file to avoid triggering the main display
+        loop's request_stop() mechanism, which would reset the simulation.
+        """
+        data = request.get_json()
+        if not data or "action" not in data:
+            return jsonify({"success": False, "message": "Missing 'action'"})
+        action = data["action"]
+        params = data.get("params", {})
+        # Write to a separate file that the living world sim reads directly
+        lw_cmd_path = os.path.join(PROJECT_ROOT, "logs", "living_world_command.json")
+        try:
+            os.makedirs(os.path.dirname(lw_cmd_path), exist_ok=True)
+            cmd = {"action": action, "params": params, "timestamp": time.time()}
+            with open(lw_cmd_path, "w") as f:
+                json.dump(cmd, f)
+            logger.info("Living world command written: %s", action)
+            return jsonify({"success": True, "message": f"Command sent: {action}"})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
     @app.route("/pixel-editor")
     @login_required
     def pixel_editor():

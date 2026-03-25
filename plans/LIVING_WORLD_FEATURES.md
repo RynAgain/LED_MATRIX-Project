@@ -65,7 +65,8 @@ main.py are required.**
 - [x] Cosine-interpolated ambient brightness -- smooth 0.15 (night) to 1.0 (day) transitions (`day_night.py`)
 - [x] Six-zone sky gradient -- night -> dawn_early -> dawn_late -> day -> dusk_early -> dusk_late with cosine blending (`day_night.py`)
 - [x] Sun arc -- 3x3 sun pixel block following a sine arc during daytime (`rendering.py`)
-- [x] Moon arc -- 2x2 moon pixel block following a sine arc during nighttime (`rendering.py`)
+- [x] Moon arc -- 3x3 moon pixel block following a sine arc during nighttime with phase mask (`rendering.py`, `day_night.py`, `constants.py`)
+- [x] Moon phases -- 8-phase lunar cycle (new/crescent/quarter/gibbous/full) over 8 day/night periods; phase-dependent 3x3 mask with lit/dark pixels (`day_night.py`, `rendering.py`, `constants.py`)
 - [x] Star rendering with twinkle -- brightness fades with ambient; random per-frame jitter (`rendering.py`)
 - [x] Seasonal color offset -- dawn/dusk tint grass and leaves with warm/cool shifts (`day_night.py`)
 - [x] Ambient-scaled block colors -- all rendered blocks darkened by ambient factor (`rendering.py`)
@@ -120,7 +121,7 @@ main.py are required.**
 
 ### 6. Villager AI & Civilization
 
-- [x] Finite state machine -- states: idle, walking, chopping, planting, building, upgrading, refueling, trading, collecting, resting, flattening, mining, entering (`villager_ai.py`)
+- [x] Finite state machine -- states: idle, walking, chopping, planting, building, upgrading, refueling, trading, collecting, resting, flattening, mining, entering, farming_plant, farming_harvest, eating (`villager_ai.py`)
 - [x] Night behavior -- villagers return home to rest; homeless seek campfires (`villager_ai.py`)
 - [x] Bad weather shelter -- villagers go home during rain/storm (`villager_ai.py`)
 - [x] Campfire building -- costs 2 lumber; finds valid site with min spacing (`villager_ai.py`)
@@ -152,6 +153,11 @@ main.py are required.**
 - [x] Post-construction area leveling -- idle house owners periodically flatten terrain around their homes for farms and future buildings (`world_updates.py`)
 - [x] Terrain climbing -- villagers can traverse height differences up to 3 blocks; 2-3 block steps incur a brief climbing pause (`villager_ai.py`, `entities.py`, `constants.py`)
 - [x] Fire fighting -- villagers detect and extinguish burning trees and grass fires within 20px radius; high priority interrupts idle/walking (`villager_ai.py`, `entities.py`, `constants.py`)
+- [x] Farm construction -- homeowners with lumber build 4-slot crop farms on flat terrain near houses; costs 2 lumber (`villager_ai.py`, `entities.py`, `constants.py`)
+- [x] Crop planting -- villagers plant seeds in empty farm slots; takes 20 ticks (`villager_ai.py`)
+- [x] Crop harvesting -- villagers harvest mature crops for food; takes 20 ticks; yields 1 food per crop (`villager_ai.py`)
+- [x] Farm site selection -- finds FARM_WIDTH contiguous flat grass columns near home, avoiding water/structures/trees (`villager_ai.py`)
+- [x] Food resource -- villagers accumulate food from harvested crops (`entities.py`)
 
 ### 7. Structures & Buildings
 
@@ -179,12 +185,14 @@ main.py are required.**
 - [x] Pre-computed light masks -- distance-based intensity falloff baked into lookup tables (`constants.py`)
 - [x] Night factor gating -- lights only activate below ambient thresholds (0.6 / 0.3) (`lighting.py`)
 - [x] Warm color bias -- light boosts red channel most, green partially, blue least (`lighting.py`)
+- [x] Max artificial light level -- all light passes capped at MAX_LIGHT_LEVEL (220) to prevent oversaturation from overlapping sources (`constants.py`, `lighting.py`)
 
 ### 9. Ambient Life
 
 - [x] Birds -- multi-pixel sprite with 2 wing animation frames; fly across screen (`entities.py`, `rendering.py`)
 - [x] Bird spawning -- spawn at screen edges during daytime; suppressed in storms (`world_updates.py`)
 - [x] Bird sine-wave flight -- vertical bob via sin(tick) for natural movement (`entities.py`)
+- [x] Bird perching -- birds land on mature tree canopies for 60-180 ticks; folded-wing sprite while perched (`entities.py`, `world_updates.py`, `rendering.py`, `constants.py`)
 - [x] Clouds -- procedural shape with hollow corners; variable width/height (`entities.py`)
 - [x] Cloud movement -- speed multiplied by weather state (1x / 1.5x / 2x) (`world_updates.py`)
 - [x] Cloud alpha blending -- 70/30 mix with background sky for translucency (`rendering.py`)
@@ -193,6 +201,12 @@ main.py are required.**
 - [x] Smoke particles -- rise from campfires and level 2+ house chimneys; fade with age (`world_updates.py`, `rendering.py`)
 - [x] Fish jumps -- occasional arc animation above water surface during daytime (`world_updates.py`, `rendering.py`)
 - [x] Torch posts -- auto-placed on well-worn paths; max 5; check every 300 ticks (`world_updates.py`)
+- [x] Deer -- ground-based 3x2 pixel animal; idle/walk/flee behavior; max 3 on map (`entities.py`, `world_updates.py`, `rendering.py`)
+- [x] Rabbits -- ground-based 2x1 pixel animal; faster than deer; max 4 on map (`entities.py`, `world_updates.py`, `rendering.py`)
+- [x] Animal fleeing -- animals flee from nearby villagers (8px radius) at double speed (`world_updates.py`)
+- [x] Animal spawning -- periodic spawning on grass away from villagers; season-modulated (`world_updates.py`, `constants.py`)
+- [x] Animal water avoidance -- animals reverse direction at water columns (`world_updates.py`)
+- [x] Shooting stars -- rare diagonal streaks across night sky; bright head with fading tail; max 1 at a time (`entities.py`, `world_updates.py`, `rendering.py`, `constants.py`)
 
 ### 10. Camera & Viewport
 
@@ -219,6 +233,7 @@ Full render order as executed in [`simulation.py`](../src/display/living_world/s
 |     9 | Structures           | `_render_structures`        | rendering.py   |
 |    10 | Trees                | `_render_trees`             | rendering.py   |
 |    11 | Lumber items         | `_render_lumber_items`      | rendering.py   |
+|  11.5 | Farms                | `_render_farms`             | rendering.py   |
 |    12 | Villagers            | `_render_villagers`         | rendering.py   |
 |    13 | Birds                | `_render_birds`             | rendering.py   |
 |    14 | Fish jumps           | `_render_fish_jumps`        | rendering.py   |
@@ -244,6 +259,7 @@ Update frequencies as coded in the frame loop ([`simulation.py`](../src/display/
 | Every 3 ticks   | Villager AI update, smoke emit + update                       |
 | Every 4 ticks   | Water simulation, bird wing animation                         |
 | Every 10 ticks  | Tree growth / dying / respawn                                 |
+| Every 10 ticks  | Crop growth on all farms                                      |
 | Every 90 ticks  | Bird spawning, cloud spawning, reproduction check             |
 | Every 200 ticks | Fish jump spawning                                            |
 | Every 300 ticks | Camera follow-target re-evaluation, torch post placement      |
@@ -252,6 +268,60 @@ Update frequencies as coded in the frame loop ([`simulation.py`](../src/display/
 | Every 2700 ticks| Villager immigration spawn                                    |
 
 Frame rate target: **18 FPS** (`FRAME_INTERVAL = 1.0 / 18`)
+
+### 13. Season System
+
+- [x] Four seasons -- spring, summer, autumn, winter cycling over 4 day/night periods (`day_night.py`, `constants.py`)
+- [x] Season computation -- deterministic season from elapsed time; each season = 1 day cycle (900s) (`day_night.py`)
+- [x] Smooth season transitions -- last 10% of each season blends colors toward next season (`day_night.py`)
+- [x] Seasonal grass colors -- bright green (spring), normal (summer), yellow-brown (autumn), frost grey (winter) (`constants.py`, `rendering.py`)
+- [x] Seasonal leaf colors -- light green (spring), normal (summer), orange-brown (autumn), dark brown (winter) (`constants.py`, `rendering.py`)
+- [x] Seasonal tree growth -- 1.5x spring, 1.0x summer, 0.5x autumn, 0.0x winter (`constants.py`, `world_updates.py`)
+- [x] Seasonal flower spawning -- 0.8 spring, 0.5 summer, 0.2 autumn, 0.0 winter (`constants.py`, `world_updates.py`)
+- [x] Winter flower death -- existing flowers gradually die during winter (`world_updates.py`)
+- [x] Season weather bias -- per-season rain weight modifiers for future use (`constants.py`)
+
+
+### 14. Farming
+
+- [x] Farm entity -- data class with crop slots, growth stages, owner reference (`entities.py`)
+- [x] Crop growth stages -- empty -> seeded -> sprouting -> growing -> mature; float 0.0-1.0 per slot (`entities.py`)
+- [x] Crop growth system -- periodic growth ticks advance all planted crops toward maturity (`world_updates.py`)
+- [x] Rain-accelerated crop growth -- 1.5x rain, 2.0x storm multipliers (`world_updates.py`, `constants.py`)
+- [x] Seasonal crop growth -- 1.5x spring, 1.0x summer, 0.5x autumn, 0.0x winter (`world_updates.py`, `constants.py`)
+- [x] Farm rendering -- tilled soil row at ground level; crop pixel above with stage-dependent color (`rendering.py`)
+- [x] Farm building AI -- homeowners with lumber >= 2 and pop >= 3 build farms; max 1 per house (`villager_ai.py`)
+- [x] Crop planting AI -- villagers plant all empty slots when visiting their farm (`villager_ai.py`)
+- [x] Crop harvesting AI -- villagers harvest all mature crops, gaining food resource (`villager_ai.py`)
+- [x] Farming speech bubble -- golden-brown indicator above head during farm tasks (`constants.py`, `villager_ai.py`)
+
+### 15. Hunger System
+
+- [x] Hunger field -- villagers accumulate hunger 0.0 (full) to 100.0 (starving) over time (`entities.py`, `constants.py`)
+- [x] Hunger increment -- hunger increases by HUNGER_RATE (0.015) each AI tick (`villager_ai.py`)
+- [x] Hunger capped at max -- hunger cannot exceed HUNGER_MAX (100.0) (`villager_ai.py`)
+- [x] Eating state -- new "eating" FSM state: villager consumes 1 food over EATING_FRAMES (25) ticks (`villager_ai.py`)
+- [x] Hunger-triggered eating -- villagers with food auto-eat when hunger >= HUNGER_EAT_THRESHOLD (30.0); interrupts idle/walking (`villager_ai.py`)
+- [x] Food satiation -- eating 1 food reduces hunger by FOOD_SATIATION (40.0), clamped at 0 (`villager_ai.py`)
+- [x] No starvation -- hunger is purely motivational; villagers never die from hunger (`villager_ai.py`)
+- [x] Hunger food priority -- critically hungry (>= 80.0) villagers without food rush to harvest mature crops or plant empty farm slots (`villager_ai.py`)
+- [x] Hunger speed penalty -- critically hungry villagers move at half speed (skip odd ticks) (`villager_ai.py`)
+- [x] Eating speech bubble -- green indicator above head during eating (`constants.py`, `villager_ai.py`)
+- [x] Eating body flash -- green-tinted body color flashes during eating animation (`rendering.py`)
+
+### 16. Goal-Based Decision Tree
+
+- [x] Goal evaluation engine -- `_evaluate_goals()` scores all applicable goals dynamically based on villager state, resources, and world context (`villager_ai.py`)
+- [x] 17 goal types -- build_campfire, get_food, build_house, farm_harvest, refuel_campfire, gather_lumber, build_farm, farm_plant, build_granary, upgrade_house, gather_stone, build_watchtower, build_mine, build_bridge, plant_tree, flatten_terrain, explore (`constants.py`)
+- [x] Priority scoring -- each goal has a base priority; dynamic bonuses adjust scores based on need (e.g. lumber shortfall boosts gather_lumber, hunger boosts farm_harvest) (`villager_ai.py`, `constants.py`)
+- [x] Resource prerequisite system -- `GOAL_PREREQS` defines lumber/stone costs per goal; `_has_prereqs()` and `_missing_prereqs()` check fulfillment (`villager_ai.py`, `constants.py`)
+- [x] Prerequisite chaining -- `_resolve_prereq_action()` redirects to sub-goals when resources are insufficient: build_house(needs 4 lumber) -> gather_lumber, upgrade_house(needs stone) -> gather_stone (`villager_ai.py`)
+- [x] Largest-shortfall resolution -- when multiple resources are missing, the sub-goal targets the one with the largest deficit first (`villager_ai.py`)
+- [x] Goal persistence -- `current_goal` field on Villager persists intent across ticks; prevents random goal flipping (`entities.py`, `villager_ai.py`)
+- [x] Goal re-evaluation interval -- goals are re-scored every `GOAL_EVAL_INTERVAL` (60) ticks or when current goal is None (`villager_ai.py`, `constants.py`)
+- [x] Goal reset on completion -- goals auto-clear when their action is successfully initiated, allowing fresh evaluation next idle tick (`villager_ai.py`)
+- [x] Gather lumber intelligence -- prefers free dropped lumber items over tree chopping; explore chance still provides behavior variety (`villager_ai.py`)
+- [x] Fallback to explore -- if no goal can be executed (missing sites, no trees, etc.), villager walks randomly (`villager_ai.py`)
 
 ---
 
@@ -312,38 +382,131 @@ Key constants defined in [`constants.py`](../src/display/living_world/constants.
 | `VILLAGER_CLIMB_SPEED`          | 2             | Extra ticks of pause for steep climbs    |
 | `FIREFIGHT_DETECT_RADIUS`       | 20            | Detection range for nearby fires         |
 | `FIREFIGHT_EXTINGUISH_TICKS`    | 10            | Ticks to extinguish a fire once adjacent |
+| `SEASON_CYCLE_DAYS`             | 4             | Full season cycle = 4 day/night periods  |
+| `SEASON_TREE_GROWTH` (spring)   | 1.5           | Tree growth multiplier in spring         |
+| `SEASON_TREE_GROWTH` (winter)   | 0.0           | No tree growth in winter                 |
+| `SEASON_FLOWER_CHANCE` (spring) | 0.8           | Flower spawn chance in spring            |
+| `SEASON_FLOWER_CHANCE` (winter) | 0.0           | No flowers spawn in winter               |
+| `MAX_DEER`                      | 3             | Maximum deer on the map                  |
+| `MAX_RABBITS`                   | 4             | Maximum rabbits on the map               |
+| `ANIMAL_SPAWN_INTERVAL`         | 400           | Ticks between animal spawn checks        |
+| `ANIMAL_FLEE_RADIUS`            | 8             | Pixels -- animals flee from villagers    |
+| `ANIMAL_FLEE_DURATION`          | 30            | Ticks animals flee before calming        |
+| `FARM_WIDTH`                    | 4             | Crop slots per farm plot                 |
+| `FARM_COST_LUMBER`              | 2             | Lumber to build a farm                   |
+| `FARM_BUILD_FRAMES`             | 60            | Ticks to till/prepare the farm           |
+| `FARM_POPULATION_THRESHOLD`     | 3             | Min villagers before farming starts      |
+| `MAX_FARMS_PER_HOUSE`           | 1             | Farms per house owner                    |
+| `CROP_GROWTH_RATE`              | 0.002         | Base growth per tick                     |
+| `CROP_HARVEST_YIELD`            | 1             | Food per harvested mature crop           |
+| `FARM_GROWTH_CHECK_INTERVAL`    | 10            | Ticks between crop growth updates        |
+| `RAIN_CROP_GROWTH_MULTIPLIER`   | 1.5           | Crop growth rate multiplier during rain  |
+| `STORM_CROP_GROWTH_MULTIPLIER`  | 2.0           | Crop growth rate multiplier during storms|
+| `HUNGER_MAX`                    | 100.0         | Maximum hunger level (starving)          |
+| `HUNGER_RATE`                   | 0.015         | Hunger increase per AI tick              |
+| `HUNGER_THRESHOLD`              | 50.0          | Hunger level for food prioritization     |
+| `HUNGER_CRITICAL`               | 80.0          | Hunger level for desperate food-seeking  |
+| `HUNGER_EAT_THRESHOLD`          | 30.0          | Min hunger before villager bothers eating|
+| `FOOD_SATIATION`                | 40.0          | Hunger reduced per food item eaten       |
+| `EATING_FRAMES`                 | 25            | Ticks spent in eating state              |
+| `HUNGER_SPEED_PENALTY`          | 0.5           | Speed multiplier when critically hungry  |
+| `GOAL_EVAL_INTERVAL`            | 60            | Ticks between full goal re-evaluation    |
+| `GOAL_PRIORITY` (build_campfire)| 85            | Highest economic goal: survival          |
+| `GOAL_PRIORITY` (build_house)   | 70            | Major progression milestone              |
+| `GOAL_PRIORITY` (gather_lumber) | 50 + dynamic  | Base + 5 per missing lumber below thresh |
+| `GOAL_PRIORITY` (explore)       | 5             | Lowest priority: random walking          |
 
 ---
 
-## Future Ideas
+## Actionable Tasks
 
-<!-- Add planned or proposed features below -->
+> Organized by priority tier. Each task has a clear scope and affected modules.
 
-- [ ] Seasons -- cycle terrain palette and tree behavior over multiple day cycles
-- [ ]max artificail light level
-- [ ] Animal mobs -- deer, rabbits roaming the world
-- [ ] Farming -- villagers till soil and grow crops
-- [ ] Boat travel -- villagers use boats to cross large water bodies
-- [ ] Villager names / traits -- personality affecting task priority
-- [ ] Trade caravans -- external villager groups arriving from off-screen
-- [ ] villager hunger (no starvation just motivation for food meat, farming)
-- [x] villagers should flatten area around house to hosue level for farms other building
-- [x] villagers should be able to climb
+### Tier 1 -- Bug Fixes & Stability
 
-- [ ] Minimap overlay -- small overview of the full 192-wide world
-- [ ] Save / restore world state -- persist simulation across restarts
+- [x] **Infinite run support** -- `simulation.py` `run()` accepts `duration=0` for indefinite operation; loop checks `should_stop()` first, then duration (`simulation.py`)
+- [x] **Save / restore world state** -- serialize all entities to JSON on exit; reload on next `run()` call; cross-references preserved via index mapping (`simulation.py`, `persistence.py`)
+- [x] **Farm orphan cleanup** -- when a villager dies, farm ownership transfers to nearest farmless villager or goes unowned (`villager_ai.py`)
+- [x] **Duplicate `_too_close_to_structure` function** -- consolidated into `terrain.py`; `world_updates.py` and `villager_ai.py` now import from `terrain` (`terrain.py`, `world_updates.py`, `villager_ai.py`)
+- [x] **Dead villager goal cleanup** -- when a villager dies mid-build, `building_target.under_construction` is set False and `build_progress` to 1.0 (`villager_ai.py`)
 
-- [x] should not grow within 2 pixels of a house or building.  Housing controls population cap with a max of 20 population.  we might need bigger houses
+### Tier 2 -- System Improvements
 
-- [ ] system should run as long as we please
-- [ ] system should save and restore between runs
-- [ ] what is the end goal here a question to ask?
-- [x] fire fighting role?
-- [x] better cloud cover during storms
-- [ ] birds land on trees
-- [ ] shooting stars
-- [ ] castle building
-- [ ] eclipse 
-- [ ] moon phases, bigger moon
-- [ ] ideas to improve current exisitng systems
-- [ ] check for brain flaws in villager behavior, priiorites
+- [x] **Rendering dedup in `_render_farms`** -- sprouting/growing/mature branches collapsed into single conditional; seeded/empty skipped uniformly (`rendering.py`)
+- [x] **Water level update performance** -- `_get_water_surface_cols()` pre-scans for water surface once per call, replacing inner O(n*m) scans (`weather.py`)
+- [x] **`_get_valley_cols` caching** -- module-level cache with generation-based invalidation; callers can pass `_cache_gen` for tick-based reuse (`terrain.py`)
+- [x] **Goal system: reproduction as a goal** -- `have_baby` goal with prereqs (has_home, breeding_age, pop < cap); villager walks home to trigger reproduction check (`villager_ai.py`, `constants.py`)
+- [x] **Goal system: food sharing** -- `share_food` goal; villagers with food > FOOD_SHARE_THRESHOLD give 1 food to nearest hungry neighbor (`villager_ai.py`, `constants.py`)
+- [x] **Campfire cremation on death at home** -- cremation flash now considers home's lantern if closer than any campfire (`villager_ai.py`)
+
+### Tier 3 -- New Features
+
+- [x] **Eclipses** -- solar eclipse every 12 day cycles at mid-day; lunar eclipse every 16 cycles at mid-night; `_check_solar_eclipse` / `_check_lunar_eclipse` functions with intensity falloff; solar dims ambient to ECLIPSE_AMBIENT_MIN (`day_night.py`, `simulation.py`, `constants.py`)
+- [x] **Castle building** -- late-game mega-structure requiring 10 lumber + 5 stone; 7x8 pixel art template with towers, battlements, windows, gate, and door; requires 8+ population; max 1 per world; construction animation bottom-up; foundation leveling; unique day/night window colors (`constants.py`, `villager_ai.py`, `rendering.py`, `structures.py`)
+- [x] **Boat travel** -- villagers craft a boat (2 lumber) to cross water bodies wider than BRIDGE_MAX_GAP; Boat entity rendered as 3px on water surface; travels at 0.5 speed; auto-crafted when villager encounters water without a bridge; boat deactivates on land (`entities.py`, `villager_ai.py`, `rendering.py`, `constants.py`, `simulation.py`)
+- [x] **Trade caravans** -- NPC Caravan groups arrive from off-screen every ~5000 ticks; walk to world center, trade stone/food/gold for lumber with nearby villagers during CARAVAN_TRADE_DURATION (120) ticks; 3 trade offer types; disappear after trading; event log integration (`entities.py`, `world_updates.py`, `rendering.py`, `constants.py`, `simulation.py`)
+- [x] **Villager names / traits** -- each villager gets a procedural name from 24 nature-themed names; personality trait (builder/farmer/lumberjack/explorer) biases goal scoring by +20% for preferred activities (`entities.py`, `villager_ai.py`, `constants.py`)
+- [x] **Hunting** -- hungry villagers (hunger > 60) with no farm chase nearby deer/rabbits; successful hunt yields 2 food; adds "hunting" state, bubble, and goal evaluation (`villager_ai.py`, `entities.py`, `constants.py`)
+- [x] **Snow weather** -- winter season spawns snow particles (white, slower than rain, no splash); SnowFlake entity with drift; `_update_snow` and `_render_snow` functions (`world_updates.py`, `rendering.py`, `entities.py`, `constants.py`, `simulation.py`)
+- [x] **Community storage building** -- villagers build storage (4 lumber + 1 stone) that stores up to 30 lumber, 15 stone, 20 food communally; villagers deposit excess items (above configurable thresholds) and withdraw when at 0; requires 3+ population; max 2 per world; `deposit_storage` and `withdraw_storage` goals with priority-based retrieval before gathering (`constants.py`, `structures.py`, `villager_ai.py`, `entities.py`)
+- [x] **Gold resource + Bank building** -- mining has 25% chance to yield gold per 2 depths; gold field on Villager; Bank building (5 lumber + 3 stone, 4x4, requires 6+ pop, max 1) stores community gold; villagers auto-deposit gold to bank via storage goal; Caravan trades accept gold as currency (`constants.py`, `entities.py`, `villager_ai.py`, `structures.py`)
+- [x] **Well building** -- villagers build wells (1 lumber + 2 stone) that prevent all lightning fires within WELL_FIRE_PREVENTION_RADIUS (15px); max 3 wells with WELL_MIN_SPACING (25px) enforced; requires 4+ population; `_is_protected_by_well()` / `_find_well_site()` helpers; 1x2 pixel rendering with stone/water/roof (`constants.py`, `structures.py`, `villager_ai.py`, `rendering.py`, `weather.py`)
+- [x] **Event logging system** -- ring-buffer log of last 1000 simulation events (births, deaths, building, trading, weather, combat) with category filtering; `log_event()` / `get_events()` / `get_all_events()` API for web UI and debugging (`event_log.py`, `villager_ai.py`, `weather.py`)
+- [x] **Bow hunting** -- villagers auto-craft a bow (1 lumber) before hunting; bow-equipped villagers shoot animals from BOW_RANGE (10px) after BOW_SHOOT_FRAMES (15) aiming ticks instead of chasing; `has_bow` field on Villager; event log integration (`constants.py`, `entities.py`, `villager_ai.py`)
+- [x] **Dense cloud roll-in** -- when weather transitions from clear/cloudy to rain/storm, clouds aggressively spawn from wind direction at faster speed (0.06-0.14 vs 0.02-0.08) to create a rolling wall effect; 70% wind-direction bias during steady-state rain (`world_updates.py`)
+- [x] rain should be a strong 'build a house' motivator if homeless
+- [x] **Pond spawning fix** -- `_guarantee_pond` now correctly digs downward (increasing y) to create a basin at the lowest terrain point instead of placing water on a hilltop where it would drain away (`terrain.py`)
+
+### Tier 4 -- Web UI & Tooling
+
+- [x] **Web UI world viewer** -- real-time minimap on `/living-world` page showing 192-wide terrain, structures, trees, animals, and villager dots on HTML5 canvas; auto-refreshes every 5 seconds via `/api/living-world/state`; camera viewport rectangle overlay (`src/web/app.py`, `src/web/templates/living_world.html`, `src/display/living_world/world_api.py`)
+- [x] **Web UI villager inspector** -- click a villager dot on minimap or list to see name, trait, state, current_goal, hunger, lumber, stone, food, age, home/farm/bow status in detail panel (`src/web/templates/living_world.html`)
+- [x] **Web UI world controls** -- buttons to trigger weather (clear/rain/storm), spawn villagers, set time of day (day/night), toggle seasons; sends commands via `/api/living-world/command`; event log viewer with category filter dropdown (`src/web/app.py`, `src/web/templates/living_world.html`)
+- [x] **World reset command** -- `reset_world` action via `/api/living-world/command` sets `_reset_requested` flag on Weather; deletes save file to force fresh world generation on next run (`simulation.py`, `persistence.py`)
+
+### Completed Ideas (archived)
+
+- [x] Seasons -- cycle terrain palette and tree behavior over multiple day cycles
+- [x] Max artificial light level -- all lighting passes capped at MAX_LIGHT_LEVEL (220)
+- [x] Animal mobs -- deer, rabbits roaming the world
+- [x] Farming -- villagers till soil and grow crops
+- [x] Villager hunger -- food motivation system (no starvation)
+- [x] Villagers should flatten area around house for farms/buildings
+- [x] Villagers should be able to climb
+- [x] Trees should not grow within 2 pixels of buildings; housing controls pop cap
+- [x] Fire fighting role
+- [x] Better cloud cover during storms
+- [x] Birds land on trees
+- [x] Shooting stars
+- [x] Moon phases, bigger moon
+- [x] Check for brain flaws in villager behavior -- FIXED via chop threshold, explore chance
+- [x] Intelligent action decision trees -- goal-based system with prerequisite chaining
+- [x] Infinite run support -- duration=0 for indefinite operation
+- [x] Save/restore world state -- JSON persistence across restarts
+- [x] Farm orphan cleanup -- farms transfer on owner death
+- [x] Consolidated _too_close_to_structure -- single canonical function in terrain.py
+- [x] Dead villager goal cleanup -- in-progress structures completed on builder death
+- [x] Rendering dedup in _render_farms -- identical branches collapsed
+- [x] Water level update performance -- water-column index pre-scan
+- [x] _get_valley_cols caching -- generation-based cache
+- [x] Reproduction as a goal -- "have_baby" in goal system
+- [x] Food sharing -- villagers share excess food with hungry neighbors
+- [x] Campfire cremation lantern fallback -- home lantern used if closer
+- [x] Eclipses -- solar and lunar eclipse events with ambient effects
+- [x] Villager names and traits -- procedural names + personality-biased goals
+- [x] Hunting -- hungry villagers chase animals for food
+- [x] Snow weather -- winter snow particles with drift and rendering
+- [x] AI audit: redundant eat-state check -- removed dead `v.state != "eating"` clause
+- [x] AI audit: chopping gives no immediate reward -- auto-collect 1 lumber after chop
+- [x] AI audit: planting never deducted lumber -- added `v.lumber -= 1` on plant
+- [x] AI audit: duplicate firefighting state -- collapsed identical if/else branches
+- [x] AI audit: bad weather dead branch -- homeless villagers now use goal tree in rain
+- [x] AI audit: explore blocks zero-lumber chop -- villagers at 0 lumber always chop
+- [x] AI audit: have_baby goal clears prematurely -- goal persists while walking home
+- [x] Rain motivates house building -- +12 rain / +20 storm score bonus for homeless villagers
+- [x] Pond spawning fix -- _guarantee_pond digs basin downward instead of placing water on hilltop
+- [x] Boat travel -- villagers auto-craft boats to cross water without bridges
+- [x] Trade caravans -- NPC traders arrive periodically to exchange resources
+- [x] Community storage -- shared building for depositing/withdrawing lumber, stone, food
+- [x] Gold resource + Bank -- mining yields gold; bank building stores community gold
+- [x] World reset command -- web UI can request fresh world generation

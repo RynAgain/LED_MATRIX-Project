@@ -6,6 +6,7 @@ from .constants import (
     CAMPFIRE_MIN_SPACING, WORLD_WIDTH, DISPLAY_HEIGHT,
     BRIDGE_MAX_GAP, WATER, GRASS, DIRT, STONE, AIR, MINE_MAX_DEPTH,
     CAMPFIRE_LOW_FUEL_THRESHOLD, CREMATION_FLASH_FRAMES,
+    WELL_FIRE_PREVENTION_RADIUS, WELL_MIN_SPACING,
 )
 from .utils import _clamp
 from .terrain import _get_valley_cols
@@ -144,6 +145,109 @@ def _level_foundation(x, width, heights, world, villager, structures):
             if 0 <= avg_h < DISPLAY_HEIGHT:
                 world[avg_h][c] = GRASS
             heights[c] = avg_h
+
+def _is_protected_by_well(x, structures):
+    """Check if column x is within the fire prevention radius of any well."""
+    for s in structures:
+        if s.type == "well" and abs(s.x - x) <= WELL_FIRE_PREVENTION_RADIUS:
+            return True
+    return False
+
+
+def _find_well_site(structures, trees, heights, world, near_x):
+    """Find a valid location to build a well near the given x coordinate.
+
+    Wells need:
+    - Grass surface
+    - Not too close to other structures
+    - Not within WELL_MIN_SPACING of another well
+    - Not near water (want them inland)
+    """
+    from .terrain import _get_valley_cols
+    vc = _get_valley_cols(world)
+    cands = list(range(max(4, near_x - 25), min(WORLD_WIDTH - 4, near_x + 25)))
+    random.shuffle(cands)
+    for x in cands:
+        if x in vc:
+            continue
+        # Check well spacing
+        if any(s.type == "well" and abs(s.x - x) < WELL_MIN_SPACING for s in structures):
+            continue
+        # Not too close to other structures
+        if any(abs(s.x - x) < 3 for s in structures):
+            continue
+        # Not too close to trees
+        if any(t.alive and abs(t.x - x) < 3 for t in trees):
+            continue
+        h = heights[x]
+        if 0 <= h < DISPLAY_HEIGHT and world[h][x] == GRASS:
+            return x
+    return None
+
+
+def _find_storage_site(structures, trees, heights, world, near_x):
+    """Find a valid location to build a community storage near the given x."""
+    from .constants import STORAGE_WIDTH
+    vc = _get_valley_cols(world)
+    cands = list(range(max(4, near_x - 20), min(WORLD_WIDTH - STORAGE_WIDTH - 4, near_x + 20)))
+    random.shuffle(cands)
+    for x in cands:
+        ok = True
+        for dx in range(STORAGE_WIDTH):
+            cx = x + dx
+            if cx in vc: ok = False; break
+            if cx >= WORLD_WIDTH: ok = False; break
+            ch = heights[cx]
+            if abs(ch - heights[x]) > 1: ok = False; break
+            if 0 <= ch < DISPLAY_HEIGHT and world[ch][cx] == WATER: ok = False; break
+        if not ok: continue
+        if any(abs(s.x - x) < s.width + 2 for s in structures): continue
+        if any(t.alive and abs(t.x - x) < 3 for t in trees): continue
+        sy = heights[x]
+        if 0 <= sy < DISPLAY_HEIGHT:
+            return (x, sy - 3)  # 3 = STORAGE_HEIGHT
+    return None
+
+
+def _find_bank_site(structures, trees, heights, world, near_x):
+    """Find a valid location to build a bank near the given x."""
+    from .constants import BANK_WIDTH, BANK_HEIGHT
+    vc = _get_valley_cols(world)
+    cands = list(range(max(4, near_x - 20), min(WORLD_WIDTH - BANK_WIDTH - 4, near_x + 20)))
+    random.shuffle(cands)
+    for x in cands:
+        ok = True
+        for dx in range(BANK_WIDTH):
+            cx = x + dx
+            if cx in vc: ok = False; break
+            if cx >= WORLD_WIDTH: ok = False; break
+            ch = heights[cx]
+            if abs(ch - heights[x]) > 1: ok = False; break
+            if 0 <= ch < DISPLAY_HEIGHT and world[ch][cx] == WATER: ok = False; break
+        if not ok: continue
+        if any(abs(s.x - x) < s.width + 2 for s in structures): continue
+        if any(t.alive and abs(t.x - x) < 3 for t in trees): continue
+        sy = heights[x]
+        if 0 <= sy < DISPLAY_HEIGHT:
+            return (x, sy - BANK_HEIGHT)
+    return None
+
+
+def _get_storage(structures):
+    """Return the first completed community storage structure, or None."""
+    for s in structures:
+        if s.type == "storage" and not s.under_construction:
+            return s
+    return None
+
+
+def _get_bank(structures):
+    """Return the first completed bank structure, or None."""
+    for s in structures:
+        if s.type == "bank" and not s.under_construction:
+            return s
+    return None
+
 
 def _update_structures(structures, villagers):
     rm = []

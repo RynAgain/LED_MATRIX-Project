@@ -7,8 +7,8 @@ from .constants import (
     DISPLAY_WIDTH, DISPLAY_HEIGHT, WORLD_WIDTH,
     AIR, WATER, GRASS, LEAF, PATH_DIRT,
     BLOCK_COLORS, WATER_SURFACE_COLOR,
-    BIRD_FRAMES, BIRD_COLOR,
-    SUN_COLOR, MOON_COLOR,
+    BIRD_FRAMES, BIRD_PERCH_FRAME, BIRD_COLOR,
+    SUN_COLOR, MOON_COLOR, MOON_PHASE_MASKS, MOON_DARK_COLOR,
     DYING_LEAF_COLORS, CAMPFIRE_COLORS, CAMPFIRE_LOW_FUEL_COLORS,
     CAMPFIRE_LOW_FUEL_THRESHOLD, LUMBER_BLOCK, WOOD,
     MINE_COLOR, STONE_HOUSE_COLOR,
@@ -18,9 +18,19 @@ from .constants import (
     WT_STONE, WT_POLE, WT_PLATFORM, WT_TORCH,
     GRANARY_TEMPLATE, GRANARY_PAL,
     LIGHTNING_BOLT_COLOR,
+    SHOOTING_STAR_COLOR, SHOOTING_STAR_TAIL_COLOR, SHOOTING_STAR_LENGTH,
+    SEASON_GRASS_COLORS, SEASON_LEAF_COLORS,
+    DEER_COLOR, DEER_HEAD_COLOR,
+    RABBIT_COLOR, RABBIT_EAR_COLOR,
+    TILLED_SOIL_COLOR, CROP_COLORS,
+    WELL_STONE_COLOR, WELL_WATER_COLOR, WELL_ROOF_COLOR,
+    CASTLE_TEMPLATE, CASTLE_PAL,
 )
 from .utils import _clamp, _apply_ambient, _lerp_color
-from .day_night import _compute_sky_colors, _compute_ambient, _seasonal_color_offset
+from .day_night import (
+    _compute_sky_colors, _compute_ambient, _seasonal_color_offset, _compute_moon_phase,
+    _check_lunar_eclipse,
+)
 
 
 def _render_sky(pixels, day_phase, weather, camera_x):
@@ -36,7 +46,7 @@ def _render_sky(pixels, day_phase, weather, camera_x):
         for x in range(DISPLAY_WIDTH):
             pixels[x, y] = c
 
-def _render_sun_moon(pixels, day_phase):
+def _render_sun_moon(pixels, day_phase, elapsed=0.0):
     p = day_phase
     if 0.05 < p < 0.5:
         t = (p - 0.05) / 0.45
@@ -54,11 +64,20 @@ def _render_sun_moon(pixels, day_phase):
             t = (p + 0.35) / 0.35
         mx = int(5 + t * 53)
         my = int(18 - 12 * math.sin(t * math.pi))
-        for dy in range(2):
-            for dx in range(2):
+        moon_phase = _compute_moon_phase(elapsed)
+        mask = MOON_PHASE_MASKS.get(moon_phase)
+        if mask is None:
+            mask = MOON_PHASE_MASKS["full"]
+        # Render 3x3 moon with phase mask
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                row, col = dy + 1, dx + 1
                 px, py = mx + dx, my + dy
                 if 0 <= px < DISPLAY_WIDTH and 0 <= py < DISPLAY_HEIGHT:
-                    pixels[px, py] = MOON_COLOR
+                    if mask[row][col]:
+                        pixels[px, py] = MOON_COLOR
+                    elif moon_phase != "new":
+                        pixels[px, py] = MOON_DARK_COLOR
 
 def _render_stars(pixels, stars, ambient, sim_tick):
     if ambient >= 0.4: return
@@ -67,6 +86,24 @@ def _render_stars(pixels, stars, ambient, sim_tick):
         b = _clamp(sb + random.randint(-30, 30), 0, 255)
         if 0 <= sx < DISPLAY_WIDTH and 0 <= sy < DISPLAY_HEIGHT:
             pixels[sx, sy] = (b, b, min(255, b + 20))
+
+def _render_shooting_stars(pixels, shooting_stars, ambient):
+    """Render shooting stars as a bright head with a fading tail."""
+    if ambient >= 0.3: return
+    for ss in shooting_stars:
+        # Draw the tail (trail behind the head)
+        for i in range(SHOOTING_STAR_LENGTH):
+            tx = int(ss.x - ss.dx * i * 0.5)
+            ty = int(ss.y - ss.dy * i * 0.5)
+            if 0 <= tx < DISPLAY_WIDTH and 0 <= ty < DISPLAY_HEIGHT:
+                if i == 0:
+                    pixels[tx, ty] = SHOOTING_STAR_COLOR
+                else:
+                    fade = max(0.2, 1.0 - i / SHOOTING_STAR_LENGTH)
+                    c = (int(SHOOTING_STAR_TAIL_COLOR[0] * fade),
+                         int(SHOOTING_STAR_TAIL_COLOR[1] * fade),
+                         int(SHOOTING_STAR_TAIL_COLOR[2] * fade))
+                    pixels[tx, ty] = c
 
 def _render_clouds(pixels, clouds, ambient, camera_x):
     for c in clouds:
@@ -87,8 +124,24 @@ def _render_clouds(pixels, clouds, ambient, camera_x):
                         _clamp((bg[2] * bg_weight + base_col[2] * fg_weight) // 10, 0, 255),
                     )
 
-def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_phase):
+def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_phase, season_info=None):
     offset = _seasonal_color_offset(day_phase)
+    # Compute blended seasonal colors for grass and leaves
+    if season_info is not None:
+        current_season, next_season, blend = season_info
+        grass_color = _lerp_color(
+            SEASON_GRASS_COLORS[current_season],
+            SEASON_GRASS_COLORS[next_season],
+            blend,
+        )
+        leaf_color = _lerp_color(
+            SEASON_LEAF_COLORS[current_season],
+            SEASON_LEAF_COLORS[next_season],
+            blend,
+        )
+    else:
+        grass_color = BLOCK_COLORS[GRASS]
+        leaf_color = BLOCK_COLORS[LEAF]
     for sx in range(DISPLAY_WIDTH):
         wx = sx + camera_x
         if wx < 0 or wx >= WORLD_WIDTH: continue
@@ -99,6 +152,10 @@ def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_ph
             if bc is None: continue
             if b == GRASS and path_wear[wx] >= 50:
                 bc = BLOCK_COLORS[PATH_DIRT]
+            elif b == GRASS:
+                bc = grass_color
+            elif b == LEAF:
+                bc = leaf_color
             c = _apply_ambient(bc, ambient)
             if b in (GRASS, LEAF):
                 c = (_clamp(c[0] + offset[0], 0, 255),
@@ -164,6 +221,10 @@ def _render_structures(pixels, structures, ambient, sim_tick, camera_x, day_phas
             _render_watchtower(pixels, s, ambient, camera_x, is_night)
         elif s.type == "granary":
             _render_granary(pixels, s, ambient, camera_x)
+        elif s.type == "well":
+            _render_well(pixels, s, ambient, camera_x)
+        elif s.type == "castle":
+            _render_castle(pixels, s, ambient, camera_x, is_night)
         elif s.type in ("house_small", "house_large"):
             _render_house(pixels, s, ambient, camera_x, is_night)
 
@@ -243,9 +304,75 @@ def _render_granary(pixels, s, ambient, camera_x):
             else: bc = pal['wall']
             pixels[px, py] = _apply_ambient(bc, ambient)
 
-def _render_trees(pixels, trees, ambient, sim_tick, camera_x, weather, day_phase):
+def _render_well(pixels, s, ambient, camera_x):
+    """Render a well structure: stone base with water and small roof post."""
+    sx = s.x - camera_x
+    if not (0 <= sx < DISPLAY_WIDTH):
+        return
+    rows_to_draw = s.height
+    if s.under_construction:
+        rows_to_draw = max(1, int(s.height * s.build_progress))
+    # Well is 1 pixel wide, 2 pixels tall:
+    #   row 0 (top): roof post / overhang
+    #   row 1 (bottom): stone base with water
+    base_y = s.y + s.height - 1  # bottom row
+    top_y = s.y + s.height - rows_to_draw
+    for row_y in range(top_y, s.y + s.height):
+        if 0 <= row_y < DISPLAY_HEIGHT:
+            if row_y == s.y:  # top row: roof
+                pixels[sx, row_y] = _apply_ambient(WELL_ROOF_COLOR, ambient)
+            else:  # bottom row: stone with water
+                pixels[sx, row_y] = _apply_ambient(WELL_STONE_COLOR, ambient)
+    # Water pixel inside the well base
+    if rows_to_draw >= 2 and 0 <= base_y < DISPLAY_HEIGHT:
+        pixels[sx, base_y] = _apply_ambient(WELL_WATER_COLOR, ambient)
+
+def _render_castle(pixels, s, ambient, camera_x, is_night):
+    """Render a castle using CASTLE_TEMPLATE pixel art."""
+    grid = CASTLE_TEMPLATE
+    pal = CASTLE_PAL
+    rows_to_draw = len(grid)
+    if s.under_construction:
+        rows_to_draw = max(1, int(len(grid) * s.build_progress))
+    draw_rows = grid[-rows_to_draw:] if s.under_construction else grid
+    start_y = s.y + (len(grid) - rows_to_draw) if s.under_construction else s.y
+    for ri, row in enumerate(draw_rows):
+        for ci, ch in enumerate(row):
+            if ch == 'A':
+                continue
+            px = s.x + ci - camera_x
+            py = start_y + ri
+            if not (0 <= px < DISPLAY_WIDTH and 0 <= py < DISPLAY_HEIGHT):
+                continue
+            if ch == 'W':
+                bc = pal['wall']
+            elif ch == 'T':
+                bc = pal['tower']
+            elif ch == 'B':
+                bc = pal['battlement']
+            elif ch == 'D':
+                bc = pal['door']
+            elif ch == 'G':
+                bc = pal['gate']
+            elif ch == 'N':
+                bc = pal['window_night'] if is_night else pal['window_day']
+            else:
+                bc = pal['wall']
+            pixels[px, py] = _apply_ambient(bc, ambient)
+
+def _render_trees(pixels, trees, ambient, sim_tick, camera_x, weather, day_phase, season_info=None):
     offset = _seasonal_color_offset(day_phase)
     sway = weather.tree_sway_offset if weather else 0
+    # Compute blended seasonal leaf color
+    if season_info is not None:
+        current_season, next_season, blend = season_info
+        seasonal_leaf = _lerp_color(
+            SEASON_LEAF_COLORS[current_season],
+            SEASON_LEAF_COLORS[next_season],
+            blend,
+        )
+    else:
+        seasonal_leaf = BLOCK_COLORS[LEAF]
     for tree in trees:
         if not tree.alive: continue
         sx = tree.x - camera_x
@@ -280,7 +407,7 @@ def _render_trees(pixels, trees, ambient, sim_tick, camera_x, weather, day_phase
                 idx = min(len(DYING_LEAF_COLORS) - 1, int(tree.dying_progress * len(DYING_LEAF_COLORS)))
                 lc_base = DYING_LEAF_COLORS[idx]
             else:
-                lc_base = BLOCK_COLORS[LEAF]
+                lc_base = seasonal_leaf
             lc = _apply_ambient(lc_base, ambient)
             lc = (_clamp(lc[0] + offset[0], 0, 255), _clamp(lc[1] + offset[1], 0, 255), _clamp(lc[2] + offset[2], 0, 255))
             if tree.style == 0:
@@ -319,6 +446,8 @@ def _render_villagers(pixels, villagers, ambient, sim_tick, camera_x):
                 body_c = (255, 255, 255)
             elif v.state == "building" and sim_tick % 12 < 6:
                 body_c = head_c
+            elif v.state == "eating" and sim_tick % 6 < 3:
+                body_c = (50, min(body_c[1] + 80, 255), 50)
             if 0 <= by < DISPLAY_HEIGHT:
                 pixels[sx, by] = body_c
             if 0 <= hy < DISPLAY_HEIGHT:
@@ -334,7 +463,10 @@ def _render_birds(pixels, birds, ambient, sim_tick, camera_x):
     for b in birds:
         bx = int(b.x) - camera_x
         by_bird = int(b.y)
-        frame = BIRD_FRAMES[b.wing_frame]
+        if b.perched:
+            frame = BIRD_PERCH_FRAME
+        else:
+            frame = BIRD_FRAMES[b.wing_frame]
         for dx, dy in frame:
             px = bx + dx
             py = by_bird + dy
@@ -419,3 +551,127 @@ def _render_grass_fires(pixels, grass_fires, camera_x):
         sx = gf.x - camera_x
         if 0 <= sx < DISPLAY_WIDTH and 0 <= gf.y < DISPLAY_HEIGHT:
             pixels[sx, gf.y] = random.choice(CAMPFIRE_COLORS)
+
+def _render_animals(pixels, animals, heights, ambient, camera_x):
+    """Render deer and rabbits on the terrain surface."""
+    for animal in animals:
+        ax = int(round(animal.x))
+        sx = ax - camera_x  # screen x for the animal's main position
+        sy = animal.y        # ground surface y
+
+        if animal.animal_type == "deer":
+            # Deer: 3px wide, 2px tall
+            # Body row at ground level (sy - 1), head 1px ahead at same height
+            body_y = sy - 1
+            head_y = sy - 1
+            body_color = _apply_ambient(DEER_COLOR, ambient)
+            head_color = _apply_ambient(DEER_HEAD_COLOR, ambient)
+            # Body: 2 pixels at (sx, body_y) and (sx - direction, body_y)
+            rear_sx = sx - animal.direction
+            head_sx = sx + animal.direction
+            # Draw rear body pixel
+            if 0 <= rear_sx < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+                pixels[rear_sx, body_y] = body_color
+            # Draw center body pixel
+            if 0 <= sx < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+                pixels[sx, body_y] = body_color
+            # Draw head pixel (1 ahead in facing direction)
+            if 0 <= head_sx < DISPLAY_WIDTH and 0 <= head_y < DISPLAY_HEIGHT:
+                pixels[head_sx, head_y] = head_color
+            # Draw legs: 1 row below body (at ground level sy) for center
+            # Optional: a pixel above center for the back/torso height
+            top_y = body_y - 1
+            if 0 <= sx < DISPLAY_WIDTH and 0 <= top_y < DISPLAY_HEIGHT:
+                pixels[sx, top_y] = body_color
+
+        elif animal.animal_type == "rabbit":
+            # Rabbit: 2px wide, 1px tall body at ground level
+            body_y = sy - 1
+            ear_y = body_y - 1
+            body_color = _apply_ambient(RABBIT_COLOR, ambient)
+            ear_color = _apply_ambient(RABBIT_EAR_COLOR, ambient)
+            # Body pixel
+            if 0 <= sx < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+                pixels[sx, body_y] = body_color
+            # Second body pixel (in direction of movement)
+            sx2 = sx + animal.direction
+            if 0 <= sx2 < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+                pixels[sx2, body_y] = body_color
+            # Ear pixel above first body pixel
+            if 0 <= sx < DISPLAY_WIDTH and 0 <= ear_y < DISPLAY_HEIGHT:
+                pixels[sx, ear_y] = ear_color
+
+
+def _render_farms(pixels, farms, ambient, camera_x):
+    """Render farm plots with tilled soil and crops at various growth stages.
+
+    Each farm is FARM_WIDTH pixels wide, rendered at ground level (farm.y).
+    The soil row is drawn at farm.y, and crops grow upward (farm.y - 1).
+    """
+    for farm in farms:
+        for slot in range(farm.width):
+            wx = farm.x + slot
+            sx = wx - camera_x
+            if sx < 0 or sx >= DISPLAY_WIDTH:
+                continue
+            soil_y = farm.y
+            crop_y = farm.y - 1
+            # Draw tilled soil at ground level
+            if 0 <= soil_y < DISPLAY_HEIGHT:
+                pixels[sx, soil_y] = _apply_ambient(TILLED_SOIL_COLOR, ambient)
+            # Draw crop based on growth stage
+            stage = farm.crop_stage(slot)
+            if stage in ("empty", "seeded"):
+                continue  # no visible crop pixel
+            crop_color = CROP_COLORS.get(stage)
+            if crop_color is not None and 0 <= crop_y < DISPLAY_HEIGHT:
+                pixels[sx, crop_y] = _apply_ambient(crop_color, ambient)
+
+
+def _render_boats(pixels, boats, ambient, camera_x):
+    """Render active boats on water surface."""
+    from .constants import BOAT_COLOR, BOAT_DECK_COLOR
+    for boat in boats:
+        if not boat.active:
+            continue
+        sx = int(round(boat.x)) - camera_x
+        sy = boat.y
+        hull_color = _apply_ambient(BOAT_COLOR, ambient)
+        deck_color = _apply_ambient(BOAT_DECK_COLOR, ambient)
+        # 3-pixel boat: left hull, center deck, right hull
+        for dx in (-1, 0, 1):
+            px = sx + dx
+            if 0 <= px < DISPLAY_WIDTH and 0 <= sy < DISPLAY_HEIGHT:
+                pixels[px, sy] = hull_color if dx != 0 else deck_color
+
+
+def _render_caravans(pixels, caravans, ambient, camera_x):
+    """Render trade caravans as 2px-tall figures with a pack."""
+    from .constants import CARAVAN_COLOR, CARAVAN_PACK_COLOR
+    for caravan in caravans:
+        sx = int(round(caravan.x)) - camera_x
+        sy = caravan.y
+        body_y = sy - 1
+        head_y = sy - 2
+        cloak = _apply_ambient(CARAVAN_COLOR, ambient)
+        pack = _apply_ambient(CARAVAN_PACK_COLOR, ambient)
+        # Body
+        if 0 <= sx < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+            pixels[sx, body_y] = cloak
+        # Head
+        if 0 <= sx < DISPLAY_WIDTH and 0 <= head_y < DISPLAY_HEIGHT:
+            pixels[sx, head_y] = (200, 160, 120)  # skin
+        # Pack on back (offset by -direction)
+        pack_x = sx - caravan.direction
+        if 0 <= pack_x < DISPLAY_WIDTH and 0 <= body_y < DISPLAY_HEIGHT:
+            pixels[pack_x, body_y] = pack
+
+
+def _render_snow(pixels, snow_flakes, camera_x):
+    """Render falling snow particles as white dots."""
+    from .constants import SNOW_COLOR
+    for sf in snow_flakes:
+        sx = int(sf.x) - camera_x
+        sy = int(sf.y)
+        if 0 <= sx < DISPLAY_WIDTH and 0 <= sy < DISPLAY_HEIGHT:
+            pixels[sx, sy] = SNOW_COLOR

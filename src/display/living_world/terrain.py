@@ -63,30 +63,37 @@ def _guarantee_pond(heights, world):
             break
     if has_water:
         return
+    # Find the LOWEST terrain point (highest y-value = deepest valley)
+    # so that water naturally settles instead of flowing off a hilltop.
     best_x, best_h = WORLD_WIDTH // 2, heights[WORLD_WIDTH // 2]
     for x in range(10, WORLD_WIDTH - 10):
-        if heights[x] < best_h:
+        if heights[x] > best_h:
             best_h = heights[x]
             best_x = x
     pond_width = random.randint(8, 15)
     lower_by = random.randint(2, 3)
     start = max(0, best_x - pond_width // 2)
     end = min(WORLD_WIDTH, start + pond_width)
+    # Water level = original surface minus 1 so water sits below surrounding terrain
     water_level = best_h
     for x in range(start, end):
-        new_h = heights[x] - lower_by
-        if new_h < TERRAIN_MIN:
-            new_h = TERRAIN_MIN
-        for y in range(new_h, heights[x]):
+        old_h = heights[x]
+        new_h = old_h + lower_by  # Dig DOWN (increase y) to create a basin
+        if new_h >= DISPLAY_HEIGHT - 1:
+            new_h = DISPLAY_HEIGHT - 2
+        # Clear old surface blocks and carve the basin
+        for y in range(old_h, new_h + 1):
             if 0 <= y < DISPLAY_HEIGHT:
                 world[y][x] = AIR
-        heights[x] = new_h
+        # Set new bottom
         if 0 <= new_h < DISPLAY_HEIGHT:
             world[new_h][x] = GRASS
         for y in range(new_h + 1, min(new_h + 5, DISPLAY_HEIGHT)):
             world[y][x] = DIRT
-        for y in range(new_h, min(water_level, DISPLAY_HEIGHT)):
-            if world[y][x] == AIR:
+        heights[x] = new_h
+        # Fill basin with water from original surface down to the dug floor
+        for y in range(water_level, new_h):
+            if 0 <= y < DISPLAY_HEIGHT and world[y][x] == AIR:
                 world[y][x] = WATER
 
 def _simulate_water(world):
@@ -161,14 +168,37 @@ def _place_trees(heights, world, structures=None):
 def _generate_stars():
     return [(random.randint(0,DISPLAY_WIDTH-1), random.randint(0,28)) for _ in range(random.randint(15,25))]
 
-def _get_valley_cols(world):
+# Module-level cache for valley columns (expensive O(n*m) scan)
+_valley_cols_cache = None
+_valley_cols_generation = -1
+
+
+def _get_valley_cols(world, _cache_gen=None):
+    """Return set of columns near water.  Cached per generation tick.
+
+    Call ``_invalidate_valley_cols_cache()`` when water changes, or pass
+    a new ``_cache_gen`` value each tick to auto-refresh periodically.
+    """
+    global _valley_cols_cache, _valley_cols_generation
+    if _cache_gen is not None and _cache_gen == _valley_cols_generation and _valley_cols_cache is not None:
+        return _valley_cols_cache
     vc = set()
     for x in range(WORLD_WIDTH):
         for y in range(DISPLAY_HEIGHT):
             if world[y][x] == WATER:
                 for dx in range(-2,3): vc.add(x+dx)
                 break
+    _valley_cols_cache = vc
+    if _cache_gen is not None:
+        _valley_cols_generation = _cache_gen
     return vc
+
+
+def _invalidate_valley_cols_cache():
+    """Force recomputation on next _get_valley_cols call."""
+    global _valley_cols_cache, _valley_cols_generation
+    _valley_cols_cache = None
+    _valley_cols_generation = -1
 
 def _flatten_terrain(x, heights, world):
     col = x

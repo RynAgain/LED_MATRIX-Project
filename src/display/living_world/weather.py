@@ -2,6 +2,7 @@
 
 import random
 
+from .event_log import log_event, CAT_WEATHER, CAT_COMBAT, CAT_WORLD
 from .constants import (
     WEATHER_CLEAR, WEATHER_CLOUDY, WEATHER_RAIN, WEATHER_STORM,
     WEATHER_DURATION, WEATHER_TRANSITION_FRAMES, WIND_SWAY_INTERVAL,
@@ -30,6 +31,7 @@ def _update_weather(weather, sim_tick):
         weather.state = random.choice(choices)
         weather.timer = random.randint(*WEATHER_DURATION[weather.state])
         weather.transition_frames = WEATHER_TRANSITION_FRAMES
+        log_event(sim_tick, CAT_WEATHER, f"Weather changed: {weather.prev_state} -> {weather.state}")
     if weather.transition_frames > 0:
         weather.transition_frames -= 1
     tgt = weather.target_storm_factor()
@@ -75,7 +77,7 @@ def _update_rain(rain_drops, weather, heights, world, camera_x):
         rx = random.randint(camera_x, camera_x + DISPLAY_WIDTH)
         rain_drops.append(RainDrop(rx, random.randint(-5, 5)))
 
-def _update_lightning(weather, trees, grass_fires, heights, world, camera_x, sim_tick):
+def _update_lightning(weather, trees, grass_fires, heights, world, camera_x, sim_tick, structures=None):
     if weather.lightning_flash > 0:
         weather.lightning_flash -= 1
     if weather.lightning_bolt_timer > 0:
@@ -88,45 +90,61 @@ def _update_lightning(weather, trees, grass_fires, heights, world, camera_x, sim
         bx = random.randint(0, DISPLAY_WIDTH - 1)
         weather.lightning_bolt = (bx, 0, random.randint(20, 40))
         weather.lightning_bolt_timer = LIGHTNING_BOLT_FRAMES
+        log_event(sim_tick, CAT_WEATHER, f"Lightning strike at screen x={bx}")
         wx = bx + camera_x
         if 0 <= wx < WORLD_WIDTH:
-            for t in trees:
-                if t.alive and not t.on_fire and abs(t.x - wx) <= 2:
-                    if random.random() < LIGHTNING_TREE_FIRE_CHANCE:
-                        t.on_fire = True; t.fire_timer = TREE_FIRE_DURATION; break
-            sy = heights[wx]
-            if 0 <= sy < DISPLAY_HEIGHT and world[sy][wx] == GRASS:
-                if random.random() < LIGHTNING_GRASS_FIRE_CHANCE:
-                    grass_fires.append(GrassFire(wx, sy, TREE_FIRE_DURATION))
+            # Wells prevent fires within their radius
+            from .structures import _is_protected_by_well
+            well_protected = _is_protected_by_well(wx, structures) if structures is not None else False
+            if not well_protected:
+                for t in trees:
+                    if t.alive and not t.on_fire and abs(t.x - wx) <= 2:
+                        if random.random() < LIGHTNING_TREE_FIRE_CHANCE:
+                            t.on_fire = True; t.fire_timer = TREE_FIRE_DURATION
+                            log_event(sim_tick, CAT_COMBAT, f"Lightning set tree on fire at x={t.x}")
+                            break
+                sy = heights[wx]
+                if 0 <= sy < DISPLAY_HEIGHT and world[sy][wx] == GRASS:
+                    if random.random() < LIGHTNING_GRASS_FIRE_CHANCE:
+                        grass_fires.append(GrassFire(wx, sy, TREE_FIRE_DURATION))
+                        log_event(sim_tick, CAT_COMBAT, f"Lightning started grass fire at x={wx}")
+            else:
+                log_event(sim_tick, CAT_WORLD, f"Well prevented fire at x={wx}")
 
 def _update_grass_fires(grass_fires):
     for gf in grass_fires:
         gf.timer -= 1
     grass_fires[:] = [g for g in grass_fires if g.timer > 0]
 
+def _get_water_surface_cols(world):
+    """Build an index of columns that have water, with the topmost water y.
+
+    Returns a list of (x, top_y) tuples -- only columns containing water.
+    O(n*m) scan but result is reusable across operations.
+    """
+    cols = []
+    for x in range(WORLD_WIDTH):
+        for y in range(DISPLAY_HEIGHT):
+            if world[y][x] == WATER:
+                cols.append((x, y))
+                break
+    return cols
+
+
 def _update_water_levels(world, heights, weather, sim_tick):
     if weather.is_storming() and sim_tick % WATER_RISE_STORM_INTERVAL == 0:
-        for x in range(WORLD_WIDTH):
-            for y in range(DISPLAY_HEIGHT - 1, -1, -1):
-                if world[y][x] == WATER:
-                    if y - 1 >= 0 and world[y - 1][x] == AIR:
-                        if random.random() < 0.02:
-                            world[y - 1][x] = WATER
-                    break
+        for x, top_y in _get_water_surface_cols(world):
+            if top_y - 1 >= 0 and world[top_y - 1][x] == AIR:
+                if random.random() < 0.02:
+                    world[top_y - 1][x] = WATER
     elif weather.is_raining() and sim_tick % WATER_RISE_RAIN_INTERVAL == 0:
-        for x in range(WORLD_WIDTH):
-            for y in range(DISPLAY_HEIGHT - 1, -1, -1):
-                if world[y][x] == WATER:
-                    if y - 1 >= 0 and world[y - 1][x] == AIR:
-                        if random.random() < 0.005:
-                            world[y - 1][x] = WATER
-                    break
+        for x, top_y in _get_water_surface_cols(world):
+            if top_y - 1 >= 0 and world[top_y - 1][x] == AIR:
+                if random.random() < 0.005:
+                    world[top_y - 1][x] = WATER
     elif not weather.is_raining() and sim_tick % WATER_RECEDE_INTERVAL == 0:
-        for x in range(WORLD_WIDTH):
-            for y in range(DISPLAY_HEIGHT):
-                if world[y][x] == WATER:
-                    if y == 0 or world[y - 1][x] == AIR:
-                        if y + 1 < DISPLAY_HEIGHT and world[y + 1][x] == WATER:
-                            if random.random() < 0.01:
-                                world[y][x] = AIR
-                    break
+        for x, top_y in _get_water_surface_cols(world):
+            if top_y == 0 or world[top_y - 1][x] == AIR:
+                if top_y + 1 < DISPLAY_HEIGHT and world[top_y + 1][x] == WATER:
+                    if random.random() < 0.01:
+                        world[top_y][x] = AIR

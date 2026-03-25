@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Living World Viewer{% endblock %}
+{% block content %}
+<h1>Living World</h1>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+  <!-- Minimap -->
+  <div class="card">
+    <h2>World Minimap</h2>
+    <canvas id="minimap" width="384" height="128" style="width:100%;border:1px solid #444;background:#111;image-rendering:pixelated;cursor:crosshair;"></canvas>
+    <div id="minimap-info" style="font-size:12px;color:#aaa;margin-top:4px;">
+      Pop: <span id="pop-count">-</span> |
+      Tick: <span id="sim-tick">-</span> |
+      Weather: <span id="weather-state">-</span>
+    </div>
+  </div>
+
+  <!-- Villager Inspector -->
+  <div class="card">
+    <h2>Villager Inspector</h2>
+    <div id="villager-list" style="max-height:200px;overflow-y:auto;font-size:12px;"></div>
+    <div id="villager-detail" style="display:none;margin-top:8px;padding:8px;background:#1a1a2a;border-radius:4px;font-size:12px;">
+      <strong id="vd-name">--</strong> (<span id="vd-trait">--</span>)<br>
+      State: <span id="vd-state">--</span> |
+      Goal: <span id="vd-goal">--</span><br>
+      Lumber: <span id="vd-lumber">0</span> |
+      Stone: <span id="vd-stone">0</span> |
+      Food: <span id="vd-food">0</span><br>
+      Hunger: <span id="vd-hunger">0</span> |
+      Age: <span id="vd-age">0</span>/<span id="vd-maxage">0</span><br>
+      Home: <span id="vd-home">-</span> |
+      Farm: <span id="vd-farm">-</span> |
+      Bow: <span id="vd-bow">-</span>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+  <!-- World Controls -->
+  <div class="card">
+    <h2>World Controls</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn" onclick="sendCmd('set_weather',{state:'clear'})">Clear Sky</button>
+      <button class="btn" onclick="sendCmd('set_weather',{state:'rain'})">Rain</button>
+      <button class="btn" onclick="sendCmd('set_weather',{state:'storm'})">Storm</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn" onclick="sendCmd('spawn_villager',{})">Spawn Villager</button>
+      <button class="btn" onclick="sendCmd('set_time',{phase:'day'})">Set Day</button>
+      <button class="btn" onclick="sendCmd('set_time',{phase:'night'})">Set Night</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn" onclick="sendCmd('toggle_season',{})">Next Season</button>
+    </div>
+    <div id="cmd-status" style="font-size:11px;color:#888;margin-top:6px;"></div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="card">
+    <h2>Event Log</h2>
+    <div style="margin-bottom:6px;">
+      <select id="log-filter" onchange="refreshEvents()" style="font-size:12px;padding:2px;">
+        <option value="">All</option>
+        <option value="villager">Villager</option>
+        <option value="building">Building</option>
+        <option value="weather">Weather</option>
+        <option value="combat">Combat</option>
+        <option value="economy">Economy</option>
+        <option value="death">Death</option>
+        <option value="birth">Birth</option>
+        <option value="world">World</option>
+      </select>
+    </div>
+    <div id="event-log" style="max-height:180px;overflow-y:auto;font-size:11px;font-family:monospace;background:#0a0a15;padding:4px;border-radius:4px;">
+      <div style="color:#555;">Loading events...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let worldData = null;
+let selectedVillager = null;
+
+// -- Minimap rendering --
+function drawMinimap(data) {
+  const canvas = document.getElementById('minimap');
+  const ctx = canvas.getContext('2d');
+  const w = data.world_width;
+  const scale = canvas.width / w;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, canvas.width, h);
+
+  // Sky
+  ctx.fillStyle = '#1a3366';
+  ctx.fillRect(0, 0, canvas.width, h);
+
+  // Terrain heights
+  if (data.heights && data.heights.length) {
+    ctx.fillStyle = '#1c7a1c';
+    for (let x = 0; x < w; x++) {
+      let ty = data.heights[x];
+      let sy = (ty / 64) * h;
+      ctx.fillRect(x * scale, sy, Math.max(1, scale), h - sy);
+    }
+  }
+
+  // Structures
+  const structColors = {
+    'campfire': '#ff6600',
+    'house_small': '#8a5020',
+    'house_large': '#8a5020',
+    'watchtower': '#7878aa',
+    'granary': '#7a4820',
+    'mine': '#303040',
+    'bridge': '#6a3a12',
+    'well': '#6464aa',
+  };
+  (data.structures || []).forEach(s => {
+    ctx.fillStyle = structColors[s.type] || '#888';
+    let sx = s.x * scale;
+    let sy = (s.y / 64) * h;
+    ctx.fillRect(sx, sy, Math.max(2, s.width * scale), Math.max(2, s.height * scale * 0.5));
+  });
+
+  // Trees
+  ctx.fillStyle = '#0a6610';
+  (data.trees || []).forEach(t => {
+    if (t.on_fire) ctx.fillStyle = '#ff4400';
+    else ctx.fillStyle = '#0a6610';
+    let tx = t.x * scale;
+    let ty = ((t.base_y - 4) / 64) * h;
+    ctx.fillRect(tx, ty, Math.max(1, scale), 4);
+  });
+
+  // Animals
+  (data.animals || []).forEach(a => {
+    ctx.fillStyle = a.type === 'deer' ? '#8c6432' : '#b0a090';
+    let ax = a.x * scale;
+    let ay = (a.y / 64) * h - 2;
+    ctx.fillRect(ax, ay, 2, 2);
+  });
+
+  // Villagers as colored dots
+  (data.villagers || []).forEach((v, i) => {
+    ctx.fillStyle = (selectedVillager === i) ? '#ffff00' : '#ff4444';
+    let vx = v.x * scale;
+    let vy = (v.y / 64) * h - 3;
+    ctx.beginPath();
+    ctx.arc(vx, vy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Camera viewport
+  if (data.camera_x !== undefined) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    let cx = data.camera_x * scale;
+    let cw = data.display_width * scale;
+    ctx.strokeRect(cx, 0, cw, h);
+  }
+
+  // Update info
+  document.getElementById('pop-count').textContent = data.population || 0;
+  document.getElementById('sim-tick').textContent = data.sim_tick || 0;
+  document.getElementById('weather-state').textContent = data.weather ? data.weather.state : '-';
+}
+
+// -- Minimap click -> select villager --
+document.getElementById('minimap').addEventListener('click', function(e) {
+  if (!worldData || !worldData.villagers) return;
+  const rect = this.getBoundingClientRect();
+  const clickX = (e.clientX - rect.left) / rect.width * worldData.world_width;
+  let best = -1, bestDist = 999;
+  worldData.villagers.forEach((v, i) => {
+    let d = Math.abs(v.x - clickX);
+    if (d < bestDist) { bestDist = d; best = i; }
+  });
+  if (best >= 0 && bestDist < 10) {
+    selectedVillager = best;
+    showVillagerDetail(worldData.villagers[best]);
+  }
+});
+
+// -- Villager list --
+function updateVillagerList(villagers) {
+  const div = document.getElementById('villager-list');
+  if (!villagers || !villagers.length) {
+    div.innerHTML = '<div style="color:#666;">No villagers</div>';
+    return;
+  }
+  div.innerHTML = villagers.map((v, i) =>
+    `<div style="cursor:pointer;padding:2px 4px;${selectedVillager===i?'background:#222244;':''}" onclick="selectVillager(${i})">
+      <span style="color:#dda;">${v.name}</span>
+      <span style="color:#888;"> [${v.trait}]</span>
+      <span style="color:#aaa;"> ${v.state}</span>
+    </div>`
+  ).join('');
+}
+
+function selectVillager(idx) {
+  if (!worldData || !worldData.villagers) return;
+  selectedVillager = idx;
+  showVillagerDetail(worldData.villagers[idx]);
+  updateVillagerList(worldData.villagers);
+  drawMinimap(worldData);
+}
+
+function showVillagerDetail(v) {
+  const d = document.getElementById('villager-detail');
+  d.style.display = 'block';
+  document.getElementById('vd-name').textContent = v.name;
+  document.getElementById('vd-trait').textContent = v.trait;
+  document.getElementById('vd-state').textContent = v.state;
+  document.getElementById('vd-goal').textContent = v.current_goal || 'none';
+  document.getElementById('vd-lumber').textContent = v.lumber;
+  document.getElementById('vd-stone').textContent = v.stone;
+  document.getElementById('vd-food').textContent = v.food;
+  document.getElementById('vd-hunger').textContent = v.hunger;
+  document.getElementById('vd-age').textContent = v.age;
+  document.getElementById('vd-maxage').textContent = v.max_age;
+  document.getElementById('vd-home').textContent = v.has_home ? 'Yes' : 'No';
+  document.getElementById('vd-farm').textContent = v.has_farm ? 'Yes' : 'No';
+  document.getElementById('vd-bow').textContent = v.has_bow ? 'Yes' : 'No';
+}
+
+// -- World controls --
+function sendCmd(action, params) {
+  fetch('/api/living-world/command', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: action, params: params})
+  })
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('cmd-status').textContent = d.message || 'OK';
+    setTimeout(() => document.getElementById('cmd-status').textContent = '', 3000);
+  })
+  .catch(e => {
+    document.getElementById('cmd-status').textContent = 'Error: ' + e;
+  });
+}
+
+// -- Event log --
+function refreshEvents() {
+  const cat = document.getElementById('log-filter').value;
+  const url = '/api/living-world/events?count=50' + (cat ? '&category=' + cat : '');
+  fetch(url)
+    .then(r => r.json())
+    .then(d => {
+      const div = document.getElementById('event-log');
+      if (!d.success || !d.events || !d.events.length) {
+        div.innerHTML = '<div style="color:#555;">No events</div>';
+        return;
+      }
+      const catColors = {
+        'villager': '#aaa', 'building': '#da4', 'weather': '#4ad',
+        'combat': '#d44', 'economy': '#4d4', 'death': '#a44',
+        'birth': '#4a4', 'world': '#88a',
+      };
+      div.innerHTML = d.events.map(e =>
+        `<div><span style="color:#666;">[${e.tick}]</span> <span style="color:${catColors[e.category]||'#aaa'};">${e.message}</span></div>`
+      ).join('');
+    })
+    .catch(() => {});
+}
+
+// -- Polling --
+function refreshWorld() {
+  fetch('/api/living-world/state')
+    .then(r => r.json())
+    .then(d => {
+      if (d.success && d.data) {
+        worldData = d.data;
+        drawMinimap(d.data);
+        updateVillagerList(d.data.villagers);
+        if (selectedVillager !== null && d.data.villagers[selectedVillager]) {
+          showVillagerDetail(d.data.villagers[selectedVillager]);
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+// Initial load + periodic refresh
+refreshWorld();
+refreshEvents();
+setInterval(refreshWorld, 5000);
+setInterval(refreshEvents, 10000);
+</script>
+{% endblock %}

@@ -16,7 +16,7 @@
     {
       "name": "pong",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "billiards",

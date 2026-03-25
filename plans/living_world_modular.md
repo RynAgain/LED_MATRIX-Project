@@ -657,12 +657,3 @@ These are the implementation steps for the refactoring, in order:
 17. Create `plans/LIVING_WORLD_FEATURES.md` from the feature tracker in section E
 
 ## G. more stuf to do
-- [ ] trees should grow a littel faster
-- [ ] should not grow within 2 pixels of a house or building
-- [ ] add rabits and hunting to the system meat as a resource
-- [ ] system should run as long as we please
-- [ ] system should save and restore between runs
-- [ ] what is the end goal here a question to ask?
-- [ ] fire fighting role?
-
-- [ ] rain makes plants grow faster
