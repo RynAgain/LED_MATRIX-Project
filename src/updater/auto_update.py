@@ -72,9 +72,44 @@ class AutoUpdater:
             logger.error("git command timed out: %s", " ".join(cmd))
             return None
 
+    def _repair_git(self):
+        """Attempt to repair a corrupted git repository.
+
+        Fixes corrupt loose objects by running fsck + prune, then
+        re-fetching from the remote. This handles the common case where
+        a power loss corrupts .git/objects/ files.
+
+        Returns:
+            True if repair succeeded, False otherwise.
+        """
+        logger.warning("Attempting git repository repair...")
+
+        # Remove corrupt loose objects
+        self._run_git(["prune"])
+        self._run_git(["gc", "--auto"])
+
+        # If that's not enough, do a more aggressive repair
+        result = self._run_git(["fsck", "--no-dangling"], timeout=120)
+        if result and result.returncode != 0:
+            logger.warning("fsck found issues: %s", result.stderr.strip()[:500])
+            # Nuclear option: re-fetch all objects from remote
+            logger.warning("Re-fetching all objects from remote...")
+            self._run_git(["fetch", "--all", "--prune"], timeout=120)
+
+        # Verify we can read HEAD now
+        result = self._run_git(["rev-parse", "HEAD"])
+        if result and result.returncode == 0:
+            logger.info("Git repository repair succeeded")
+            return True
+        else:
+            logger.error("Git repository repair failed. Manual intervention needed: "
+                         "cd %s && rm -rf .git && git clone <url> .", self.project_root)
+            return False
+
     def fetch_remote(self):
         """
         Fetch latest changes from remote without applying them.
+        If fetch fails due to corrupt objects, attempts automatic repair.
 
         Returns:
             True if fetch succeeded, False otherwise.
@@ -84,10 +119,22 @@ class AutoUpdater:
         if result and result.returncode == 0:
             logger.info("Fetch completed successfully")
             return True
-        else:
-            error = result.stderr.strip() if result else "git not available"
-            logger.error("Fetch failed: %s", error)
-            return False
+
+        error = result.stderr.strip() if result else "git not available"
+        logger.error("Fetch failed: %s", error)
+
+        # Detect corrupt git objects and attempt repair
+        if result and ("corrupt" in error.lower() or "inflate" in error.lower()
+                       or "unable to unpack" in error.lower()):
+            logger.warning("Corrupt git objects detected, attempting repair...")
+            if self._repair_git():
+                # Retry fetch after repair
+                result = self._run_git(["fetch", "origin", self.branch])
+                if result and result.returncode == 0:
+                    logger.info("Fetch succeeded after repair")
+                    return True
+
+        return False
 
     def has_updates(self):
         """

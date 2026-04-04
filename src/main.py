@@ -222,9 +222,24 @@ def handle_play_video(matrix, url, title="Unknown", duration=300):
             pass
 
 
+# Minimal fallback config so the system can boot even with a corrupt config.json.
+# Shows time_display so the user at least sees something on the matrix.
+_DEFAULT_CONFIG = {
+    "display_duration": 60,
+    "sequence": [
+        {"name": "time_display", "type": "utility", "enabled": True},
+        {"name": "fire", "type": "effect", "enabled": True},
+    ]
+}
+
+
 def load_config():
     """
     Load display sequence configuration.
+
+    Falls back to a minimal default config if the file is missing or corrupt,
+    instead of crashing. This prevents boot loops when config.json gets
+    corrupted (e.g., by a failed write or disk issue).
 
     Returns:
         dict: Configuration dictionary with sequence and settings.
@@ -232,15 +247,19 @@ def load_config():
     config_path = os.path.join(PROJECT_ROOT, "config", "config.json")
     try:
         with open(config_path, "r") as f:
-            config = json.load(f)
+            content = f.read().strip()
+        if not content:
+            raise json.JSONDecodeError("Empty file", "", 0)
+        config = json.loads(content)
         logger.info("Loaded config from %s", config_path)
         return config
     except FileNotFoundError:
-        logger.error("Config file not found: %s", config_path)
-        sys.exit(1)
+        logger.error("Config file not found: %s -- using defaults", config_path)
+        return _DEFAULT_CONFIG.copy()
     except json.JSONDecodeError as e:
-        logger.error("Invalid JSON in config: %s", e)
-        sys.exit(1)
+        logger.error("Invalid JSON in config: %s -- using defaults", e)
+        logger.error("Fix your config/config.json or re-download it from GitHub")
+        return _DEFAULT_CONFIG.copy()
 
 
 def _create_simulator_matrix(options=None):
