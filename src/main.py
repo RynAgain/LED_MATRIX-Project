@@ -537,6 +537,118 @@ def _handle_command(cmd, matrix, duration):
         _show_pixel_art(matrix)
 
 
+def _precache_youtube_videos(matrix, enabled_features):
+    """Pre-download YouTube videos at boot with a loading ring animation.
+
+    Runs only if youtube_stream is in the enabled features list.
+    Downloads videos in a background thread while showing an animated
+    loading ring on the matrix. Retries failed downloads up to 2 times.
+    Gracefully skips if no internet or dependencies are missing.
+    """
+    # Check if youtube_stream is enabled
+    yt_enabled = any(f.get("name") == "youtube_stream" for f in enabled_features)
+    if not yt_enabled:
+        return
+
+    logger.info("YouTube is enabled -- pre-caching videos at boot...")
+
+    try:
+        from src.display.youtube_stream import (
+            _ensure_dependencies, _update_ytdlp, read_urls_from_csv,
+            download_video, _is_cached, CACHE_DIR
+        )
+    except ImportError as e:
+        logger.warning("Cannot import youtube_stream for precaching: %s", e)
+        return
+
+    if not _ensure_dependencies():
+        logger.warning("YouTube dependencies missing, skipping precache")
+        return
+
+    # Update yt-dlp first
+    _update_ytdlp()
+
+    csv_path = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
+    urls = read_urls_from_csv(csv_path)
+    if not urls:
+        logger.info("No YouTube URLs to precache")
+        return
+
+    # Shared state between download thread and animation thread
+    status = {"downloaded": 0, "failed": 0, "total": len(urls), "current": ""}
+    done_event = threading.Event()
+
+    def get_status():
+        d = status["downloaded"]
+        f = status["failed"]
+        t = status["total"]
+        current = status["current"]
+        line1 = f"CACHING {d}/{t}"
+        line2 = current[:10] if current else ""
+        return line1, line2
+
+    def download_worker():
+        max_retries = 2
+        for url, title, dur in urls:
+            if _shutdown:
+                break
+
+            status["current"] = title
+
+            if _is_cached(url):
+                status["downloaded"] += 1
+                logger.info("Already cached: '%s' (%d/%d)",
+                            title, status["downloaded"], status["total"])
+                continue
+
+            # Try downloading with retries
+            success = False
+            for attempt in range(1, max_retries + 1):
+                if _shutdown:
+                    break
+                logger.info("Downloading '%s' (attempt %d/%d)...", title, attempt, max_retries)
+                path = download_video(url, title)
+                if path:
+                    success = True
+                    break
+                if attempt < max_retries:
+                    logger.warning("Retry %d for '%s'...", attempt, title)
+                    time.sleep(2)
+
+            if success:
+                status["downloaded"] += 1
+                logger.info("Cached '%s' (%d/%d)",
+                            title, status["downloaded"], status["total"])
+            else:
+                status["failed"] += 1
+                logger.warning("Failed to cache '%s' after %d attempts (%d failed)",
+                               title, max_retries, status["failed"])
+
+        status["current"] = ""
+        done_event.set()
+
+    # Start download in background thread
+    dl_thread = threading.Thread(target=download_worker, daemon=True)
+    dl_thread.start()
+
+    # Show loading ring animation while downloading
+    try:
+        from src.display.boot_screen import show_loading_ring
+        show_loading_ring(matrix, get_status, done_event)
+    except Exception as e:
+        logger.warning("Loading ring animation failed: %s", e)
+        # Fall back to just waiting
+        dl_thread.join(timeout=300)
+
+    # Ensure download thread finishes
+    dl_thread.join(timeout=10)
+
+    d = status["downloaded"]
+    f = status["failed"]
+    t = status["total"]
+    logger.info("YouTube precache complete: %d/%d cached, %d failed", d, t, f)
+
+
 def ensure_wifi():
     """
     Ensure WiFi connectivity before starting display loop.
@@ -633,6 +745,11 @@ def main():
         sys.exit(1)
 
     logger.info("Enabled features: %s", [f["name"] for f in enabled_features])
+
+    # Pre-cache YouTube videos at boot if youtube_stream is enabled.
+    # Downloads happen in a background thread while a loading ring
+    # animates on the matrix. If no internet, this gracefully skips.
+    _precache_youtube_videos(matrix, enabled_features)
 
     # Store matrix reference for web panel preview
     import src.main as _self_module

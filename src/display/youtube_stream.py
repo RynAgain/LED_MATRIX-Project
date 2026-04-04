@@ -451,15 +451,10 @@ def play_videos_on_matrix(matrix):
 def run(matrix, duration=60):
     """Run the YouTube Stream display feature for the specified duration.
 
-    Starts a background thread to download videos while simultaneously
-    playing any that are already cached or become ready.
-
-    Behavior:
-      - Already-cached videos play immediately (no download wait)
-      - New videos download in background; each plays as soon as ready
-      - If no videos are ready yet, shows a download progress screen
-      - Loops the playlist if time remains after all videos play
-      - Downloads persist to disk for instant playback on future cycles
+    Plays videos from the local cache (downloaded_videos/).
+    Videos are pre-cached at boot by main.py -- this function does NOT
+    download anything. If no cached videos exist, it logs a warning and
+    returns immediately so the system continues to the next feature.
 
     Args:
         matrix: RGBMatrix instance (or mock).
@@ -468,9 +463,6 @@ def run(matrix, duration=60):
     if not _ensure_dependencies():
         logger.error("Cannot run YouTube streaming -- missing dependencies")
         return
-
-    # Auto-update yt-dlp (YouTube breaks old versions constantly)
-    _update_ytdlp()
 
     csv_path = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
     start_time = time.time()
@@ -482,44 +474,30 @@ def run(matrix, duration=60):
             logger.warning("No YouTube URLs found in %s", csv_path)
             return
 
-        # Start background downloader thread
-        downloader = _BackgroundDownloader(urls)
-        downloader.start()
+        # Build playlist from already-cached videos only
+        playlist = []
+        for url, title, dur in urls:
+            if _is_cached(url):
+                playlist.append((_url_to_cache_path(url), title, dur))
+            else:
+                logger.info("Video not cached, skipping: '%s'", title)
 
-        # Collect playable videos as they become ready
-        playlist = []  # List of (path, title, dur) for completed downloads
+        if not playlist:
+            logger.warning("No cached videos available. "
+                           "Videos are downloaded at boot -- try rebooting with internet.")
+            return
+
+        logger.info("Playing %d cached videos (out of %d in playlist)",
+                     len(playlist), len(urls))
+
+        # Play loop: cycle through cached videos until duration expires
         videos_played = 0
         playlist_idx = 0
 
         while time.time() < global_deadline and not should_stop():
-
-            # Drain any newly-ready videos from the downloader
-            newly_ready = downloader.get_all_ready()
-            playlist.extend(newly_ready)
-
-            if not playlist:
-                # Nothing ready yet -- show download progress
-                downloaded, failed, total = downloader.progress
-                _show_status_frame(matrix, "BUFFERING", f"{downloaded}/{total}")
-
-                if downloader.is_done() and not playlist:
-                    logger.error("All downloads failed, nothing to play")
-                    _show_error_frame(matrix, "NO VIDEOS")
-                    time.sleep(3)
-                    break
-
-                time.sleep(0.5)
-                continue
-
-            # Play the next video in the playlist
             if playlist_idx >= len(playlist):
-                # Reached end of playlist, loop back
                 playlist_idx = 0
-                # Also drain any late arrivals
-                playlist.extend(downloader.get_all_ready())
-                if not playlist:
-                    break
-                logger.info("Looping playlist (%d videos)", len(playlist))
+                logger.info("Looping playlist")
 
             path, title, dur = playlist[playlist_idx]
             playlist_idx += 1
@@ -544,7 +522,6 @@ def run(matrix, duration=60):
             if frames > 0:
                 videos_played += 1
 
-        downloader.stop()
         logger.info("YouTube session complete: played %d video segments", videos_played)
 
     except Exception as e:
