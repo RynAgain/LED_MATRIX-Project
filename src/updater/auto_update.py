@@ -187,11 +187,14 @@ class AutoUpdater:
 
     def restart_display_service(self):
         """
-        Restart the LED matrix display service via systemd.
+        Restart the LED matrix display and web services via systemd.
 
         Returns:
-            True if restart command succeeded, False otherwise.
+            True if restart commands succeeded, False otherwise.
         """
+        success = True
+
+        # Restart display service
         logger.info("Restarting led-matrix display service...")
         try:
             result = subprocess.run(
@@ -202,13 +205,32 @@ class AutoUpdater:
             )
             if result.returncode == 0:
                 logger.info("Display service restarted successfully")
-                return True
             else:
-                logger.error("Service restart failed: %s", result.stderr.strip())
-                return False
+                logger.error("Display service restart failed: %s", result.stderr.strip())
+                success = False
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            logger.error("Could not restart service: %s", e)
-            return False
+            logger.error("Could not restart display service: %s", e)
+            success = False
+
+        # Restart web panel service (picks up new routes/templates)
+        logger.info("Restarting led-matrix-web service...")
+        try:
+            result = subprocess.run(
+                ["sudo", "systemctl", "restart", "led-matrix-web.service"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                logger.info("Web service restarted successfully")
+            else:
+                logger.error("Web service restart failed: %s", result.stderr.strip())
+                success = False
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            logger.error("Could not restart web service: %s", e)
+            success = False
+
+        return success
 
     def check_and_update(self):
         """
