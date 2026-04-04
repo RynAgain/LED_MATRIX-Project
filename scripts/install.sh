@@ -68,11 +68,10 @@ log_info "Logs directory ready"
 # --- Step 5: Install systemd services ---
 log_info "Step 5/6: Installing systemd services..."
 
-# Display service
+# Display service (runs as root for GPIO/hardware access)
 cp "$PROJECT_ROOT/services/led-matrix.service" /etc/systemd/system/led-matrix.service
 sed -i "s|/home/pi/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix.service
-sed -i "s|User=pi|User=$ACTUAL_USER|g" /etc/systemd/system/led-matrix.service
-sed -i "s|Group=pi|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix.service
+# NOTE: Display service intentionally runs as root (required by rpi-rgb-led-matrix for GPIO)
 
 # Updater service
 cp "$PROJECT_ROOT/services/led-matrix-updater.service" /etc/systemd/system/led-matrix-updater.service

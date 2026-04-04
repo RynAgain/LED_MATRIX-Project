@@ -6,8 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+# Must run as root for GPIO/hardware access (rpi-rgb-led-matrix requirement)
+User=root
+Group=root
 WorkingDirectory=/home/pi/LED_MATRIX-Project
 ExecStartPre=/bin/sleep 5
 ExecStart=/home/pi/LED_MATRIX-Project/venv/bin/python3 /home/pi/LED_MATRIX-Project/src/main.py
@@ -21,8 +22,7 @@ SyslogIdentifier=led-matrix
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/pi/LED_MATRIX-Project
 
-# Hardening
-ProtectHome=read-only
+# Hardening (ProtectHome removed - project lives under /home and needs write access)
 NoNewPrivileges=false
 
 [Install]

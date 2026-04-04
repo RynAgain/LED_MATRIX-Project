@@ -261,24 +261,45 @@ def _create_simulator_matrix(options=None):
 def init_matrix():
     """
     Initialize the RGB LED matrix.
+
+    Reads hardware parameters from config/config.json -> "matrix_hardware".
+    If no hardware config exists, uses sensible defaults for a 64x64 panel.
+
     On Raspberry Pi: uses the real rgbmatrix library.
     On other platforms: falls back to pygame-based simulator.
     """
+    # Load hardware config (or use defaults)
+    hw = _load_hardware_config()
+
     try:
         from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
         options = RGBMatrixOptions()
-        options.rows = 64
-        options.cols = 64
-        options.chain_length = 1
-        options.parallel = 1
-        options.hardware_mapping = "regular"
-        options.gpio_slowdown = 4
-        options.brightness = 80
-        options.drop_privileges = False
+        options.rows = hw.get("rows", 64)
+        options.cols = hw.get("cols", 64)
+        options.chain_length = hw.get("chain_length", 1)
+        options.parallel = hw.get("parallel", 1)
+        options.hardware_mapping = hw.get("hardware_mapping", "regular")
+        options.gpio_slowdown = hw.get("gpio_slowdown", 4)
+        options.brightness = hw.get("brightness", 80)
+        options.drop_privileges = hw.get("drop_privileges", False)
+        options.pwm_bits = hw.get("pwm_bits", 11)
+        options.pwm_lsb_nanoseconds = hw.get("pwm_lsb_nanoseconds", 130)
+        options.pwm_dither_bits = hw.get("pwm_dither_bits", 0)
+        options.scan_mode = hw.get("scan_mode", 0)
+        options.multiplexing = hw.get("multiplexing", 0)
+        options.row_address_type = hw.get("row_address_type", 0)
+        options.disable_hardware_pulsing = hw.get("disable_hardware_pulsing", False)
 
+        pixel_mapper = hw.get("pixel_mapper", "")
+        if pixel_mapper:
+            options.pixel_mapper_config = pixel_mapper
+
+        total_w = options.cols * options.chain_length
+        total_h = options.rows * options.parallel
         matrix = RGBMatrix(options=options)
-        logger.info("RGB LED Matrix initialized (64x64)")
+        logger.info("RGB LED Matrix initialized (%dx%d, mapping=%s, slowdown=%d)",
+                     total_w, total_h, options.hardware_mapping, options.gpio_slowdown)
         return matrix
     except ImportError:
         logger.warning("rgbmatrix not available - using simulator")
@@ -287,6 +308,31 @@ def init_matrix():
         logger.error("Failed to initialize matrix: %s", e)
         logger.warning("Falling back to simulator")
         return _create_simulator_matrix()
+
+
+def _load_hardware_config():
+    """Load matrix hardware settings from config/config.json.
+
+    Returns:
+        dict with hardware parameters. Falls back to empty dict (defaults)
+        if the key is missing or the file cannot be read.
+    """
+    config_path = os.path.join(PROJECT_ROOT, "config", "config.json")
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        hw = config.get("matrix_hardware", {})
+        if hw:
+            logger.info("Loaded matrix hardware config: %dx%d, mapping=%s",
+                        hw.get("rows", 64), hw.get("cols", 64),
+                        hw.get("hardware_mapping", "regular"))
+        else:
+            logger.info("No matrix_hardware in config, using defaults. "
+                        "Run: sudo bash scripts/configure_matrix.sh")
+        return hw
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning("Could not read hardware config: %s, using defaults", e)
+        return {}
 
 
 def _register_simulator_modules():
