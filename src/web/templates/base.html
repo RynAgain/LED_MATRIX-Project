@@ -23,6 +23,7 @@
             <a href="{{ url_for('wireframe_page') }}" class="{% if request.endpoint == 'wireframe_page' %}active{% endif %}">3D</a>
             <a href="{{ url_for('living_world') }}" class="{% if request.endpoint == 'living_world' %}active{% endif %}">World</a>
             <a href="{{ url_for('wifi') }}" class="{% if request.endpoint == 'wifi' %}active{% endif %}">WiFi</a>
+            <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Logs</a>
             <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}">Settings</a>
             <a href="{{ url_for('logout') }}" class="nav-logout">Logout</a>
         </div>

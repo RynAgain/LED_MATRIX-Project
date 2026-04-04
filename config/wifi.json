@@ -197,6 +197,18 @@
       "password": "testpass",
       "priority": 1,
       "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
+      "priority": 1,
+      "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
+      "priority": 1,
+      "hidden": false
     }
   ],
   "connection_timeout": 30,

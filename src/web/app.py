@@ -1019,6 +1019,59 @@ def create_app():
 
         return render_template("change_password.html", user=session.get("user"))
 
+    @app.route("/logs")
+    @login_required
+    def logs_page():
+        return render_template("logs.html", user=session.get("user"))
+
+    @app.route("/api/logs")
+    @login_required
+    def api_logs():
+        """Return recent log lines as JSON for the logs viewer.
+
+        Query params:
+            file: 'display' (default) or 'updater'
+            lines: number of lines to return (default 200, max 2000)
+            filter: optional text filter (case-insensitive substring match)
+        """
+        log_file = request.args.get("file", "display")
+        num_lines = min(int(request.args.get("lines", 200)), 2000)
+        text_filter = request.args.get("filter", "").strip().lower()
+
+        # Map log file names to actual paths
+        log_files = {
+            "display": os.path.join(PROJECT_ROOT, "logs", "display.log"),
+            "updater": os.path.join(PROJECT_ROOT, "logs", "updater.log"),
+        }
+
+        log_path = log_files.get(log_file)
+        if not log_path or not os.path.exists(log_path):
+            return jsonify({"lines": [], "file": log_file, "error": "Log file not found"})
+
+        try:
+            # Read last N lines efficiently (read from end)
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+
+            # Take last N lines
+            recent = all_lines[-num_lines:] if len(all_lines) > num_lines else all_lines
+
+            # Apply filter if specified
+            if text_filter:
+                recent = [l for l in recent if text_filter in l.lower()]
+
+            # Strip trailing newlines
+            recent = [l.rstrip("\n\r") for l in recent]
+
+            return jsonify({
+                "lines": recent,
+                "file": log_file,
+                "total_lines": len(all_lines),
+                "showing": len(recent),
+            })
+        except Exception as e:
+            return jsonify({"lines": [], "file": log_file, "error": str(e)})
+
     return app
 
 
