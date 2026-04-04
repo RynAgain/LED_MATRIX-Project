@@ -2,11 +2,15 @@
 YouTube video streaming for 64x64 LED matrix.
 
 Downloads YouTube videos to local cache at low resolution, then plays
-from disk. This is far more reliable than real-time streaming on a Pi:
-  - No network jitter during playback
-  - No stream URL expiration mid-video
-  - Faster frame decode from local files
-  - Videos persist across reboots (only downloaded once)
+from disk. Uses a background thread to download videos concurrently
+with playback -- plays each video as soon as it's ready.
+
+Architecture:
+  - Background thread downloads videos to downloaded_videos/
+  - Main thread plays videos from local cache as they become available
+  - Already-cached videos play immediately (no download wait)
+  - New videos download in background and are available for future cycles
+  - Downloads persist across reboots (only downloaded once per URL)
 
 Requires: yt-dlp, opencv-python-headless, numpy, Pillow
 """
@@ -18,6 +22,8 @@ import csv
 import subprocess
 import hashlib
 import logging
+import threading
+import queue
 from PIL import Image
 from src.display._shared import should_stop
 
@@ -85,7 +91,6 @@ def _update_ytdlp():
         )
         if result.returncode == 0:
             logger.info("yt-dlp is up to date")
-            # Reload the module to pick up new version
             import importlib
             global yt_dlp
             if yt_dlp is not None:
@@ -100,10 +105,7 @@ def _update_ytdlp():
 
 
 def _url_to_cache_path(url):
-    """Generate a deterministic cache filename from a URL.
-
-    Returns the full path to the cached video file.
-    """
+    """Generate a deterministic cache filename from a URL."""
     url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
     return os.path.join(CACHE_DIR, f"{url_hash}.mp4")
 
@@ -113,11 +115,13 @@ def _is_cached(url):
     path = _url_to_cache_path(url)
     if not os.path.exists(path):
         return False
-    # Check file isn't empty or corrupt (at least 10KB)
     size = os.path.getsize(path)
     if size < 10240:
         logger.warning("Cached file too small (%d bytes), will re-download: %s", size, path)
-        os.remove(path)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         return False
     return True
 
@@ -138,14 +142,12 @@ def download_video(url, title="Unknown"):
 
     cache_path = _url_to_cache_path(url)
 
-    # Already cached?
     if _is_cached(url):
-        logger.info("Using cached video for '%s': %s", title, cache_path)
+        logger.info("Already cached: '%s'", title)
         return cache_path
 
     os.makedirs(CACHE_DIR, exist_ok=True)
 
-    # Download at lowest available resolution
     ydl_opts = {
         'format': (
             f'worst[vcodec!=none][height<={MAX_HEIGHT}][ext=mp4]/'
@@ -161,13 +163,11 @@ def download_video(url, title="Unknown"):
         'socket_timeout': 30,
         'retries': 3,
         'fragment_retries': 3,
-        # Merge to MP4 if needed
         'merge_output_format': 'mp4',
-        # Don't post-process (save CPU)
         'postprocessors': [],
     }
 
-    logger.info("Downloading '%s' to cache...", title)
+    logger.info("Downloading '%s'...", title)
     start = time.time()
 
     try:
@@ -180,22 +180,20 @@ def download_video(url, title="Unknown"):
             size_mb = os.path.getsize(cache_path) / (1024 * 1024)
             logger.info("Downloaded '%s' (%.1f MB) in %.1fs", title, size_mb, elapsed)
             return cache_path
-        else:
-            # yt-dlp may have added a different extension
-            # Check for any file matching the hash prefix
-            prefix = os.path.splitext(os.path.basename(cache_path))[0]
-            for f in os.listdir(CACHE_DIR):
-                if f.startswith(prefix):
-                    actual_path = os.path.join(CACHE_DIR, f)
-                    logger.info("Downloaded '%s' as %s", title, f)
-                    return actual_path
 
-            logger.error("Download appeared to succeed but file not found: %s", cache_path)
-            return None
+        # yt-dlp may have used a different extension
+        prefix = os.path.splitext(os.path.basename(cache_path))[0]
+        for f in os.listdir(CACHE_DIR):
+            if f.startswith(prefix):
+                actual_path = os.path.join(CACHE_DIR, f)
+                logger.info("Downloaded '%s' as %s", title, f)
+                return actual_path
+
+        logger.error("Download succeeded but file not found: %s", cache_path)
+        return None
 
     except Exception as e:
         logger.error("Failed to download '%s': %s", title, e)
-        # Clean up partial downloads
         if os.path.exists(cache_path):
             try:
                 os.remove(cache_path)
@@ -204,31 +202,114 @@ def download_video(url, title="Unknown"):
         return None
 
 
-def prebuffer_all(urls):
-    """Download all videos in the playlist to local cache.
+# ---------------------------------------------------------------------------
+# Background downloader
+# ---------------------------------------------------------------------------
 
-    Args:
-        urls: List of (url, title, duration) tuples.
+class _BackgroundDownloader:
+    """Downloads videos in a background thread, notifying the main thread
+    as each video becomes ready for playback.
 
-    Returns:
-        List of (local_path, title, duration) tuples for successfully cached videos.
+    Usage:
+        dl = _BackgroundDownloader(urls)
+        dl.start()
+        while True:
+            item = dl.get_next_ready(timeout=1.0)
+            if item is not None:
+                path, title, dur = item
+                # play it
+            if dl.is_done():
+                break
+        dl.stop()
     """
-    cached = []
-    for url, title, dur in urls:
-        if should_stop():
-            break
 
-        if _is_cached(url):
-            cached.append((_url_to_cache_path(url), title, dur))
-            logger.info("Already cached: '%s'", title)
-        else:
+    def __init__(self, urls):
+        """
+        Args:
+            urls: List of (url, title, duration) tuples.
+        """
+        self._urls = urls
+        self._ready_queue = queue.Queue()
+        self._thread = None
+        self._stop_event = threading.Event()
+        self._total = len(urls)
+        self._downloaded = 0
+        self._failed = 0
+
+    def start(self):
+        """Start the background download thread."""
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+        logger.info("Background downloader started for %d videos", self._total)
+
+    def stop(self):
+        """Signal the downloader to stop."""
+        self._stop_event.set()
+
+    def is_done(self):
+        """True if all videos have been attempted (downloaded or failed)."""
+        return (self._downloaded + self._failed) >= self._total
+
+    def get_next_ready(self, timeout=1.0):
+        """Get the next ready-to-play video.
+
+        Returns:
+            (path, title, duration) tuple, or None if nothing ready yet.
+        """
+        try:
+            return self._ready_queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def get_all_ready(self):
+        """Drain the queue and return all currently ready videos as a list."""
+        items = []
+        while True:
+            try:
+                items.append(self._ready_queue.get_nowait())
+            except queue.Empty:
+                break
+        return items
+
+    @property
+    def progress(self):
+        """Returns (downloaded, failed, total) counts."""
+        return self._downloaded, self._failed, self._total
+
+    def _worker(self):
+        """Background thread: download videos one by one."""
+        for url, title, dur in self._urls:
+            if self._stop_event.is_set():
+                break
+
+            # Check cache first (instant)
+            if _is_cached(url):
+                path = _url_to_cache_path(url)
+                self._ready_queue.put((path, title, dur))
+                self._downloaded += 1
+                logger.info("BG: Cached hit for '%s' (%d/%d)",
+                            title, self._downloaded, self._total)
+                continue
+
+            # Download
             path = download_video(url, title)
             if path:
-                cached.append((path, title, dur))
+                self._ready_queue.put((path, title, dur))
+                self._downloaded += 1
+                logger.info("BG: Downloaded '%s' (%d/%d)",
+                            title, self._downloaded, self._total)
+            else:
+                self._failed += 1
+                logger.warning("BG: Failed '%s' (%d failed / %d total)",
+                               title, self._failed, self._total)
 
-    logger.info("Prebuffer complete: %d/%d videos ready", len(cached), len(urls))
-    return cached
+        logger.info("BG: Downloader finished: %d downloaded, %d failed",
+                     self._downloaded, self._failed)
 
+
+# ---------------------------------------------------------------------------
+# Playback
+# ---------------------------------------------------------------------------
 
 def _play_local_video(matrix, video_path, title, max_duration=None, global_deadline=None):
     """Play a local video file on the matrix.
@@ -237,8 +318,8 @@ def _play_local_video(matrix, video_path, title, max_duration=None, global_deadl
         matrix: RGBMatrix instance.
         video_path: Path to local video file.
         title: Video title for logging.
-        max_duration: Maximum seconds to play this video (None = full video).
-        global_deadline: Absolute time.time() deadline to stop (None = no limit).
+        max_duration: Maximum seconds to play this video.
+        global_deadline: Absolute time.time() deadline to stop.
 
     Returns:
         Number of frames played.
@@ -255,7 +336,6 @@ def _play_local_video(matrix, video_path, title, max_duration=None, global_deadl
         while cap.isOpened():
             frame_start = time.time()
 
-            # Check stop conditions
             if should_stop():
                 break
             if global_deadline and time.time() >= global_deadline:
@@ -267,30 +347,24 @@ def _play_local_video(matrix, video_path, title, max_duration=None, global_deadl
             if not ret:
                 break
 
-            # Resize to matrix dimensions (INTER_AREA is best for downscaling quality,
-            # INTER_NEAREST is fastest -- use AREA since we're playing from local disk)
             frame = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_AREA)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame)
             matrix.SetImage(image)
             frames_played += 1
 
-            # Frame rate control
             elapsed = time.time() - frame_start
             sleep_time = FRAME_INTERVAL - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
-            elif frames_played % 100 == 0:
-                # Skip frames if we're falling behind (every 100 frames check)
-                # Read and discard a frame to catch up
-                cap.read()
 
     finally:
         cap.release()
 
     vid_elapsed = time.time() - vid_start
     fps_actual = frames_played / max(vid_elapsed, 0.1)
-    logger.info("Played '%s': %d frames in %.1fs (%.1f FPS)", title, frames_played, vid_elapsed, fps_actual)
+    logger.info("Played '%s': %d frames in %.1fs (%.1f FPS)",
+                title, frames_played, vid_elapsed, fps_actual)
     return frames_played
 
 
@@ -313,7 +387,6 @@ def stream_video(url):
     """Legacy API: extract a streamable video URL via yt-dlp.
 
     Kept for backward compatibility with handle_play_video() in main.py.
-    Prefer download_video() + local playback instead.
     """
     if yt_dlp is None:
         raise RuntimeError("yt-dlp not available")
@@ -328,7 +401,6 @@ def stream_video(url):
         info_dict = ydl.extract_info(url, download=False)
         video_url = info_dict.get('url')
         if not video_url:
-            # Try merged format
             for f in info_dict.get('requested_formats', []):
                 if f.get('vcodec', 'none') != 'none':
                     video_url = f.get('url')
@@ -339,21 +411,31 @@ def stream_video(url):
 
 
 def stream_youtube_videos(urls, matrix):
-    """Stream YouTube videos to LED matrix (legacy function, now uses prebuffer)."""
+    """Stream YouTube videos to LED matrix (legacy function)."""
     if not _ensure_dependencies():
         return
 
-    cached = prebuffer_all(urls)
-    for path, title, dur in cached:
-        if should_stop():
-            break
-        max_dur = None
-        if dur.lower() != 'x':
-            try:
-                max_dur = float(dur) * 60
-            except ValueError:
-                pass
-        _play_local_video(matrix, path, title, max_duration=max_dur)
+    downloader = _BackgroundDownloader(urls)
+    downloader.start()
+
+    try:
+        while not downloader.is_done() or not downloader._ready_queue.empty():
+            item = downloader.get_next_ready(timeout=2.0)
+            if item is None:
+                downloaded, failed, total = downloader.progress
+                _show_status_frame(matrix, "DOWNLOADING", f"{downloaded}/{total}")
+                continue
+
+            path, title, dur = item
+            max_dur = None
+            if dur.lower() != 'x':
+                try:
+                    max_dur = float(dur) * 60
+                except ValueError:
+                    pass
+            _play_local_video(matrix, path, title, max_duration=max_dur)
+    finally:
+        downloader.stop()
 
 
 def play_videos_on_matrix(matrix):
@@ -369,8 +451,15 @@ def play_videos_on_matrix(matrix):
 def run(matrix, duration=60):
     """Run the YouTube Stream display feature for the specified duration.
 
-    Downloads all videos to local cache first (prebuffer), then plays
-    them from disk for reliable, smooth playback.
+    Starts a background thread to download videos while simultaneously
+    playing any that are already cached or become ready.
+
+    Behavior:
+      - Already-cached videos play immediately (no download wait)
+      - New videos download in background; each plays as soon as ready
+      - If no videos are ready yet, shows a download progress screen
+      - Loops the playlist if time remains after all videos play
+      - Downloads persist to disk for instant playback on future cycles
 
     Args:
         matrix: RGBMatrix instance (or mock).
@@ -393,53 +482,69 @@ def run(matrix, duration=60):
             logger.warning("No YouTube URLs found in %s", csv_path)
             return
 
-        # --- Phase 1: Prebuffer (download all videos) ---
-        logger.info("=== Prebuffering %d videos ===", len(urls))
-        _show_status_frame(matrix, "DOWNLOADING", f"{len(urls)} VIDEOS")
+        # Start background downloader thread
+        downloader = _BackgroundDownloader(urls)
+        downloader.start()
 
-        cached = prebuffer_all(urls)
-
-        if not cached:
-            logger.error("No videos could be downloaded")
-            _show_error_frame(matrix, "NO VIDEOS")
-            time.sleep(3)
-            return
-
-        logger.info("=== Prebuffer complete: %d/%d videos ready ===", len(cached), len(urls))
-
-        # --- Phase 2: Playback loop from local files ---
+        # Collect playable videos as they become ready
+        playlist = []  # List of (path, title, dur) for completed downloads
         videos_played = 0
+        playlist_idx = 0
 
         while time.time() < global_deadline and not should_stop():
-            for path, title, dur in cached:
-                if time.time() >= global_deadline:
+
+            # Drain any newly-ready videos from the downloader
+            newly_ready = downloader.get_all_ready()
+            playlist.extend(newly_ready)
+
+            if not playlist:
+                # Nothing ready yet -- show download progress
+                downloaded, failed, total = downloader.progress
+                _show_status_frame(matrix, "BUFFERING", f"{downloaded}/{total}")
+
+                if downloader.is_done() and not playlist:
+                    logger.error("All downloads failed, nothing to play")
+                    _show_error_frame(matrix, "NO VIDEOS")
+                    time.sleep(3)
                     break
-                if should_stop():
+
+                time.sleep(0.5)
+                continue
+
+            # Play the next video in the playlist
+            if playlist_idx >= len(playlist):
+                # Reached end of playlist, loop back
+                playlist_idx = 0
+                # Also drain any late arrivals
+                playlist.extend(downloader.get_all_ready())
+                if not playlist:
                     break
+                logger.info("Looping playlist (%d videos)", len(playlist))
 
-                logger.info("=== Playing: %s ===", title)
+            path, title, dur = playlist[playlist_idx]
+            playlist_idx += 1
 
-                # Per-video max duration from CSV
-                max_vid_dur = None
-                if dur.lower() != 'x':
-                    try:
-                        max_vid_dur = float(dur) * 60
-                    except ValueError:
-                        pass
+            # Per-video max duration from CSV
+            max_vid_dur = None
+            if dur.lower() != 'x':
+                try:
+                    max_vid_dur = float(dur) * 60
+                except ValueError:
+                    pass
 
-                frames = _play_local_video(
-                    matrix, path, title,
-                    max_duration=max_vid_dur,
-                    global_deadline=global_deadline
-                )
+            logger.info("=== Playing [%d/%d]: %s ===",
+                        playlist_idx, len(playlist), title)
 
-                if frames > 0:
-                    videos_played += 1
+            frames = _play_local_video(
+                matrix, path, title,
+                max_duration=max_vid_dur,
+                global_deadline=global_deadline
+            )
 
-            # If we've looped through all videos and still have time, loop again
-            if time.time() < global_deadline and not should_stop():
-                logger.info("Looping playlist...")
+            if frames > 0:
+                videos_played += 1
 
+        downloader.stop()
         logger.info("YouTube session complete: played %d video segments", videos_played)
 
     except Exception as e:
@@ -472,7 +577,7 @@ def _show_status_frame(matrix, line1, line2):
 
 
 def _show_error_frame(matrix, title):
-    """Show a brief red error indicator on the matrix when a video fails."""
+    """Show a brief red error indicator on the matrix."""
     try:
         from src.display.boot_screen import _draw_text, _text_width
         from PIL import ImageDraw
@@ -496,10 +601,7 @@ def _show_error_frame(matrix, title):
 
 
 def cleanup_cache(max_age_days=7):
-    """Remove cached videos older than max_age_days.
-
-    Can be called periodically to prevent the cache from growing forever.
-    """
+    """Remove cached videos older than max_age_days."""
     if not os.path.isdir(CACHE_DIR):
         return
 

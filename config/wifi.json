@@ -7,6 +7,12 @@
       "hidden": false
     },
     {
+      "ssid": "hydrogen2",
+      "password": "pineapple",
+      "priority": 2,
+      "hidden": false
+    },
+    {
       "ssid": "TestNetwork",
       "password": "testpass",
       "priority": 1,
