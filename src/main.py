@@ -603,7 +603,17 @@ def main():
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, sighup_handler)
 
-    # Ensure WiFi connectivity
+    # Initialize matrix and show boot screen FIRST for immediate visual feedback.
+    # WiFi and config loading happen after, so the user sees something right away.
+    matrix = init_matrix()
+
+    try:
+        from src.display.boot_screen import show as show_boot_screen
+        show_boot_screen(matrix)
+    except Exception as e:
+        logger.warning("Boot screen failed (non-fatal): %s", e)
+
+    # Now do the slower startup tasks (WiFi, config)
     logger.info("Checking WiFi connectivity...")
     if ensure_wifi():
         logger.info("WiFi connectivity confirmed")
@@ -623,9 +633,6 @@ def main():
         sys.exit(1)
 
     logger.info("Enabled features: %s", [f["name"] for f in enabled_features])
-
-    # Initialize the matrix
-    matrix = init_matrix()
 
     # Store matrix reference for web panel preview
     import src.main as _self_module
