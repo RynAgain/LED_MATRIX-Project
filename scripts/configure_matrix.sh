@@ -239,9 +239,9 @@ echo ""
 
 DISABLE_HW_PULSE_INPUT=$(ask "Disable hardware pulsing? (y/n)" "n")
 if [ "$DISABLE_HW_PULSE_INPUT" = "y" ] || [ "$DISABLE_HW_PULSE_INPUT" = "Y" ]; then
-    DISABLE_HW_PULSE=true
+    DISABLE_HW_PULSE=True
 else
-    DISABLE_HW_PULSE=false
+    DISABLE_HW_PULSE=False
 fi
 echo ""
 

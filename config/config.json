@@ -29,12 +29,12 @@
     {
       "name": "snake",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "pong",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "billiards",
@@ -124,8 +124,7 @@
     {
       "name": "living_world",
       "type": "effect",
-      "enabled": true,
-      "duration": 3600
+      "enabled": false
     },
     {
       "name": "qr_code",

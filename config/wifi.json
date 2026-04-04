@@ -1,8 +1,14 @@
 {
   "networks": [
     {
-      "ssid": "YOUR_WIFI_SSID",
-      "password": "",
+      "ssid": "NETGEAR88",
+      "password": "largecheese510",
+      "priority": 1,
+      "hidden": false
+    },
+    {
+      "ssid": "TestNetwork",
+      "password": "testpass",
       "priority": 1,
       "hidden": false
     },
