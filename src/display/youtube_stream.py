@@ -148,23 +148,32 @@ def download_video(url, title="Unknown"):
 
     os.makedirs(CACHE_DIR, exist_ok=True)
 
+    # Request only pre-merged formats (video+audio in one file) so yt-dlp
+    # does NOT need ffmpeg to merge separate streams. This is the #1 cause
+    # of silent download failures on fresh Pi installs without ffmpeg.
+    # The 'b' prefix means "best" pre-merged format at that quality level.
     ydl_opts = {
         'format': (
-            f'worst[vcodec!=none][height<={MAX_HEIGHT}][ext=mp4]/'
-            f'worst[vcodec!=none][ext=mp4]/'
-            'worst[ext=mp4]/'
-            'worst/'
+            # Pre-merged formats only (no separate audio+video requiring ffmpeg merge):
+            f'best[height<={MAX_HEIGHT}][ext=mp4][vcodec!=none][acodec!=none]/'
+            f'best[height<={MAX_HEIGHT}][vcodec!=none][acodec!=none]/'
+            'worst[vcodec!=none][acodec!=none]/'
             f'best[height<={MAX_HEIGHT}]/'
+            'worst/'
             'best'
         ),
         'outtmpl': cache_path,
-        'quiet': True,
-        'no_warnings': True,
+        # Don't silence errors -- we need to see what's failing
+        'quiet': False,
+        'no_warnings': False,
+        'verbose': False,
         'socket_timeout': 30,
         'retries': 3,
         'fragment_retries': 3,
-        'merge_output_format': 'mp4',
+        # Do NOT set merge_output_format -- avoids ffmpeg dependency
         'postprocessors': [],
+        # Write to a temp file first, rename on success
+        'nopart': True,
     }
 
     logger.info("Downloading '%s'...", title)
@@ -172,33 +181,53 @@ def download_video(url, title="Unknown"):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            if info:
+                logger.info("Download info: format=%s, height=%s, ext=%s",
+                            info.get('format', '?'),
+                            info.get('height', '?'),
+                            info.get('ext', '?'))
 
         elapsed = time.time() - start
 
+        # Check for the file -- yt-dlp may use a different extension
         if os.path.exists(cache_path):
             size_mb = os.path.getsize(cache_path) / (1024 * 1024)
             logger.info("Downloaded '%s' (%.1f MB) in %.1fs", title, size_mb, elapsed)
             return cache_path
 
-        # yt-dlp may have used a different extension
+        # Search for any file matching our hash prefix
         prefix = os.path.splitext(os.path.basename(cache_path))[0]
         for f in os.listdir(CACHE_DIR):
-            if f.startswith(prefix):
+            if f.startswith(prefix) and not f.endswith('.part'):
                 actual_path = os.path.join(CACHE_DIR, f)
-                logger.info("Downloaded '%s' as %s", title, f)
-                return actual_path
+                size = os.path.getsize(actual_path)
+                if size > 1024:  # Must be > 1KB
+                    # Rename to expected .mp4 path for consistent lookup
+                    if actual_path != cache_path:
+                        try:
+                            os.rename(actual_path, cache_path)
+                            logger.info("Renamed %s -> %s", f, os.path.basename(cache_path))
+                        except OSError:
+                            cache_path = actual_path
+                    logger.info("Downloaded '%s' (%.1f MB) in %.1fs",
+                                title, size / (1024 * 1024), elapsed)
+                    return cache_path
 
-        logger.error("Download succeeded but file not found: %s", cache_path)
+        logger.error("Download appeared to complete but no file found for '%s'. "
+                      "Expected: %s", title, cache_path)
         return None
 
     except Exception as e:
-        logger.error("Failed to download '%s': %s", title, e)
-        if os.path.exists(cache_path):
-            try:
-                os.remove(cache_path)
-            except OSError:
-                pass
+        logger.error("Failed to download '%s': %s", title, e, exc_info=True)
+        # Clean up partial downloads
+        for suffix in ['', '.part', '.ytdl']:
+            p = cache_path + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
         return None
 
 

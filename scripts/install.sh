@@ -40,8 +40,9 @@ apt-get install -y -qq \
     python3-venv \
     git \
     network-manager \
+    ffmpeg \
     > /dev/null 2>&1
-log_info "System packages installed"
+log_info "System packages installed (including ffmpeg for video processing)"
 
 # --- Step 2: Create virtual environment ---
 log_info "Step 2/6: Setting up Python virtual environment..."
