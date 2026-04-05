@@ -47,6 +47,7 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | GitHub Stats | Repository statistics display |
 | Slideshow | Cycle through custom images |
 | Logo Display | Custom logo rendering |
+| System Stats | Live CPU, RAM, temperature bars with hostname/IP |
 
 ### Video
 | Feature | Description |
@@ -57,8 +58,9 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | Feature | Description |
 |---------|-------------|
 | Boot Screen | Animated startup sequence (ring burst + loading bar) |
-| Web Control Panel | Mobile-friendly dashboard for full remote control |
-| Auto-Updater | Git-based updates every 30 minutes |
+| System Stats | CPU/RAM/temp bar graphs + hostname/IP on the matrix |
+| Web Control Panel | Mobile-friendly dashboard with live resource monitoring |
+| Auto-Updater | Git-based updates every 30 min with auto-repair for corrupt repos |
 | Night Mode | Scheduled brightness + feature restrictions |
 
 ---
@@ -69,7 +71,7 @@ A password-protected web interface accessible from any device on the same networ
 
 | Tab | Description |
 |-----|-------------|
-| Dashboard | Live status, current feature, uptime, restart/update controls |
+| Dashboard | Live status, current feature, uptime, CPU/RAM/disk/temp bars, live matrix preview |
 | Features | Toggle features on/off, set per-feature duration |
 | YouTube | Manage video playlist, trigger playback |
 | Messages | Configure scrolling text messages |
@@ -79,7 +81,7 @@ A password-protected web interface accessible from any device on the same networ
 | 3D | Configure wireframe objects |
 | World | Living World controls and event log |
 | WiFi | Add/remove WiFi networks |
-| **Logs** | **Live log viewer with filtering, color-coded errors, auto-refresh** |
+| Logs | Live log viewer with filtering, color-coded errors, auto-refresh |
 | Settings | GitHub branch, log level, system configuration |
 
 Default credentials: `admin` / `ledmatrix` (change via Settings or `config/web.json`)
@@ -100,6 +102,7 @@ sudo bash scripts/install.sh
 The installer sets up:
 - System packages (Python 3, pip, git, NetworkManager, ffmpeg)
 - Python virtual environment + dependencies
+- yt-dlp installed directly from GitHub source (latest extraction fixes, ahead of PyPI)
 - systemd services for display, web panel, and auto-updater
 - Logs directory
 
@@ -208,7 +211,7 @@ LED_MATRIX-Project/
       templates/           # Jinja2 HTML templates (13 pages + base)
       static/              # CSS styles
   downloaded_videos/       # YouTube video cache (persists across reboots)
-  rgbmatrix/               # RGB LED matrix Cython library stubs
+  rgbmatrix/               # RGB LED matrix Cython bindings (optimized SetImage pipeline)
   tests/                   # Test suite (526 tests, runs without Pi hardware)
   logs/                    # Runtime logs (display.log, updater.log, status.json)
 ```
@@ -234,15 +237,20 @@ LED_MATRIX-Project/
 
 ### Cython Driver Improvements
 
-The vendored `rgbmatrix/` Cython bindings include an optimized `SetImage()` pipeline in `core.pyx` with three rendering tiers:
+The vendored [`rgbmatrix/`](rgbmatrix/) Cython bindings include a custom-optimized [`SetImage()`](rgbmatrix/core.pyx:12) pipeline in [`core.pyx`](rgbmatrix/core.pyx) with three rendering tiers:
 
-1. **Fast path** -- Direct Pillow `unsafe_ptrs` access via `SetPixelsPillow()`. Zero-copy pointer access to the image's raw 32-bit pixel buffer with `@boundscheck(False)`, `@wraparound(False)`, and `nogil` C loop. This is the fastest possible Python-to-C pixel transfer.
+1. **Fast path** -- Direct Pillow `unsafe_ptrs` access via [`SetPixelsPillow()`](rgbmatrix/core.pyx:61). Zero-copy pointer access to the image's raw 32-bit RGBA pixel buffer. Decorated with `@boundscheck(False)` and `@wraparound(False)` to eliminate all array bounds checks at the C level. The entire pixel-setting loop runs inside a `with nogil:` block, fully releasing the Python GIL so background threads (command watcher, YouTube downloads) continue unblocked. Pixel data is unpacked directly from `uint32_t **image_ptr` -- no intermediate copies, no Python object creation per pixel.
 
-2. **Medium path** -- `image.tobytes()` with a `nogil` typed C loop. Releases the Python GIL during the pixel-setting loop, allowing other threads (command watcher, background downloads) to run concurrently.
+2. **Medium path** -- `image.tobytes()` with a `nogil` typed C loop. The raw bytes pointer (`const unsigned char*`) is cast and iterated in pure C, again with the GIL released. This path is used when the Pillow version does not expose `unsafe_ptrs` (pre-10.x).
 
-3. **Slow fallback** -- Pure Python per-pixel access with bounds checking. Used only when the above paths fail (e.g., incompatible Pillow version).
+3. **Slow fallback** -- Pure Python per-pixel access with explicit bounds checking. Used only when neither of the above paths are available. Guarantees correctness but at the cost of Python overhead per pixel.
 
-The `graphics.pyx` module provides `DrawText()` with background color and kerning support, `VerticalDrawText()`, plus `DrawCircle()` and `DrawLine()` primitives.
+The [`graphics.pyx`](rgbmatrix/graphics.pyx) module provides:
+- [`DrawText()`](rgbmatrix/graphics.pyx:61) with optional background color fill and kerning offset
+- [`VerticalDrawText()`](rgbmatrix/graphics.pyx:86) for column-oriented text rendering
+- [`DrawCircle()`](rgbmatrix/graphics.pyx:106) and [`DrawLine()`](rgbmatrix/graphics.pyx:109) primitives
+
+These changes together yield significantly higher frame rates compared to the upstream Python bindings, especially on Pi 3/4 where the GIL release allows the display refresh thread and application logic to overlap.
 
 ### GPIO Slowdown by Pi Model
 
@@ -340,12 +348,27 @@ pytest
 
 1. A systemd timer fires every 30 minutes (and 2 minutes after boot)
 2. Ensures WiFi connectivity
-3. Runs `git fetch` + `git pull --ff-only` from the configured branch
-4. Installs any new Python dependencies
-5. Restarts the display service
-6. All activity logged to `logs/updater.log`
+3. Updates yt-dlp from GitHub source (latest YouTube extraction fixes)
+4. Runs `git fetch` + `git pull --ff-only` from the configured branch
+5. Detects and auto-repairs corrupt Git objects (`prune`, `gc`, `fsck`)
+6. Installs any new Python dependencies
+7. Restarts both the display service and the web panel
+8. All activity logged to `logs/updater.log`
 
 Code-only changes (new features, bug fixes) are picked up automatically. Changes to systemd service files require re-running `sudo bash scripts/install.sh`.
+
+### Git Auto-Repair
+
+If `git fetch` fails due to corrupt loose objects (common on Pi after power loss), the updater automatically:
+1. Runs `git prune` to remove unreachable objects
+2. Runs `git gc` to repack the object database
+3. Runs `git fsck` to verify integrity
+4. Retries the fetch/pull cycle
+
+A manual emergency repair script is also available:
+```bash
+sudo bash scripts/repair.sh
+```
 
 ---
 

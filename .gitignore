@@ -24,6 +24,7 @@ ENV/
 
 # Logs
 logs/
+!logs/.gitkeep
 *.log
 
 # PID files
