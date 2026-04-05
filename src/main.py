@@ -556,25 +556,31 @@ def _handle_command(cmd, matrix, duration):
         _show_pixel_art(matrix)
 
 
+# Maximum time (seconds) the YouTube precache can run at boot.
+# Prevents the Pi from being saturated by downloads forever.
+_PRECACHE_TIMEOUT = 180
+
+
 def _precache_youtube_videos(matrix, enabled_features):
     """Pre-download YouTube videos at boot with a loading ring animation.
 
     Runs only if youtube_stream is in the enabled features list.
-    Downloads videos in a background thread while showing an animated
-    loading ring on the matrix. Retries failed downloads up to 2 times.
-    Gracefully skips if no internet or dependencies are missing.
+    Downloads happen in a LOW-PRIORITY background thread with a hard
+    timeout so the Pi stays responsive for the web panel and display.
+    Already-cached videos are detected instantly (no download).
     """
     # Check if youtube_stream is enabled
     yt_enabled = any(f.get("name") == "youtube_stream" for f in enabled_features)
     if not yt_enabled:
         return
 
-    logger.info("YouTube is enabled -- pre-caching videos at boot...")
+    logger.info("YouTube is enabled -- pre-caching videos at boot (timeout: %ds)...",
+                _PRECACHE_TIMEOUT)
 
     try:
         from src.display.youtube_stream import (
-            _ensure_dependencies, _update_ytdlp, read_urls_from_csv,
-            download_video, _is_cached, CACHE_DIR
+            _ensure_dependencies, read_urls_from_csv,
+            download_video, _is_cached
         )
     except ImportError as e:
         logger.warning("Cannot import youtube_stream for precaching: %s", e)
@@ -584,8 +590,8 @@ def _precache_youtube_videos(matrix, enabled_features):
         logger.warning("YouTube dependencies missing, skipping precache")
         return
 
-    # Update yt-dlp first
-    _update_ytdlp()
+    # Skip yt-dlp update at boot -- it's CPU-heavy and the updater timer
+    # handles it separately. Videos will download fine with the current version.
 
     csv_path = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
     urls = read_urls_from_csv(csv_path)
@@ -593,13 +599,22 @@ def _precache_youtube_videos(matrix, enabled_features):
         logger.info("No YouTube URLs to precache")
         return
 
+    # Check how many are already cached (instant, no downloads)
+    already_cached = sum(1 for url, _, _ in urls if _is_cached(url))
+    if already_cached == len(urls):
+        logger.info("All %d videos already cached, skipping precache", already_cached)
+        return
+
+    logger.info("%d/%d videos already cached, downloading remaining...",
+                already_cached, len(urls))
+
     # Shared state between download thread and animation thread
-    status = {"downloaded": 0, "failed": 0, "total": len(urls), "current": ""}
+    status = {"downloaded": already_cached, "failed": 0, "total": len(urls), "current": ""}
     done_event = threading.Event()
+    boot_deadline = time.time() + _PRECACHE_TIMEOUT
 
     def get_status():
         d = status["downloaded"]
-        f = status["failed"]
         t = status["total"]
         current = status["current"]
         line1 = f"CACHING {d}/{t}"
@@ -607,65 +622,61 @@ def _precache_youtube_videos(matrix, enabled_features):
         return line1, line2
 
     def download_worker():
-        max_retries = 2
         for url, title, dur in urls:
-            if _shutdown:
+            if _shutdown or time.time() > boot_deadline:
+                if time.time() > boot_deadline:
+                    logger.info("Precache timeout reached, stopping downloads")
                 break
 
             status["current"] = title
 
             if _is_cached(url):
-                status["downloaded"] += 1
-                logger.info("Already cached: '%s' (%d/%d)",
-                            title, status["downloaded"], status["total"])
+                # Already counted above, skip
                 continue
 
-            # Try downloading with retries
-            success = False
-            for attempt in range(1, max_retries + 1):
-                if _shutdown:
-                    break
-                logger.info("Downloading '%s' (attempt %d/%d)...", title, attempt, max_retries)
-                path = download_video(url, title)
-                if path:
-                    success = True
-                    break
-                if attempt < max_retries:
-                    logger.warning("Retry %d for '%s'...", attempt, title)
-                    time.sleep(2)
+            # Single attempt at boot (retries waste too much time)
+            logger.info("Downloading '%s'...", title)
+            path = download_video(url, title)
 
-            if success:
+            if path:
                 status["downloaded"] += 1
                 logger.info("Cached '%s' (%d/%d)",
                             title, status["downloaded"], status["total"])
             else:
                 status["failed"] += 1
-                logger.warning("Failed to cache '%s' after %d attempts (%d failed)",
-                               title, max_retries, status["failed"])
+                logger.warning("Failed to cache '%s' (%d failed)",
+                               title, status["failed"])
+
+            # Brief pause between downloads to let the Pi breathe
+            # (prevents CPU/network saturation that kills the web panel)
+            time.sleep(1)
 
         status["current"] = ""
         done_event.set()
 
-    # Start download in background thread
+    # Start download in LOW-PRIORITY background thread
     dl_thread = threading.Thread(target=download_worker, daemon=True)
     dl_thread.start()
 
-    # Show loading ring animation while downloading
+    # Show loading ring animation while downloading (with hard timeout)
     try:
         from src.display.boot_screen import show_loading_ring
         show_loading_ring(matrix, get_status, done_event)
     except Exception as e:
         logger.warning("Loading ring animation failed: %s", e)
-        # Fall back to just waiting
-        dl_thread.join(timeout=300)
+        dl_thread.join(timeout=_PRECACHE_TIMEOUT)
 
-    # Ensure download thread finishes
-    dl_thread.join(timeout=10)
+    # Don't wait forever for the download thread
+    dl_thread.join(timeout=5)
 
     d = status["downloaded"]
     f = status["failed"]
     t = status["total"]
-    logger.info("YouTube precache complete: %d/%d cached, %d failed", d, t, f)
+    remaining = t - d - f
+    if remaining > 0:
+        logger.info("YouTube precache: %d cached, %d failed, %d deferred to next boot", d, f, remaining)
+    else:
+        logger.info("YouTube precache complete: %d/%d cached, %d failed", d, t, f)
 
 
 def ensure_wifi():

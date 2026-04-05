@@ -33,6 +33,12 @@ log "Checking WiFi connectivity..."
     log "WARNING: WiFi connection check failed, attempting update anyway"
 }
 
+# Keep yt-dlp updated (YouTube breaks old versions every few weeks)
+log "Updating yt-dlp..."
+"$VENV_PYTHON" -m pip install --upgrade --quiet yt-dlp 2>&1 | tee -a "$LOG_FILE" || {
+    log "WARNING: yt-dlp update failed (non-fatal)"
+}
+
 # Run the auto-updater
 cd "$PROJECT_ROOT"
 "$VENV_PYTHON" -m src.updater.auto_update update 2>&1 | tee -a "$LOG_FILE"
