@@ -175,6 +175,11 @@
       "name": "terrain_ball",
       "type": "effect",
       "enabled": false
+    },
+    {
+      "name": "system_stats",
+      "type": "utility",
+      "enabled": false
     }
   ]
 }

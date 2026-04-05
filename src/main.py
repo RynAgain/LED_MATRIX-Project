@@ -421,6 +421,7 @@ FEATURE_MODULES = {
     "wireframe": "src.display.wireframe",
     "maze_3d": "src.display.maze_3d",
     "terrain_ball": "src.display.terrain_ball",
+    "system_stats": "src.display.system_stats",
 }
 
 

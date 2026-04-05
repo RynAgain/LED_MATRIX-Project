@@ -23,7 +23,7 @@ VALID_FEATURE_NAMES = {
     "lava_lamp", "living_world", "qr_code", "slideshow",
     "galaga", "space_invaders", "logo_wholefoods",
     "github_stats", "tanks", "wireframe", "maze_3d",
-    "terrain_ball"
+    "terrain_ball", "system_stats"
 }
 
 VALID_FEATURE_TYPES = {"game", "utility", "video", "effect"}

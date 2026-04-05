@@ -78,19 +78,30 @@ def _ensure_dependencies():
 
 
 def _update_ytdlp():
-    """Attempt to update yt-dlp to the latest version.
+    """Update yt-dlp from GitHub source (latest fixes, ahead of PyPI).
 
-    YouTube frequently changes their extraction methods. An outdated yt-dlp
-    is the #1 cause of videos failing to download.
+    YouTube frequently changes their extraction methods. Installing from
+    GitHub master gets fixes hours before they hit PyPI. Falls back to
+    PyPI if GitHub source fails.
     """
     try:
-        logger.info("Checking for yt-dlp updates...")
+        logger.info("Updating yt-dlp from GitHub source...")
+        # Try GitHub source first (most up-to-date)
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", "yt-dlp"],
-            capture_output=True, text=True, timeout=60
+            [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet",
+             "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz"],
+            capture_output=True, text=True, timeout=90
         )
+        if result.returncode != 0:
+            # Fallback to PyPI
+            logger.info("GitHub source failed, falling back to PyPI...")
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", "yt-dlp"],
+                capture_output=True, text=True, timeout=60
+            )
+
         if result.returncode == 0:
-            logger.info("yt-dlp is up to date")
+            logger.info("yt-dlp updated successfully")
             import importlib
             global yt_dlp
             if yt_dlp is not None:

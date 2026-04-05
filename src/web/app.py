@@ -397,6 +397,87 @@ def signal_display_reload():
     return False
 
 
+def _get_system_stats():
+    """Collect system resource stats using psutil.
+
+    Returns a dict with cpu_percent, ram_percent, disk_percent,
+    cpu_temp, and uptime. Gracefully handles missing psutil or
+    unavailable sensors.
+    """
+    stats = {
+        "cpu_percent": 0.0,
+        "ram_percent": 0.0,
+        "disk_percent": 0.0,
+        "cpu_temp": None,
+        "uptime": "N/A",
+    }
+
+    try:
+        import psutil
+    except ImportError:
+        logger.warning("psutil not installed -- system stats unavailable")
+        return stats
+
+    try:
+        stats["cpu_percent"] = psutil.cpu_percent(interval=0)
+    except Exception:
+        pass
+
+    try:
+        stats["ram_percent"] = psutil.virtual_memory().percent
+    except Exception:
+        pass
+
+    try:
+        stats["disk_percent"] = psutil.disk_usage('/').percent
+    except Exception:
+        pass
+
+    # CPU temperature
+    try:
+        if hasattr(psutil, 'sensors_temperatures'):
+            temps = psutil.sensors_temperatures()
+            if temps:
+                for name in ('coretemp', 'cpu_thermal', 'cpu-thermal',
+                             'soc_thermal', 'k10temp', 'zenpower'):
+                    if name in temps and temps[name]:
+                        stats["cpu_temp"] = round(temps[name][0].current, 1)
+                        break
+                if stats["cpu_temp"] is None:
+                    for sensor_list in temps.values():
+                        if sensor_list:
+                            stats["cpu_temp"] = round(sensor_list[0].current, 1)
+                            break
+    except Exception:
+        pass
+
+    # Raspberry Pi thermal zone fallback
+    if stats["cpu_temp"] is None:
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                stats["cpu_temp"] = round(int(f.read().strip()) / 1000.0, 1)
+        except (FileNotFoundError, ValueError, OSError):
+            pass
+
+    # System uptime
+    try:
+        boot_time = psutil.boot_time()
+        uptime_secs = time.time() - boot_time
+        days = int(uptime_secs // 86400)
+        hours = int((uptime_secs % 86400) // 3600)
+        minutes = int((uptime_secs % 3600) // 60)
+        if days > 0:
+            stats["uptime"] = f"{days}d {hours}h {minutes}m"
+        elif hours > 0:
+            stats["uptime"] = f"{hours}h {minutes}m"
+        else:
+            stats["uptime"] = f"{minutes}m"
+    except Exception:
+        pass
+
+    return stats
+
+
 def create_app():
     """Create and configure the Flask application."""
     web_config = load_web_config()
@@ -595,6 +676,13 @@ def create_app():
     def api_status():
         """API endpoint for live status updates."""
         return jsonify(get_display_status())
+
+    @app.route("/api/system-stats")
+    @login_required
+    def api_system_stats():
+        """API endpoint for system resource monitoring (CPU, RAM, disk, temp, uptime)."""
+        stats = _get_system_stats()
+        return jsonify(stats)
 
     @app.route("/api/restart", methods=["POST"])
     @login_required

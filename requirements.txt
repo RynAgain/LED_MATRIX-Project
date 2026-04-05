@@ -33,5 +33,8 @@ Flask>=3.0.0,<4.0
 # QR code generation
 qrcode>=7.4
 
+# System resource monitoring (CPU, RAM, disk, temperature)
+psutil>=5.9.0,<6.0
+
 # Testing (install with: pip install -r requirements.txt)
 pytest>=7.4.0
