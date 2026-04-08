@@ -11,7 +11,7 @@
 # identical cv2 API for frame processing.
 
 # Image processing
-Pillow>=10.0.0,<11.0
+Pillow>=10.0.0
 
 # Video processing (for YouTube stream feature)
 # On Raspberry Pi: if pip install fails, use system package instead:
