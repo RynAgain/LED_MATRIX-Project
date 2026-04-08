@@ -136,30 +136,46 @@ if [ "$IS_PI" = true ]; then
     fi
 
     # Build the C library
-    log_info "Compiling C library (this may take a few minutes)..."
-    make -C "$RGB_MATRIX_DIR" clean > /dev/null 2>&1 || true
-    make -C "$RGB_MATRIX_DIR" -j"$(nproc)" > /dev/null 2>&1
-
-    # Build and install the Python bindings into our venv
-    log_info "Building Python bindings..."
-    VENV_PYTHON="$VENV_PATH/bin/python3"
-
-    # Install Cython into the venv (needed for building the .pyx files)
-    "$VENV_PATH/bin/pip" install --quiet cython
-
-    cd "$RGB_MATRIX_DIR/bindings/python"
-    # The Makefile in the bindings directory builds and installs into the
-    # Python pointed to by PYTHON variable
-    make clean > /dev/null 2>&1 || true
-    make build-python PYTHON="$VENV_PYTHON" > /dev/null 2>&1
-    make install-python PYTHON="$VENV_PYTHON" > /dev/null 2>&1
-
-    # Verify the bindings installed correctly
-    if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
-        log_info "rpi-rgb-led-matrix Python bindings installed successfully"
+    log_info "Compiling C library (this may take a few minutes on a Pi)..."
+    make -C "$RGB_MATRIX_DIR" clean 2>/dev/null || true
+    if ! make -C "$RGB_MATRIX_DIR" -j"$(nproc)"; then
+        log_error "C library compilation failed! See errors above."
+        log_error "Common fixes:"
+        log_error "  - Install build tools: sudo apt-get install build-essential gcc g++ make"
+        log_error "  - Check disk space: df -h"
+        log_error "  - Try manually: cd $RGB_MATRIX_DIR && make"
+        # Don't exit -- continue with rest of install, matrix just won't have hardware support
     else
-        log_error "Python bindings built but import failed!"
-        log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make build-python PYTHON=$VENV_PYTHON && make install-python PYTHON=$VENV_PYTHON"
+        log_info "C library compiled successfully"
+
+        # Build and install the Python bindings into our venv
+        log_info "Building Python bindings (this may also take a few minutes)..."
+        VENV_PYTHON="$VENV_PATH/bin/python3"
+
+        # Install Cython into the venv (needed for building the .pyx files)
+        "$VENV_PATH/bin/pip" install --quiet cython
+
+        cd "$RGB_MATRIX_DIR/bindings/python"
+
+        # The Makefile in the bindings directory builds and installs into the
+        # Python pointed to by PYTHON variable.
+        # Show output so build errors are visible.
+        make clean 2>/dev/null || true
+        if ! make build-python PYTHON="$VENV_PYTHON"; then
+            log_error "Python bindings build failed! See errors above."
+            log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make build-python PYTHON=$VENV_PYTHON"
+        elif ! make install-python PYTHON="$VENV_PYTHON"; then
+            log_error "Python bindings install failed! See errors above."
+            log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make install-python PYTHON=$VENV_PYTHON"
+        else
+            # Verify the bindings actually import correctly
+            if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
+                log_info "rpi-rgb-led-matrix Python bindings installed successfully"
+            else
+                log_error "Python bindings installed but import test failed!"
+                log_error "Try manually: $VENV_PYTHON -c 'from rgbmatrix import RGBMatrix'"
+            fi
+        fi
     fi
 
     # Fix ownership (we cloned as root due to sudo)
