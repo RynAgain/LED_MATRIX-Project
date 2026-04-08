@@ -16,25 +16,25 @@ Pillow>=10.0.0
 # Video processing (for YouTube stream feature)
 # On Raspberry Pi: if pip install fails, use system package instead:
 #   sudo apt-get install python3-opencv
-opencv-python-headless>=4.8.0,<5.0
-numpy>=1.24.0,<2.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
 yt-dlp>=2024.1.1
 
 # HTTP requests (for Bitcoin price, connectivity checks)
-requests>=2.31.0,<3.0
+requests>=2.31.0
 
 # Development: LED matrix simulator (not needed on Raspberry Pi)
 # Install on dev machines: pip install pygame
 pygame>=2.5.0; sys_platform == "win32" or sys_platform == "darwin"
 
 # Web control panel
-Flask>=3.0.0,<4.0
+Flask>=3.0.0
 
 # QR code generation
 qrcode>=7.4
 
 # System resource monitoring (CPU, RAM, disk, temperature)
-psutil>=5.9.0,<6.0
+psutil>=5.9.0
 
 # Testing (install with: pip install -r requirements.txt)
 pytest>=7.4.0
