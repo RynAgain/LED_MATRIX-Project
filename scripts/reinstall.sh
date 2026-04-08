@@ -9,8 +9,12 @@
 #   1. Stops all LED Matrix systemd services
 #   2. Removes old systemd unit files
 #   3. Deletes venv/, logs/, __pycache__/, downloaded videos
-#   4. Re-runs scripts/install.sh (creates venv, installs deps, registers services)
+#   4. Re-runs scripts/install.sh (creates venv, installs deps, compiles
+#      rpi-rgb-led-matrix, disables audio, registers services)
 #   5. Starts services and shows status
+#
+# Note: If this is a fresh OS install, a reboot is required after reinstall
+# because install.sh disables onboard audio (GPIO 18 conflict).
 
 set -e
 

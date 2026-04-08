@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+# Compiled shared objects (rpi-rgb-led-matrix Python bindings are built
+# on the Pi by install.sh -- they are architecture-specific and must not
+# be committed. If missing, run: sudo bash scripts/install.sh)
 *.so
 *.egg-info/
 *.egg
