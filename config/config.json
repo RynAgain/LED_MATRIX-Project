@@ -37,6 +37,11 @@
       "enabled": true
     },
     {
+      "name": "breakout",
+      "type": "game",
+      "enabled": true
+    },
+    {
       "name": "billiards",
       "type": "game",
       "enabled": false

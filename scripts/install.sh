@@ -14,6 +14,7 @@
 #   8. Prompts for WiFi configuration
 
 set -e
+trap 'log_error "Script failed at line $LINENO (exit code $?). Last command: $BASH_COMMAND"' ERR
 
 # Colors for output
 RED='\033[0;31m'
@@ -123,6 +124,17 @@ if [ "$IS_PI" = true ]; then
     STEP=$((STEP + 1))
     log_info "Step $STEP/$TOTAL_STEPS: Building rpi-rgb-led-matrix library..."
 
+    # CRITICAL: Remove the rgbmatrix/ directory from the project root if it
+    # exists. Old versions of this repo shipped uncompiled Cython source files
+    # in rgbmatrix/. Python finds that directory before the real site-packages
+    # rgbmatrix, causing an ImportError that silently falls back to the
+    # simulator. The real bindings live in the venv's site-packages.
+    if [ -d "$PROJECT_ROOT/rgbmatrix" ] && [ -f "$PROJECT_ROOT/rgbmatrix/__init__.py" ]; then
+        log_warn "Found shadowing rgbmatrix/ directory in project root -- renaming to rgbmatrix_src/"
+        log_warn "This directory contains Cython source files, not compiled bindings."
+        mv "$PROJECT_ROOT/rgbmatrix" "$PROJECT_ROOT/rgbmatrix_src" 2>/dev/null || true
+    fi
+
     RGB_MATRIX_DIR="$ACTUAL_HOME/rpi-rgb-led-matrix"
 
     if [ -d "$RGB_MATRIX_DIR" ]; then
@@ -148,7 +160,7 @@ if [ "$IS_PI" = true ]; then
     else
         log_info "C library compiled successfully"
 
-        # Build and install the Python bindings into our venv
+        # Build the Python bindings
         log_info "Building Python bindings (this may also take a few minutes)..."
         VENV_PYTHON="$VENV_PATH/bin/python3"
 
@@ -157,17 +169,25 @@ if [ "$IS_PI" = true ]; then
 
         cd "$RGB_MATRIX_DIR/bindings/python"
 
-        # The Makefile in the bindings directory builds and installs into the
-        # Python pointed to by PYTHON variable.
-        # Show output so build errors are visible.
+        # Build the .so files using the Makefile
         make clean 2>/dev/null || true
         if ! make build-python PYTHON="$VENV_PYTHON"; then
             log_error "Python bindings build failed! See errors above."
             log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make build-python PYTHON=$VENV_PYTHON"
-        elif ! make install-python PYTHON="$VENV_PYTHON"; then
-            log_error "Python bindings install failed! See errors above."
-            log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make install-python PYTHON=$VENV_PYTHON"
         else
+            # Install into venv by direct copy.
+            # NOTE: 'make install-python' uses deprecated setup.py install which
+            # silently fails on newer setuptools/pip. The direct copy is reliable.
+            SITE_PKG=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
+            log_info "Installing bindings to $SITE_PKG/rgbmatrix/"
+
+            # Copy the built rgbmatrix package (contains __init__.py + .so files)
+            cp -r "$RGB_MATRIX_DIR/bindings/python/rgbmatrix" "$SITE_PKG/"
+
+            # Install the shared library system-wide so the .so bindings can link to it
+            cp "$RGB_MATRIX_DIR/lib/librgbmatrix.so.1" /usr/lib/
+            ldconfig
+
             # Verify the bindings actually import correctly
             if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
                 log_info "rpi-rgb-led-matrix Python bindings installed successfully"

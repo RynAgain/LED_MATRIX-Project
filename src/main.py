@@ -391,6 +391,7 @@ FEATURE_MODULES = {
     "tic_tac_toe": "src.display.tic_tac_toe",
     "snake": "src.display.snake",
     "pong": "src.display.pong",
+    "breakout": "src.display.breakout",
     "billiards": "src.display.billiards",
     "time_display": "src.display.time_display",
     "bitcoin_price": "src.display.bitcoin_price",
