@@ -14,15 +14,15 @@
     <div class="status-grid" id="status-display">
         <div class="status-item">
             <span class="status-label">Status</span>
-            <span class="status-value" id="status-state">{{ status.get('status', 'unknown') }}</span>
+            <span class="status-value" id="status-state" style="color: #ff9800;">{{ 'Stopped' if status.get('status', 'unknown') in ('unknown', '') else status.get('status') }}</span>
         </div>
         <div class="status-item">
             <span class="status-label">Current Feature</span>
-            <span class="status-value" id="status-feature">{{ status.get('current_feature', 'N/A') }}</span>
+            <span class="status-value" id="status-feature" style="{{ 'color: #666;' if not status.get('current_feature') else '' }}">{{ status.get('current_feature') or 'None' }}</span>
         </div>
         <div class="status-item">
             <span class="status-label">Uptime</span>
-            <span class="status-value" id="status-uptime">{{ status.get('uptime', 'N/A') }}</span>
+            <span class="status-value" id="status-uptime">{{ status.get('uptime') or '--' }}</span>
         </div>
     </div>
 </div>
@@ -65,8 +65,11 @@
 <div class="card">
     <h2>Live Preview</h2>
     <div style="text-align: center;">
+        <div id="preview-placeholder" style="width:200px;height:200px;background:#1a1a2e;border:1px solid #333;border-radius:8px;display:flex;align-items:center;justify-content:center;margin:0 auto;color:#666;font-size:0.85em;text-align:center;">
+            Display not running<br>No preview available
+        </div>
         <img id="matrix-preview" src="" alt="Matrix Preview"
-             style="width: 200px; height: 200px; image-rendering: pixelated; border: 1px solid var(--border-color); background: black;">
+             style="display:none;width:200px;height:200px;image-rendering:pixelated;border:1px solid var(--border-color);background:black;margin:0 auto;">
         <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">Updates every 3 seconds</p>
     </div>
 </div>
@@ -143,12 +146,23 @@ var _errorDismissed = false;
 
 function updateDashboard(d) {
     // Display status
-    var el = document.getElementById('status-state');
-    if (el && d.status) el.textContent = d.status;
-    el = document.getElementById('status-feature');
-    if (el) el.textContent = d.current_feature || 'N/A';
-    el = document.getElementById('status-uptime');
-    if (el) el.textContent = d.uptime || 'N/A';
+    var statusEl = document.getElementById('status-state');
+    if (statusEl) {
+        var status = d.status || 'stopped';
+        statusEl.textContent = (status === 'unknown' || status === '') ? 'Stopped' : status;
+        statusEl.style.color = (status === 'running') ? '#4CAF50' : '#ff9800';
+    }
+    var featureEl = document.getElementById('status-feature');
+    if (featureEl) {
+        var feature = d.current_feature || '';
+        featureEl.textContent = feature || 'None';
+        featureEl.style.color = feature ? '#e0e0e0' : '#666';
+    }
+    var uptimeEl = document.getElementById('status-uptime');
+    if (uptimeEl) {
+        var uptime = d.uptime || '';
+        uptimeEl.textContent = uptime || '--';
+    }
 
     // System stats (nested under d.system)
     var sys = d.system;
@@ -248,11 +262,23 @@ function updatePreview() {
     fetch('/api/preview')
         .then(r => r.json())
         .then(d => {
+            var img = document.getElementById('matrix-preview');
+            var placeholder = document.getElementById('preview-placeholder');
             if (d.success && d.image) {
-                document.getElementById('matrix-preview').src = 'data:image/png;base64,' + d.image;
+                img.src = 'data:image/png;base64,' + d.image;
+                img.style.display = 'block';
+                if (placeholder) placeholder.style.display = 'none';
+            } else {
+                img.style.display = 'none';
+                if (placeholder) placeholder.style.display = 'flex';
             }
         })
-        .catch(() => {});
+        .catch(function() {
+            var img = document.getElementById('matrix-preview');
+            var placeholder = document.getElementById('preview-placeholder');
+            if (img) img.style.display = 'none';
+            if (placeholder) placeholder.style.display = 'flex';
+        });
 }
 setInterval(updatePreview, 3000);
 updatePreview();
