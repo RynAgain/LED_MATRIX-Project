@@ -165,14 +165,38 @@ class AutoUpdater:
             logger.info("Already up to date: %s", local_hash[:8])
             return False
 
+    def _backup_configs(self):
+        """Backup config/*.json before git pull to prevent data loss."""
+        import shutil
+        config_dir = os.path.join(self.project_root, "config")
+        backup_dir = os.path.join(self.project_root, "config", ".backup")
+        os.makedirs(backup_dir, exist_ok=True)
+
+        backed_up = 0
+        for filename in os.listdir(config_dir):
+            if filename.endswith(".json"):
+                src = os.path.join(config_dir, filename)
+                dst = os.path.join(backup_dir, filename + ".bak")
+                try:
+                    shutil.copy2(src, dst)
+                    backed_up += 1
+                except OSError as e:
+                    logger.warning("Could not backup %s: %s", filename, e)
+
+        if backed_up:
+            logger.info("Backed up %d config files to config/.backup/", backed_up)
+
     def pull_updates(self):
         """
         Pull latest changes from remote.
-        Stashes any local changes first, then pulls, then pops stash.
+        Backs up config files, stashes any local changes, then pulls, then pops stash.
 
         Returns:
             True if pull succeeded, False otherwise.
         """
+        # Backup configs before pull
+        self._backup_configs()
+
         # Stash any local changes (e.g., config edits)
         logger.info("Stashing local changes...")
         self._run_git(["stash", "push", "-m", "auto-update-stash"])

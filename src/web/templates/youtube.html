@@ -38,6 +38,7 @@
 <div class="card">
     <h2>Manage Playlist</h2>
     <form method="POST" action="{{ url_for('youtube') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="add">
         <div class="form-group">
             <label for="new_url">YouTube URL</label>
@@ -62,6 +63,7 @@
         <div class="video-manage-item">
             <span>{{ video.title }}</span>
             <form method="POST" action="{{ url_for('youtube') }}" class="inline-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="remove">
                 <input type="hidden" name="index" value="{{ loop.index0 }}">
                 <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Remove {{ video.title }}?')">Remove</button>

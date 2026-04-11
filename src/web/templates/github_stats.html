@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}GitHub Stats - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>GitHub Stats</h1>
+
+<div class="card">
+    <h2>Configuration</h2>
+    <p class="card-hint">Configure the GitHub username and optional Personal Access Token for the contribution heatmap display.</p>
+
+    <form method="POST" action="{{ url_for('github_stats_page') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <div class="form-group">
+            <label for="username">GitHub Username</label>
+            <input type="text" id="username" name="username" value="{{ config.get('username', '') }}" required placeholder="e.g. octocat" autocomplete="username">
+        </div>
+
+        <div class="form-group">
+            <label for="token">Personal Access Token <span style="color: #888; font-weight: normal;">(optional)</span></label>
+            <div style="position: relative;">
+                <input type="password" id="token" name="token" value="" placeholder="Leave blank to keep existing token" autocomplete="off" style="padding-right: 60px;">
+                <button type="button" onclick="toggleTokenVisibility()" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: #333; border: 1px solid #555; color: #ccc; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;" id="toggleBtn">Show</button>
+            </div>
+            {% if config.get('token') %}
+            <small style="color: #6a6;">* Token is configured</small>
+            {% endif %}
+        </div>
+
+        <div class="card" style="background: #1a1a2e; border: 1px solid #333; margin: 12px 0;">
+            <p style="color: #aaa; margin: 0; font-size: 13px;">
+                <strong style="color: #ccc;">PAT Scopes:</strong> A token with <code style="background: #222; padding: 2px 6px; border-radius: 3px;">public_repo</code> scope is enough for public contribution data. Without a token, the display falls back to the public Events API (limited to recent activity).
+            </p>
+            <p style="color: #888; margin: 8px 0 0 0; font-size: 12px;">
+                Generate a token at: <span style="color: #6a9fd6;">github.com &gt; Settings &gt; Developer settings &gt; Personal access tokens</span>
+            </p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full">Save Settings</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Quick Actions</h2>
+    <button class="btn btn-info btn-full" onclick="playGitHubStats()">Show GitHub Stats Now</button>
+</div>
+
+<script>
+function toggleTokenVisibility() {
+    var input = document.getElementById('token');
+    var btn = document.getElementById('toggleBtn');
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Hide';
+    } else {
+        input.type = 'password';
+        btn.textContent = 'Show';
+    }
+}
+
+function playGitHubStats() {
+    fetch('/api/play_feature', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feature: 'github_stats'})
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+            var el = document.createElement('div');
+            el.className = 'alert alert-success';
+            el.textContent = 'GitHub Stats activated';
+            document.querySelector('.container').prepend(el);
+            setTimeout(function() { el.remove(); }, 3000);
+        }
+    });
+}
+</script>
+{% endblock %}

@@ -6,6 +6,7 @@
 <div class="card">
     <h2>Set Timer</h2>
     <form method="POST" action="{{ url_for('countdown_page') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
             <label for="label">Timer Label</label>
             <input type="text" id="label" name="label" value="{{ config.get('label', 'Timer') }}" maxlength="10">

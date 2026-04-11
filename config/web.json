@@ -1,9 +1,9 @@
 {
   "host": "0.0.0.0",
   "port": 5000,
-  "secret_key": "CHANGE_ME_TO_RANDOM_STRING",
+  "secret_key": "f519c9da6d40acfac047de40efddddb2428a548e6efd93efac8bb938e50eef27",
   "users": {
-    "admin": "ledmatrix"
+    "admin": "ed2bef15ca23ca71ab75b2b18f81e1bc:e3829d1c28e13f26baf9ef44d08281e8df9b42d03f1908bea7d279d89279f1c6"
   },
   "session_timeout_minutes": 60,
   "https": {

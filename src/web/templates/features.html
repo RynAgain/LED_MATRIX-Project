@@ -39,6 +39,7 @@
 <h1>Display Features</h1>
 
 <form method="POST" action="{{ url_for('features') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     {% set type_labels = {'game': 'Game', 'effect': 'Effect', 'utility': 'Utility', 'video': 'Media'} %}
 
     <div class="card">

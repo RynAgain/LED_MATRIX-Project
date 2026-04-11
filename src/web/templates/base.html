@@ -20,10 +20,13 @@
             <a href="{{ url_for('stocks') }}" class="{% if request.endpoint == 'stocks' %}active{% endif %}">Stocks</a>
             <a href="{{ url_for('countdown_page') }}" class="{% if request.endpoint == 'countdown_page' %}active{% endif %}">Timer</a>
             <a href="{{ url_for('pixel_editor') }}" class="{% if request.endpoint == 'pixel_editor' %}active{% endif %}">Draw</a>
+            <a href="{{ url_for('slideshow_page') }}" class="{% if request.endpoint == 'slideshow_page' %}active{% endif %}">Slideshow</a>
             <a href="{{ url_for('wireframe_page') }}" class="{% if request.endpoint == 'wireframe_page' %}active{% endif %}">3D</a>
             <a href="{{ url_for('living_world') }}" class="{% if request.endpoint == 'living_world' %}active{% endif %}">World</a>
+            <a href="{{ url_for('github_stats_page') }}" class="{% if request.endpoint == 'github_stats_page' %}active{% endif %}">GitHub</a>
             <a href="{{ url_for('wifi') }}" class="{% if request.endpoint == 'wifi' %}active{% endif %}">WiFi</a>
             <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Logs</a>
+            <a href="{{ url_for('api_docs_page') }}" class="{% if request.endpoint == 'api_docs_page' %}active{% endif %}">API</a>
             <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}">Settings</a>
             <a href="{{ url_for('logout') }}" class="nav-logout">Logout</a>
         </div>

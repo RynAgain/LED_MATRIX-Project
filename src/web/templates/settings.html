@@ -4,6 +4,7 @@
 <h1>Settings</h1>
 
 <form method="POST" action="{{ url_for('settings') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="card">
         <h2>Update Settings</h2>
         <div class="form-group">
@@ -34,6 +35,7 @@
 <div class="card">
     <h2>Weather Location</h2>
     <form method="POST" action="{{ url_for('settings') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="section" value="weather">
         <div class="form-row">
             <div class="form-group">
@@ -53,6 +55,7 @@
 {% set existing_schedules = schedule_config.get('schedules', []) %}
 
 <form method="POST" action="{{ url_for('settings') }}" id="schedule-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="section" value="schedule">
     <input type="hidden" name="schedule_count" id="schedule_count" value="{{ existing_schedules|length }}">
 
@@ -189,6 +192,7 @@
 <div class="card">
     <h2>HTTPS / TLS</h2>
     <form method="POST" action="{{ url_for('settings') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="section" value="https">
         <label class="toggle-row" style="padding: 0.5rem 0;">
             <span>Enable HTTPS</span>
@@ -206,6 +210,37 @@
         </div>
         <button type="submit" class="btn btn-primary btn-full">Save HTTPS Settings</button>
     </form>
+</div>
+
+<div class="card">
+    <h2>Config Backup</h2>
+    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+        Download all configuration files as a zip archive, or restore from a previous backup.
+    </p>
+    <a href="{{ url_for('api_config_backup') }}" class="btn btn-primary btn-full" style="margin-bottom: 0.75rem; display: block; text-align: center; text-decoration: none;">Download Backup</a>
+    <form id="restore-form" enctype="multipart/form-data" style="margin-bottom: 0.5rem;">
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="file" name="backup" accept=".zip" id="restore-file"
+                   style="flex: 1; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem;">
+            <button type="button" class="btn btn-warning" onclick="restoreBackup()">Restore</button>
+        </div>
+    </form>
+    <div style="background: var(--bg-secondary); border-radius: 6px; padding: 0.75rem; font-size: 0.82rem; color: var(--text-secondary);">
+        [!] Restoring a backup will overwrite current config files. Only .json and .csv files are restored.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Version Management</h2>
+    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+        Current commit: <code id="current-commit" style="color: var(--accent-primary);">loading...</code>
+    </p>
+    <div id="commit-list" style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 0.75rem; font-size: 0.85rem;">
+        <div style="padding: 8px; color: var(--text-secondary);">Loading commit history...</div>
+    </div>
+    <div style="background: var(--bg-secondary); border-radius: 6px; padding: 0.75rem; font-size: 0.82rem; color: var(--text-secondary);">
+        [!] Rolling back checks out files from a previous commit. Restart the service afterwards to apply changes. A config backup is recommended first.
+    </div>
 </div>
 
 <div class="card">
@@ -236,6 +271,28 @@ function checkUpdate() {
         .then(r => r.json())
         .then(d => alert(d.message))
         .catch(e => alert('Error: ' + e));
+}
+
+function restoreBackup() {
+    var fileInput = document.getElementById('restore-file');
+    if (!fileInput.files.length) {
+        alert('Please select a .zip backup file first.');
+        return;
+    }
+    if (!confirm('This will overwrite current config files. Continue?')) return;
+    var formData = new FormData();
+    formData.append('backup', fileInput.files[0]);
+    fetch('{{ url_for("api_config_restore") }}', {method: 'POST', body: formData})
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success) {
+                alert('Restored ' + d.restored + ' config file(s). Reload the page to see changes.');
+                location.reload();
+            } else {
+                alert('Restore failed: ' + d.error);
+            }
+        })
+        .catch(function(e) { alert('Error: ' + e); });
 }
 
 /* --- Feature Schedules --- */
@@ -306,6 +363,11 @@ function deleteSchedule(index) {
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = '{{ url_for("settings") }}';
+    var csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = '_csrf_token';
+    csrfInput.value = '{{ csrf_token() }}';
+    form.appendChild(csrfInput);
     var sectionInput = document.createElement('input');
     sectionInput.type = 'hidden';
     sectionInput.name = 'section';
@@ -319,5 +381,56 @@ function deleteSchedule(index) {
     document.body.appendChild(form);
     form.submit();
 }
+
+/* --- Version Management --- */
+
+function loadGitLog() {
+    fetch('/api/git-log').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.success) {
+            var commitEl = document.getElementById('current-commit');
+            if (commitEl) commitEl.textContent = data.current || 'unknown';
+            var container = document.getElementById('commit-list');
+            container.innerHTML = '';
+            data.commits.forEach(function(c) {
+                var isCurrent = c.hash === data.current;
+                var div = document.createElement('div');
+                div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-color, #333);';
+                if (isCurrent) div.style.background = '#1a3a1a';
+                div.innerHTML = '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><code>' + c.hash + '</code> ' + c.message +
+                    (isCurrent ? ' <span style="color:#4CAF50">[current]</span>' : '') + '</span>' +
+                    (isCurrent ? '' : '<button onclick="rollback(\'' + c.hash + '\')" style="flex-shrink:0;font-size:0.75em;padding:2px 8px;margin-left:8px;background:#ff9800;border:none;color:#fff;border-radius:3px;cursor:pointer;">Rollback</button>');
+                container.appendChild(div);
+            });
+            if (data.commits.length === 0) {
+                container.innerHTML = '<div style="padding:8px;color:var(--text-secondary);">No commits found.</div>';
+            }
+        } else {
+            var container = document.getElementById('commit-list');
+            container.innerHTML = '<div style="padding:8px;color:#f44336;">Failed to load: ' + (data.error || 'unknown error') + '</div>';
+        }
+    }).catch(function(e) {
+        var container = document.getElementById('commit-list');
+        container.innerHTML = '<div style="padding:8px;color:#f44336;">Error: ' + e + '</div>';
+    });
+}
+
+function rollback(hash) {
+    if (!confirm('Roll back to commit ' + hash + '? This will change files on disk. A config backup is recommended first.')) return;
+    fetch('/api/git-rollback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({hash: hash})
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.success) {
+            alert('Rolled back to ' + hash + '. Restart the service to apply changes.');
+            loadGitLog();
+        } else {
+            alert('Rollback failed: ' + data.error);
+        }
+    }).catch(function(e) { alert('Rollback error: ' + e); });
+}
+
+// Load git log on page load
+document.addEventListener('DOMContentLoaded', loadGitLog);
 </script>
 {% endblock %}

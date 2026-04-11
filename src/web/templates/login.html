@@ -6,6 +6,7 @@
         <h1>LED Matrix</h1>
         <p class="login-subtitle">Control Panel</p>
         <form method="POST" action="{{ url_for('login') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autocomplete="username" autofocus>

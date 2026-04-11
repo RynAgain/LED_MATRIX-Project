@@ -15,6 +15,7 @@
                 <span class="video-title">{{ sym }}</span>
             </div>
             <form method="POST" action="{{ url_for('stocks') }}" class="inline-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="remove">
                 <input type="hidden" name="index" value="{{ loop.index0 }}">
                 <button type="submit" class="btn btn-danger btn-small">Remove</button>
@@ -30,6 +31,7 @@
 <div class="card">
     <h2>Add Stock Symbol</h2>
     <form method="POST" action="{{ url_for('stocks') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="add">
         <div class="form-group">
             <label for="symbol">Ticker Symbol</label>
@@ -43,6 +45,7 @@
 <div class="card">
     <h2>Quick Actions</h2>
     <form method="POST" action="{{ url_for('stocks') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="play">
         <button type="submit" class="btn btn-info btn-full">Show Stock Ticker Now</button>
     </form>

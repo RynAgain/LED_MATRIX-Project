@@ -3,6 +3,12 @@
 {% block content %}
 <h1>Dashboard <span id="ws-status" style="font-size: 0.7em; color: #4CAF50; vertical-align: middle;">--</span></h1>
 
+<div id="error-alert" style="display:none; background:#ff4444; padding:10px; border-radius:6px; margin-bottom:10px; color:#fff;">
+    <strong>[!] Feature Error:</strong> <span id="error-text"></span>
+    <small id="error-time" style="display:block; margin-top:4px; opacity:0.8;"></small>
+    <button onclick="dismissError()" style="float:right; background:transparent; border:1px solid rgba(255,255,255,0.5); color:#fff; border-radius:4px; padding:2px 8px; cursor:pointer; margin-top:-28px;">[x]</button>
+</div>
+
 <div class="card">
     <h2>Display Status</h2>
     <div class="status-grid" id="status-display">
@@ -133,6 +139,8 @@ var wsRetryCount = 0;
 var maxRetries = 10;
 var pollingFallbackId = null;
 
+var _errorDismissed = false;
+
 function updateDashboard(d) {
     // Display status
     var el = document.getElementById('status-state');
@@ -166,6 +174,26 @@ function updateDashboard(d) {
         }
         document.getElementById('stat-uptime').textContent = sys.uptime || 'N/A';
     }
+
+    // Feature error alert
+    var alertEl = document.getElementById('error-alert');
+    if (d.last_error && !_errorDismissed) {
+        document.getElementById('error-text').textContent =
+            d.last_error.feature + ': ' + d.last_error.error;
+        var errDate = new Date(d.last_error.time * 1000);
+        document.getElementById('error-time').textContent = errDate.toLocaleString();
+        alertEl.style.display = 'block';
+    } else if (!d.last_error) {
+        alertEl.style.display = 'none';
+        _errorDismissed = false;  // Reset when error clears
+    }
+}
+
+function dismissError() {
+    _errorDismissed = true;
+    document.getElementById('error-alert').style.display = 'none';
+    fetch('/api/dismiss-error', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+        .catch(function() {});
 }
 
 function connectWebSocket() {

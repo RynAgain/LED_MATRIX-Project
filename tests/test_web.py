@@ -318,3 +318,94 @@ class TestSecurity:
             follow_redirects=True
         )
         assert b"incorrect" in response.data.lower()
+
+
+class TestCSRF:
+    """Test CSRF protection."""
+
+    def test_csrf_blocks_post_without_token(self):
+        """POST without CSRF token should be rejected when CSRF is enabled."""
+        app = create_app()
+        app.config["TESTING"] = True
+        # Leave WTF_CSRF_ENABLED at default (True)
+        client = app.test_client()
+        # Log in first (login is exempt from CSRF)
+        client.post("/login", data={"username": "admin", "password": "ledmatrix"})
+        # Now try a POST to features without CSRF token
+        response = client.post(
+            "/features",
+            data={"display_duration": "30"},
+        )
+        assert response.status_code == 403
+
+    def test_csrf_allows_post_with_valid_token(self):
+        """POST with valid CSRF token should succeed."""
+        app = create_app()
+        app.config["TESTING"] = True
+        client = app.test_client()
+        # Log in
+        client.post("/login", data={"username": "admin", "password": "ledmatrix"})
+        # GET the features page to generate a CSRF token in the session
+        response = client.get("/features")
+        assert response.status_code == 200
+        # Extract the CSRF token from the rendered HTML
+        import re
+        match = re.search(
+            rb'name="_csrf_token"\s+value="([^"]+)"', response.data
+        )
+        assert match, "CSRF token not found in rendered form"
+        csrf_token = match.group(1).decode()
+        # POST with the token
+        response = client.post(
+            "/features",
+            data={"display_duration": "30", "_csrf_token": csrf_token},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    def test_csrf_skips_json_api(self):
+        """JSON API endpoints should not require CSRF tokens."""
+        app = create_app()
+        app.config["TESTING"] = True
+        client = app.test_client()
+        client.post("/login", data={"username": "admin", "password": "ledmatrix"})
+        response = client.post(
+            "/api/brightness",
+            json={"brightness": 50},
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+
+    def test_csrf_skips_login(self):
+        """Login POST should not require CSRF token."""
+        app = create_app()
+        app.config["TESTING"] = True
+        client = app.test_client()
+        response = client.post(
+            "/login",
+            data={"username": "admin", "password": "ledmatrix"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"Dashboard" in response.data
+
+
+class TestSecretKeyAndPasswordMigration:
+    """Test auto-generation and migration features."""
+
+    def test_hash_password_format(self):
+        """Hashed passwords should use salt:hash format."""
+        from src.web.app import _hash_password, _verify_password
+        hashed = _hash_password("testpass")
+        assert ":" in hashed
+        assert len(hashed) > 40
+        assert _verify_password("testpass", hashed)
+        assert not _verify_password("wrongpass", hashed)
+
+    def test_plaintext_password_still_works_after_migration(self):
+        """After migration, the original plaintext password should verify."""
+        from src.web.app import _hash_password, _verify_password
+        original = "ledmatrix"
+        hashed = _hash_password(original)
+        assert _verify_password(original, hashed)

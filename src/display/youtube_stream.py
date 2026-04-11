@@ -137,6 +137,28 @@ def _is_cached(url):
     return True
 
 
+def _check_disk_space(path, min_mb=200):
+    """Check if there's enough disk space for a video download.
+
+    Args:
+        path: Directory path to check free space on.
+        min_mb: Minimum free megabytes required.
+
+    Returns:
+        True if sufficient space is available (or check cannot be performed).
+    """
+    try:
+        import shutil
+        usage = shutil.disk_usage(path)
+        free_mb = usage.free / (1024 * 1024)
+        if free_mb < min_mb:
+            logger.warning("Low disk space: %.0f MB free (need %d MB)", free_mb, min_mb)
+            return False
+        return True
+    except Exception:
+        return True  # Can't check, proceed anyway
+
+
 def download_video(url, title="Unknown"):
     """Download a YouTube video to local cache at low resolution.
 
@@ -158,6 +180,11 @@ def download_video(url, title="Unknown"):
         return cache_path
 
     os.makedirs(CACHE_DIR, exist_ok=True)
+
+    # Check disk space before attempting download
+    if not _check_disk_space(CACHE_DIR):
+        logger.error("Insufficient disk space for video download of '%s'", title)
+        return None
 
     # Request only pre-merged formats (video+audio in one file) so yt-dlp
     # does NOT need ffmpeg to merge separate streams. This is the #1 cause

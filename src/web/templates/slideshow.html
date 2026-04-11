@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Slideshow - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>Slideshow Images</h1>
+
+<div class="card">
+    <h2 style="margin-bottom: 0.75rem;">Upload Image</h2>
+    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.75rem;">
+        Images are resized to 64x64 pixels to match the LED matrix. Allowed: PNG, JPG, GIF, BMP (max 5MB).
+    </p>
+    <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s;">
+        <div style="color: var(--text-secondary); margin-bottom: 0.5rem;" id="drop-label">
+            Drag &amp; drop an image here, or click to browse
+        </div>
+        <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.gif,.bmp" style="display: none;">
+        <button class="btn btn-primary btn-small" onclick="document.getElementById('file-input').click()">Choose File</button>
+    </div>
+    <div id="upload-status" style="margin-top: 0.5rem;"></div>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <h2>Images <span style="color: var(--text-secondary); font-size: 0.9rem;">({{ images|length }})</span></h2>
+        <button class="btn btn-primary btn-small" onclick="playSlideshow()">Play Slideshow</button>
+    </div>
+
+    {% if images %}
+    <div id="image-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem;">
+        {% for img in images %}
+        <div class="image-card" data-filename="{{ img }}" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem; text-align: center;">
+            <img src="{{ url_for('api_serve_image', filename=img) }}" alt="{{ img }}"
+                 style="width: 128px; height: 128px; image-rendering: pixelated; border-radius: 4px; background: #000;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ img }}">
+                {{ img }}
+            </div>
+            <button class="btn btn-danger btn-small" style="margin-top: 0.4rem; font-size: 0.7rem; padding: 0.2rem 0.5rem;" onclick="deleteImage('{{ img }}')">Delete</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: var(--text-secondary); text-align: center; padding: 2rem 0;">
+        No images yet. Upload an image or create one in the <a href="{{ url_for('pixel_editor') }}" style="color: var(--accent-info);">Pixel Art Editor</a>.
+    </p>
+    {% endif %}
+</div>
+
+<script>
+var dropZone = document.getElementById('drop-zone');
+var fileInput = document.getElementById('file-input');
+var statusDiv = document.getElementById('upload-status');
+
+// Drag & drop
+dropZone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--accent-primary)';
+    dropZone.style.background = 'rgba(15, 155, 88, 0.05)';
+});
+dropZone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--border-color)';
+    dropZone.style.background = '';
+});
+dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--border-color)';
+    dropZone.style.background = '';
+    if (e.dataTransfer.files.length > 0) {
+        uploadFile(e.dataTransfer.files[0]);
+    }
+});
+dropZone.addEventListener('click', function(e) {
+    if (e.target.tagName !== 'BUTTON') {
+        fileInput.click();
+    }
+});
+fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) {
+        uploadFile(fileInput.files[0]);
+    }
+});
+
+function uploadFile(file) {
+    statusDiv.innerHTML = '<span style="color: var(--text-secondary);">Uploading...</span>';
+    var formData = new FormData();
+    formData.append('image', file);
+
+    fetch('{{ url_for("api_upload_image") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.success) {
+            statusDiv.innerHTML = '<span style="color: var(--accent-primary);">Uploaded: ' + d.filename + '</span>';
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            statusDiv.innerHTML = '<span style="color: var(--accent-danger);">Error: ' + d.error + '</span>';
+        }
+    })
+    .catch(function(err) {
+        statusDiv.innerHTML = '<span style="color: var(--accent-danger);">Upload failed: ' + err + '</span>';
+    });
+
+    fileInput.value = '';
+}
+
+function deleteImage(filename) {
+    if (!confirm('Delete "' + filename + '"?')) return;
+
+    fetch('{{ url_for("api_delete_image") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: filename})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.success) {
+            var card = document.querySelector('[data-filename="' + filename + '"]');
+            if (card) card.remove();
+            // Update count
+            var remaining = document.querySelectorAll('.image-card').length;
+            document.querySelector('h2 span').textContent = '(' + remaining + ')';
+            if (remaining === 0) location.reload();
+        } else {
+            alert('Delete failed: ' + d.error);
+        }
+    })
+    .catch(function(err) { alert('Delete failed: ' + err); });
+}
+
+function playSlideshow() {
+    fetch('{{ url_for("api_play_feature") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feature: 'slideshow'})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.success) {
+            var container = document.querySelector('.container');
+            container.insertAdjacentHTML('afterbegin',
+                '<div class="alert alert-success">Slideshow started!</div>');
+        }
+    });
+}
+</script>
+{% endblock %}

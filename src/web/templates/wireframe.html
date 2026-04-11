@@ -3,6 +3,7 @@
 {% block content %}
 <h2>Wireframe 3D Shapes</h2>
 <form method="POST" action="{{ url_for('wireframe_page') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="card">
         <h3>Active Shapes</h3>
         <p style="color:#999;font-size:0.85rem;margin-bottom:0.75rem;">Toggle which shapes appear in the rotation cycle.</p>

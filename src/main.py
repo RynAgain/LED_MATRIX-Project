@@ -19,6 +19,44 @@ from src.display._shared import request_stop, clear_stop, should_stop
 
 logger = logging.getLogger(__name__)
 
+# Features that require internet connectivity
+INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
+                     "youtube_stream", "github_stats"}
+
+
+def _check_internet(timeout=3):
+    """Quick connectivity check. Returns True if internet is reachable."""
+    try:
+        import requests
+        requests.head("https://httpbin.org/get", timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def _run_feature_with_watchdog(feature_callable, duration, feature_name):
+    """Run a feature with a watchdog timeout. Returns True if completed normally.
+
+    Args:
+        feature_callable: A no-arg callable (closure) that runs the feature.
+        duration: The configured duration, used to derive the watchdog timeout.
+        feature_name: Name of the feature for logging.
+    """
+    timeout = max(duration * 2, 60)  # At least 60 seconds, or 2x duration
+
+    thread = threading.Thread(target=feature_callable, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+
+    if thread.is_alive():
+        logger.warning("Watchdog: %s hung after %ds, forcing stop", feature_name, timeout)
+        request_stop()
+        thread.join(timeout=5)  # Give it 5 more seconds after stop request
+        if thread.is_alive():
+            logger.error("Watchdog: %s did not respond to stop request", feature_name)
+        return False
+    return True
+
 # Global reference for web panel preview access
 _matrix_ref = None
 
@@ -449,20 +487,34 @@ def run_feature(feature_name, matrix, duration):
 
         # Each display module should have a run(matrix, duration) function
         if hasattr(module, "run"):
-            module.run(matrix, duration)
+            feature_callable = lambda: module.run(matrix, duration)
         elif hasattr(module, "main"):
             # Fallback to main() for legacy modules
-            module.main(matrix, duration)
+            feature_callable = lambda: module.main(matrix, duration)
         else:
             logger.warning("Feature '%s' has no run() or main() function, skipping", feature_name)
             return False
 
-        logger.info("Feature '%s' completed", feature_name)
-        return True
+        # Use watchdog timer to kill hung features (timeout = 2x duration, min 60s)
+        completed = _run_feature_with_watchdog(feature_callable, duration, feature_name)
+        if completed:
+            logger.info("Feature '%s' completed", feature_name)
+        return completed
     except KeyboardInterrupt:
         raise
     except Exception as e:
         logger.error("Feature '%s' crashed: %s", feature_name, e, exc_info=True)
+        # Track last error for dashboard display
+        try:
+            error_path = os.path.join(PROJECT_ROOT, "logs", "feature_error.json")
+            with open(error_path, "w") as ef:
+                json.dump({
+                    "feature": feature_name,
+                    "error": str(e),
+                    "time": time.time()
+                }, ef)
+        except Exception:
+            pass
         # Clear the matrix on crash
         try:
             matrix.Clear()
@@ -813,6 +865,11 @@ def main():
     # Main display loop
     logger.info("Entering display loop...")
     while not _shutdown:
+        # Cache internet connectivity once per cycle (not per feature)
+        _internet_available = _check_internet()
+        if not _internet_available:
+            logger.info("Internet unavailable this cycle -- internet features will be skipped")
+
         for feature in enabled_features:
             if _shutdown:
                 break
@@ -824,6 +881,13 @@ def main():
                 continue
 
             name = feature.get("name", "unknown")
+
+            # Skip internet-dependent features when connectivity is down
+            if name in INTERNET_FEATURES:
+                if not _internet_available:
+                    logger.info("Skipping %s (no internet)", name)
+                    continue
+
             feat_duration = feature.get("duration", duration)  # Per-feature or global
             clear_stop()
             write_status(name, "running")

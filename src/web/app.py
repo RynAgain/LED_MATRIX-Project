@@ -17,8 +17,9 @@ from datetime import timedelta
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, jsonify
+    session, flash, jsonify, abort, send_from_directory, send_file
 )
+from werkzeug.utils import secure_filename
 from flask_sock import Sock
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ QR_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "qr.json")
 WEATHER_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "weather.json")
 SCHEDULE_PATH = os.path.join(PROJECT_ROOT, "config", "schedule.json")
 WIREFRAME_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "wireframe.json")
+GITHUB_STATS_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "github_stats.json")
 STATUS_PATH = os.path.join(PROJECT_ROOT, "logs", "status.json")
 PID_PATH = os.path.join(PROJECT_ROOT, "logs", "display.pid")
 
@@ -537,13 +539,29 @@ def _generate_self_signed_cert(cert_path, key_path):
             return False
 
 
+# Path to the feature error file written by main.py
+FEATURE_ERROR_PATH = os.path.join(PROJECT_ROOT, "logs", "feature_error.json")
+
+
 def _get_status_data():
     """Gather current status data for API/WebSocket responses.
 
-    Combines display status and system stats into a single dict.
+    Combines display status, system stats, and last feature error into a single dict.
     """
     status = get_display_status()
     status["system"] = _get_system_stats()
+
+    # Include last feature error if present and recent (within 1 hour)
+    try:
+        if os.path.exists(FEATURE_ERROR_PATH):
+            with open(FEATURE_ERROR_PATH, "r") as f:
+                err = json.load(f)
+            # Only include if less than 1 hour old
+            if time.time() - err.get("time", 0) < 3600:
+                status["last_error"] = err
+    except (json.JSONDecodeError, OSError):
+        pass
+
     return status
 
 
@@ -559,12 +577,55 @@ def create_app():
 
     sock = Sock(app)
 
-    app.secret_key = web_config.get("secret_key", secrets.token_hex(32))
+    # --- Feature 1: Auto-generate secret_key on first boot ---
+    secret_key = web_config.get("secret_key", "")
+    if not secret_key or secret_key == "CHANGE_ME_TO_RANDOM_STRING":
+        secret_key = secrets.token_hex(32)
+        web_config["secret_key"] = secret_key
+        save_web_config(web_config)
+        logger.info("Generated new secret_key for web sessions")
+    app.secret_key = secret_key
+
     app.permanent_session_lifetime = timedelta(
         minutes=web_config.get("session_timeout_minutes", 60)
     )
 
+    # --- Feature 2: Auto-migrate plaintext passwords to hashed format ---
     users = web_config.get("users", {"admin": "ledmatrix"})
+    migrated = False
+    for username, password in users.items():
+        if ":" not in password:  # plaintext (no salt:hash format)
+            users[username] = _hash_password(password)
+            migrated = True
+    if migrated:
+        web_config["users"] = users
+        save_web_config(web_config)
+        logger.info("Migrated plaintext passwords to hashed format")
+
+    # --- Feature 3: CSRF protection ---
+    def _generate_csrf_token():
+        if '_csrf_token' not in session:
+            session['_csrf_token'] = secrets.token_hex(32)
+        return session['_csrf_token']
+
+    app.jinja_env.globals['csrf_token'] = _generate_csrf_token
+
+    @app.before_request
+    def _check_csrf():
+        if request.method == "POST":
+            # Allow tests to disable CSRF via app.config["WTF_CSRF_ENABLED"]
+            if not app.config.get("WTF_CSRF_ENABLED", True):
+                return
+            # Skip CSRF for JSON API endpoints (they use Content-Type check)
+            if request.is_json:
+                return
+            # Skip CSRF for login (first POST creates the session)
+            if request.endpoint == "login":
+                return
+            token = session.get('_csrf_token', '')
+            form_token = request.form.get('_csrf_token', '')
+            if not token or token != form_token:
+                abort(403)
 
     # --- Auth decorator ---
     def login_required(f):
@@ -1066,6 +1127,48 @@ def create_app():
         return render_template("wireframe.html", config=cfg,
                                shape_names=shape_names, user=session.get("user"))
 
+    @app.route("/github-stats", methods=["GET", "POST"])
+    @login_required
+    def github_stats_page():
+        """GitHub Stats configuration page."""
+        config = {}
+        try:
+            with open(GITHUB_STATS_CONFIG_PATH) as f:
+                config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            token = request.form.get("token", "").strip()
+            data = {"username": username}
+            if token:
+                data["token"] = token
+            elif config.get("token"):
+                # Keep existing token if field left blank
+                data["token"] = config["token"]
+            try:
+                with open(GITHUB_STATS_CONFIG_PATH, 'w') as f:
+                    json.dump(data, f, indent=2)
+                flash("GitHub Stats settings saved", "success")
+            except Exception as e:
+                flash(f"Error saving: {e}", "error")
+            return redirect(url_for("github_stats_page"))
+
+        return render_template("github_stats.html", config=config, user=session.get("user"))
+
+    @app.route("/api/github-stats", methods=["POST"])
+    @login_required
+    def api_github_stats():
+        """Save GitHub Stats configuration (JSON API)."""
+        data = request.get_json() if request.is_json else {}
+        try:
+            with open(GITHUB_STATS_CONFIG_PATH, 'w') as f:
+                json.dump(data, f, indent=2)
+            return jsonify({"success": True, "message": "GitHub Stats settings saved"})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+
     @app.route("/api/reorder-features", methods=["POST"])
     @login_required
     def api_reorder_features():
@@ -1322,6 +1425,281 @@ def create_app():
             })
         except Exception as e:
             return jsonify({"lines": [], "file": log_file, "error": str(e)})
+
+    @app.route("/slideshow")
+    @login_required
+    def slideshow_page():
+        """Image management page for the slideshow feature."""
+        images_dir = os.path.join(PROJECT_ROOT, "config", "images")
+        images = []
+        if os.path.isdir(images_dir):
+            allowed = {'.png', '.jpg', '.jpeg', '.gif', '.bmp'}
+            for f in sorted(os.listdir(images_dir)):
+                if os.path.splitext(f)[1].lower() in allowed:
+                    images.append(f)
+        return render_template("slideshow.html", images=images)
+
+    @app.route("/api/upload-image", methods=["POST"])
+    @login_required
+    def api_upload_image():
+        """Upload an image file for the slideshow."""
+        if 'image' not in request.files:
+            return jsonify({"success": False, "error": "No image file provided"})
+
+        file = request.files['image']
+        if not file.filename:
+            return jsonify({"success": False, "error": "No file selected"})
+
+        # Validate extension
+        allowed = {'.png', '.jpg', '.jpeg', '.gif', '.bmp'}
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in allowed:
+            return jsonify({"success": False, "error": f"Invalid format. Allowed: {', '.join(allowed)}"})
+
+        # Validate file size (max 5MB)
+        file.seek(0, 2)
+        size = file.tell()
+        file.seek(0)
+        if size > 5 * 1024 * 1024:
+            return jsonify({"success": False, "error": "File too large (max 5MB)"})
+
+        images_dir = os.path.join(PROJECT_ROOT, "config", "images")
+        os.makedirs(images_dir, exist_ok=True)
+
+        # Resize to matrix dimensions (64x64)
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(file)
+            img = img.convert("RGB")
+            img = img.resize((64, 64), PILImage.LANCZOS)
+
+            # Save with sanitized filename
+            safe_name = secure_filename(file.filename)
+            if not safe_name:
+                safe_name = f"upload_{int(time.time())}{ext}"
+            save_path = os.path.join(images_dir, safe_name)
+
+            # Avoid overwriting
+            base, extension = os.path.splitext(safe_name)
+            counter = 1
+            while os.path.exists(save_path):
+                save_path = os.path.join(images_dir, f"{base}_{counter}{extension}")
+                counter += 1
+
+            img.save(save_path)
+            return jsonify({"success": True, "filename": os.path.basename(save_path)})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    @app.route("/api/images")
+    @login_required
+    def api_list_images():
+        """List all images in the slideshow directory."""
+        images_dir = os.path.join(PROJECT_ROOT, "config", "images")
+        images = []
+        if os.path.isdir(images_dir):
+            allowed = {'.png', '.jpg', '.jpeg', '.gif', '.bmp'}
+            for f in sorted(os.listdir(images_dir)):
+                ext = os.path.splitext(f)[1].lower()
+                if ext in allowed:
+                    path = os.path.join(images_dir, f)
+                    size = os.path.getsize(path)
+                    images.append({"name": f, "size": size})
+        return jsonify({"success": True, "images": images, "count": len(images)})
+
+    @app.route("/api/delete-image", methods=["POST"])
+    @login_required
+    def api_delete_image():
+        """Delete an image from the slideshow directory."""
+        data = request.get_json()
+        filename = data.get("filename", "") if data else ""
+        if not filename:
+            return jsonify({"success": False, "error": "No filename provided"})
+
+        # Security: prevent path traversal
+        safe_name = os.path.basename(filename)
+        path = os.path.join(PROJECT_ROOT, "config", "images", safe_name)
+
+        if not os.path.exists(path):
+            return jsonify({"success": False, "error": "Image not found"})
+
+        try:
+            os.remove(path)
+            return jsonify({"success": True})
+        except OSError as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    @app.route("/api/image/<filename>")
+    @login_required
+    def api_serve_image(filename):
+        """Serve an image file for preview."""
+        images_dir = os.path.join(PROJECT_ROOT, "config", "images")
+        safe_name = os.path.basename(filename)
+        return send_from_directory(images_dir, safe_name)
+
+    # --- Health check endpoint (no auth required) ---
+
+    @app.route("/api/health")
+    def api_health():
+        """Health check endpoint for monitoring. No auth required."""
+        import time as time_mod
+        return jsonify({
+            "status": "ok",
+            "timestamp": int(time_mod.time()),
+            "version": "1.0.0"
+        })
+
+    # --- Config backup/restore endpoints ---
+
+    @app.route("/api/config-backup")
+    @login_required
+    def api_config_backup():
+        """Download all config files as a zip archive."""
+        import zipfile
+        import io
+
+        config_dir = os.path.join(PROJECT_ROOT, "config")
+        buf = io.BytesIO()
+
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for filename in sorted(os.listdir(config_dir)):
+                filepath = os.path.join(config_dir, filename)
+                if os.path.isfile(filepath) and filename.endswith(('.json', '.csv')):
+                    zf.write(filepath, filename)
+
+        buf.seek(0)
+        return send_file(buf, mimetype='application/zip',
+                         as_attachment=True,
+                         download_name='led-matrix-config.zip')
+
+    @app.route("/api/config-restore", methods=["POST"])
+    @login_required
+    def api_config_restore():
+        """Restore config files from uploaded zip."""
+        import zipfile
+        import io
+
+        if 'backup' not in request.files:
+            return jsonify({"success": False, "error": "No file provided"})
+
+        file = request.files['backup']
+        if not file.filename.endswith('.zip'):
+            return jsonify({"success": False, "error": "Must be a .zip file"})
+
+        config_dir = os.path.join(PROJECT_ROOT, "config")
+
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(file.read()))
+
+            # Validate: only allow .json and .csv files, no path traversal
+            restored = 0
+            for name in zf.namelist():
+                if name.endswith(('.json', '.csv')) and '/' not in name and '..' not in name:
+                    zf.extract(name, config_dir)
+                    restored += 1
+
+            return jsonify({"success": True, "restored": restored})
+        except zipfile.BadZipFile:
+            return jsonify({"success": False, "error": "Invalid zip file"})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    # --- Clear logs endpoint ---
+
+    @app.route("/api/clear-logs", methods=["POST"])
+    @login_required
+    def api_clear_logs():
+        """Clear the display log file."""
+        log_path = os.path.join(PROJECT_ROOT, "logs", "display.log")
+        try:
+            with open(log_path, 'w') as f:
+                f.write("")
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    # --- Dismiss feature error endpoint ---
+
+    @app.route("/api/dismiss-error", methods=["POST"])
+    @login_required
+    def api_dismiss_error():
+        """Dismiss the current feature error alert."""
+        try:
+            if os.path.exists(FEATURE_ERROR_PATH):
+                os.remove(FEATURE_ERROR_PATH)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    # --- Git version control endpoints ---
+
+    @app.route("/api/git-log")
+    @login_required
+    def api_git_log():
+        """Get recent git commit history."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "--no-decorate", "-n", "20"],
+                cwd=PROJECT_ROOT,
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return jsonify({"success": False, "error": "git log failed"})
+
+            commits = []
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split(' ', 1)
+                    commits.append({"hash": parts[0], "message": parts[1] if len(parts) > 1 else ""})
+
+            # Get current HEAD
+            head = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=PROJECT_ROOT,
+                capture_output=True, text=True, timeout=5
+            )
+            current = head.stdout.strip() if head.returncode == 0 else ""
+
+            return jsonify({"success": True, "commits": commits, "current": current})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    @app.route("/api/git-rollback", methods=["POST"])
+    @login_required
+    def api_git_rollback():
+        """Rollback to a specific git commit."""
+        import subprocess
+        data = request.get_json()
+        commit_hash = data.get("hash", "") if data else ""
+
+        if not commit_hash or len(commit_hash) < 7:
+            return jsonify({"success": False, "error": "Invalid commit hash"})
+
+        # Only allow alphanumeric characters (prevent injection)
+        if not commit_hash.isalnum():
+            return jsonify({"success": False, "error": "Invalid commit hash format"})
+
+        try:
+            result = subprocess.run(
+                ["git", "checkout", commit_hash, "--", "."],
+                cwd=PROJECT_ROOT,
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                return jsonify({"success": False, "error": result.stderr.strip()[:200]})
+
+            return jsonify({"success": True, "message": f"Rolled back to {commit_hash}"})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    # --- API documentation page ---
+
+    @app.route("/api-docs")
+    @login_required
+    def api_docs_page():
+        """API documentation page."""
+        return render_template("api_docs.html")
 
     return app
 

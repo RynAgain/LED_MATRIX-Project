@@ -6,6 +6,7 @@
 <div class="card">
     <h2>Configure QR Code</h2>
     <form method="POST" action="{{ url_for('qr_page') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
             <label for="content">Content (URL or text)</label>
             <input type="text" id="content" name="content" value="{{ config.get('content', '') }}" 

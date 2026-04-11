@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}API Documentation - LED Matrix Control{% endblock %}
+{% block content %}
+<h1>API Documentation</h1>
+<p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+    REST API endpoints for the LED Matrix web control panel. All endpoints except <code>/api/health</code> require authentication.
+</p>
+
+<style>
+.api-card {
+    background: var(--bg-card, #1e1e1e);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+.api-method {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    min-width: 42px;
+    text-align: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.api-method-get { background: #2e7d32; color: #fff; }
+.api-method-post { background: #e65100; color: #fff; }
+.api-method-ws { background: #1565c0; color: #fff; }
+.api-path {
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--text-primary, #eee);
+    word-break: break-all;
+}
+.api-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary, #aaa);
+    margin-top: 0.15rem;
+}
+.api-body {
+    font-size: 0.78rem;
+    color: var(--text-secondary, #888);
+    margin-top: 0.25rem;
+    font-family: monospace;
+}
+.api-section {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    color: var(--accent-primary, #4CAF50);
+    border-bottom: 1px solid var(--border-color, #333);
+    padding-bottom: 0.35rem;
+}
+</style>
+
+<h2 class="api-section">Status & Health</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/health</div>
+        <div class="api-desc">Health check -- no authentication required. Returns status, timestamp, and version.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/status</div>
+        <div class="api-desc">Display status and system stats (CPU, RAM, disk, temp, uptime).</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/system-stats</div>
+        <div class="api-desc">System resource usage (CPU %, RAM %, disk %, temperature, uptime).</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/preview</div>
+        <div class="api-desc">Live matrix preview as base64-encoded PNG image.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-ws">WS</span>
+    <div>
+        <div class="api-path">/ws/status</div>
+        <div class="api-desc">WebSocket real-time status feed. Pushes JSON status every 2 seconds.</div>
+    </div>
+</div>
+
+<h2 class="api-section">Feature Control</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/play_feature</div>
+        <div class="api-desc">Switch to a specific feature immediately.</div>
+        <div class="api-body">Body: {"feature": "name"}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/restart</div>
+        <div class="api-desc">Restart the display service via systemctl.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/update</div>
+        <div class="api-desc">Trigger a git update check via the updater service.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/brightness</div>
+        <div class="api-desc">Set display brightness.</div>
+        <div class="api-body">Body: {"brightness": 10-100}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/reorder-features</div>
+        <div class="api-desc">Reorder the feature display sequence.</div>
+        <div class="api-body">Body: {"order": ["feature1", "feature2", ...]}</div>
+    </div>
+</div>
+
+<h2 class="api-section">Configuration</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/countdown</div>
+        <div class="api-desc">Set and start the countdown timer.</div>
+        <div class="api-body">Body: {"label": "Timer", "seconds": 300}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/qr</div>
+        <div class="api-desc">Set QR code content and display it.</div>
+        <div class="api-body">Body: {"content": "https://...", "label": "Scan Me"}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/github-stats</div>
+        <div class="api-desc">Save GitHub stats configuration (username, token).</div>
+        <div class="api-body">Body: {"username": "...", "token": "..."}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/config-backup</div>
+        <div class="api-desc">Download all config files as a .zip archive.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/config-restore</div>
+        <div class="api-desc">Upload and restore config files from a .zip backup.</div>
+        <div class="api-body">Multipart form: field "backup" (.zip file)</div>
+    </div>
+</div>
+
+<h2 class="api-section">Images & Pixel Art</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/images</div>
+        <div class="api-desc">List all slideshow images with file names and sizes.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/upload-image</div>
+        <div class="api-desc">Upload an image for the slideshow. Auto-resized to 64x64.</div>
+        <div class="api-body">Multipart form: field "image" (png/jpg/gif/bmp, max 5MB)</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/delete-image</div>
+        <div class="api-desc">Delete an image from the slideshow directory.</div>
+        <div class="api-body">Body: {"filename": "image.png"}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/image/&lt;filename&gt;</div>
+        <div class="api-desc">Serve a specific image file for preview.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/pixel-art</div>
+        <div class="api-desc">Send pixel art data directly to the matrix display.</div>
+        <div class="api-body">Body: {"pixels": [[r,g,b], ...]}</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/save-pixel-art</div>
+        <div class="api-desc">Save pixel art as a PNG image in the slideshow directory.</div>
+        <div class="api-body">Body: {"pixels": [[r,g,b], ...]}</div>
+    </div>
+</div>
+
+<h2 class="api-section">Logs & Errors</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/clear-logs</div>
+        <div class="api-desc">Clear the display log file.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/dismiss-error</div>
+        <div class="api-desc">Dismiss the current feature error alert.</div>
+    </div>
+</div>
+
+<h2 class="api-section">Version Control</h2>
+
+<div class="api-card">
+    <span class="api-method api-method-get">GET</span>
+    <div>
+        <div class="api-path">/api/git-log</div>
+        <div class="api-desc">Recent commit history (last 20 commits). Returns commit hashes, messages, and current HEAD.</div>
+    </div>
+</div>
+
+<div class="api-card">
+    <span class="api-method api-method-post">POST</span>
+    <div>
+        <div class="api-path">/api/git-rollback</div>
+        <div class="api-desc">Rollback to a specific git commit. Hash must be alphanumeric, minimum 7 characters.</div>
+        <div class="api-body">Body: {"hash": "abc1234"}</div>
+    </div>
+</div>
+
+{% endblock %}

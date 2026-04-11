@@ -24,12 +24,12 @@
     {
       "name": "snake",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "pong",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "fire",

@@ -56,3 +56,6 @@ $null
 # Cache
 logs/sp500_cache.json
 logs/pixel_art.json
+
+# Config backups created by auto-updater
+config/.backup/

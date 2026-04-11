@@ -45,34 +45,48 @@
 
 ---
 
-## Display Features (20 modes)
+## Display Features (33 modes)
 
-### Games
+### Games (8)
 - [x] Tic Tac Toe (AI vs AI)
 - [x] Snake (autonomous AI)
 - [x] Pong (AI vs AI)
 - [x] Breakout (autonomous AI)
 - [x] Billiards (physics simulation)
+- [x] Galaga (classic arcade shooter)
+- [x] Space Invaders (classic arcade shooter)
+- [x] Tanks (artillery combat)
 
-### Original Displays
+### Original Displays (1 video + 2 utility)
 - [x] Time Display (clock)
 - [x] Bitcoin Price Display (live API via requests)
 - [x] YouTube Stream (yt-dlp + OpenCV)
 
-### Visual Effects
+### Visual Effects (11)
 - [x] Fire (procedural flame simulation)
 - [x] Plasma (sine-based color cycling)
 - [x] Matrix Rain (falling green characters)
 - [x] Starfield (3D star parallax)
 - [x] Game of Life (Conway's cellular automaton)
 - [x] Rainbow Waves (animated color gradients)
+- [x] Lava Lamp (metaball / blob effect)
+- [x] Living World (persistent village simulation)
+- [x] Wireframe (rotating 3D polygon shapes)
+- [x] Maze 3D (first-person maze walker)
+- [x] Terrain Ball (rolling ball on procedural terrain)
 
-### Utilities
+### Utilities (11)
 - [x] Weather (live weather display)
 - [x] Text Scroller (scrolling message display)
 - [x] Stock Ticker (live stock prices)
 - [x] S&P 500 Heatmap (sector-based market heatmap)
 - [x] Binary Clock (binary-encoded time display)
+- [x] Countdown (configurable countdown timer)
+- [x] QR Code (display WiFi password, custom URLs)
+- [x] Slideshow (cycle uploaded images)
+- [x] GitHub Stats (contribution heatmap)
+- [x] System Stats (CPU, RAM, disk usage)
+- [x] Logo Wholefoods (branded logo display)
 
 ---
 
@@ -194,3 +208,45 @@
 ### Code Quality
 - [x] Update test suite for all 19+ display modules
 - [x] Clean up stray files ($null in project root)
+
+---
+
+## Next Up (Actionable)
+
+### Security Hardening
+- [x] Auto-generate `secret_key` on first boot (currently ships as `CHANGE_ME_TO_RANDOM_STRING` in `config/web.json`)
+- [x] Auto-migrate plaintext password to hashed on first boot (default `"admin": "ledmatrix"` ships unprotected)
+- [x] Set HTTPS to `enabled: false` in shipped `config/web.json` (currently committed as `true`, will fail on fresh installs without certs)
+- [x] Add CSRF protection tokens to all web forms
+
+### Slideshow / Image Management
+- [x] Direct image upload endpoint (multipart file upload form in web panel, not just pixel editor save)
+- [x] Image delete/manage UI (view, delete uploaded images from web panel)
+- [x] Resize uploaded images to matrix dimensions (64x64) server-side
+
+### Display Feature Gaps
+- [x] Add all 33 display modules to FEATURES.md (only 20 were listed; added galaga, space_invaders, tanks, wireframe, maze_3d, terrain_ball, system_stats, living_world, logo_wholefoods, github_stats, countdown, lava_lamp, qr_code, slideshow)
+- [ ] Boot screen configuration from web panel (intentionally skipped -- hardcoded by design)
+- [x] GitHub stats config from web panel (PAT token, username)
+- [x] Messages config from web panel (text_scroller messages management)
+
+### Web Panel Enhancements
+- [x] Config backup/restore (download/upload `config/` as zip from web panel)
+- [x] Git version rollback from web panel (list recent commits, revert to selected)
+- [x] Health check endpoint (`/api/health` for external monitoring tools)
+- [x] REST API documentation page (auto-generated or static list of all endpoints)
+- [x] Logs page improvements (filter by level, auto-scroll, clear logs)
+- [x] Error notification system (flash persistent alerts when features fail to load)
+
+### Reliability
+- [x] Graceful degradation when internet is unavailable (skip API-dependent features, don't crash)
+- [x] Config file backup before auto-update overwrites (save `config/*.json.bak` before `git pull`)
+- [x] Watchdog timer for stuck display modules (kill and move to next if a feature hangs > 2x duration)
+- [x] Disk space check before video downloads (prevent filling SD card)
+
+### Developer Experience
+- [x] Add execution tests for all 33 display modules (currently only ~16 have `_runs_briefly` tests)
+- [ ] CI pipeline configuration -- removed, not needed per user
+- [x] Code coverage reporting (pytest-cov integration)
+- [ ] Type hints across all Python modules -- deferred (large scope, low urgency)
+- [x] Pre-commit hooks (linting, formatting)
