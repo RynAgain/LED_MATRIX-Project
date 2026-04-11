@@ -3533,6 +3533,10 @@ class TestWorldApiModule:
             "src.display.living_world.world_api._SAVE_PATH",
             str(tmp_path / "nonexistent.json"),
         )
+        monkeypatch.setattr(
+            "src.display.living_world.world_api._LIVE_SNAPSHOT_PATH",
+            str(tmp_path / "nonexistent_live.json"),
+        )
         assert get_world_snapshot() is None
 
     def test_get_event_log_snapshot_returns_list(self):

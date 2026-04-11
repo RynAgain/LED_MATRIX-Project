@@ -1,11 +1,14 @@
 {
-  "enabled": false,
+  "enabled": true,
   "night_mode": {
-    "enabled": false,
+    "enabled": true,
     "start_hour": 22,
     "end_hour": 7,
     "brightness": 20,
-    "allowed_features": ["time_display", "binary_clock"]
+    "allowed_features": [
+      "time_display",
+      "binary_clock"
+    ]
   },
   "schedules": []
 }

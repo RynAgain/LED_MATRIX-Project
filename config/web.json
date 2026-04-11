@@ -5,5 +5,11 @@
   "users": {
     "admin": "ledmatrix"
   },
-  "session_timeout_minutes": 60
+  "session_timeout_minutes": 60,
+  "https": {
+    "enabled": true,
+    "cert_path": "config/cert.pem",
+    "key_path": "config/key.pem",
+    "auto_generate": true
+  }
 }

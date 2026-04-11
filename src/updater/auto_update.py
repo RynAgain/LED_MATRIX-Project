@@ -203,7 +203,12 @@ class AutoUpdater:
 
     def install_dependencies(self):
         """
-        Install/update Python dependencies from requirements.txt.
+        Install/upgrade Python dependencies from requirements.txt.
+
+        Uses --upgrade to ensure outdated packages are updated, not just
+        missing ones installed. Falls back to installing without --upgrade
+        if the first attempt fails (e.g., GitHub source for yt-dlp is
+        unreachable). After installation, verifies critical imports.
 
         Returns:
             True if installation succeeded, False otherwise.
@@ -213,24 +218,96 @@ class AutoUpdater:
             logger.warning("requirements.txt not found, skipping dependency install")
             return True
 
-        logger.info("Installing dependencies from requirements.txt...")
+        logger.info("Upgrading dependencies from requirements.txt...")
+        success = False
         try:
+            # First pass: install with --upgrade to catch outdated packages
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", req_path, "--quiet"],
+                [sys.executable, "-m", "pip", "install", "--upgrade",
+                 "-r", req_path, "--quiet"],
                 cwd=self.project_root,
                 capture_output=True,
                 text=True,
                 timeout=300
             )
             if result.returncode == 0:
-                logger.info("Dependencies installed successfully")
-                return True
+                logger.info("Dependencies upgraded successfully")
+                success = True
             else:
-                logger.error("Dependency install failed: %s", result.stderr.strip())
-                return False
+                logger.warning("Dependency upgrade failed: %s", result.stderr.strip()[:500])
+                # Fallback: install without --upgrade (satisfies missing deps only)
+                logger.info("Retrying without --upgrade...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install",
+                     "-r", req_path, "--quiet"],
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode == 0:
+                    logger.info("Dependencies installed (without upgrade)")
+                    success = True
+                else:
+                    logger.error("Dependency install also failed: %s",
+                                 result.stderr.strip()[:500])
         except subprocess.TimeoutExpired:
             logger.error("Dependency installation timed out")
-            return False
+
+        # Verify critical dependencies are importable
+        self._verify_dependencies()
+
+        return success
+
+    def _verify_dependencies(self):
+        """Check that critical Python packages are importable.
+
+        Logs warnings for any missing packages so operators can see
+        exactly what needs manual attention. Attempts to install missing
+        critical packages individually as a last resort.
+        """
+        critical = {
+            "flask": "Flask",
+            "flask_sock": "flask-sock",
+            "requests": "requests",
+            "PIL": "Pillow",
+            "psutil": "psutil",
+            "qrcode": "qrcode",
+        }
+        optional = {
+            "cv2": "opencv-python-headless",
+            "numpy": "numpy",
+            "yt_dlp": "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz",
+        }
+
+        for module, package in critical.items():
+            try:
+                __import__(module)
+            except ImportError:
+                logger.warning("Critical dependency missing: %s (pip install %s)", module, package)
+                self._pip_install_single(package)
+
+        for module, package in optional.items():
+            try:
+                __import__(module)
+            except ImportError:
+                logger.info("Optional dependency not available: %s", module)
+
+    def _pip_install_single(self, package):
+        """Attempt to install a single package as a last-resort fix."""
+        logger.info("Attempting to install: %s", package)
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet", package],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                logger.info("Installed %s successfully", package)
+            else:
+                logger.error("Failed to install %s: %s", package,
+                             result.stderr.strip()[:200])
+        except subprocess.TimeoutExpired:
+            logger.error("Timed out installing %s", package)
 
     def restart_display_service(self):
         """

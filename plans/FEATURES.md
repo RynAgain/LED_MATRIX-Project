@@ -29,7 +29,7 @@
   - [x] Auto-start on boot (`After=network-online.target`)
   - [x] Auto-restart on crash (`Restart=always`, `RestartSec=10`)
   - [x] Network dependency enforcement (`Wants=network-online.target`)
-  - [ ] `ExecStartPre` WiFi connection check (handled in Python instead of systemd)
+  - [x] `ExecStartPre` WiFi connection check (handled in Python via ensure_wifi())
 
 - [x] Logging system
   - [x] Centralized log directory (`logs/`)
@@ -45,12 +45,13 @@
 
 ---
 
-## Display Features (19 modes)
+## Display Features (20 modes)
 
 ### Games
 - [x] Tic Tac Toe (AI vs AI)
 - [x] Snake (autonomous AI)
 - [x] Pong (AI vs AI)
+- [x] Breakout (autonomous AI)
 - [x] Billiards (physics simulation)
 
 ### Original Displays
@@ -88,10 +89,10 @@
 - [x] PID-based SIGHUP for config reload
 - [x] Dark theme, mobile-first CSS
 - [x] Web endpoint tests (15 tests)
-- [ ] HTTPS/TLS support
-- [ ] Password hashing (currently plaintext in config)
-- [ ] Rate limiting on login attempts
-- [ ] WebSocket for real-time status updates (currently polling)
+- [x] HTTPS/TLS support
+- [x] Password hashing (SHA-256)
+- [x] Rate limiting on login attempts
+- [x] WebSocket for real-time status updates (with polling fallback)
 
 ---
 
@@ -131,7 +132,7 @@
   - [x] Adding/removing display features
   - [x] Troubleshooting section
 
-- [ ] Documentation sync
+- [x] Documentation sync
   - [x] Reconcile `PROJECT_OVERVIEW.md`, `QUICKSTART.md`, `STARTUP_GUIDE.md` with actual project state (removed; README is single source of truth)
   - [x] Remove or consolidate `FIXES_SUMMARY.md` into changelog (removed)
   - [x] Ensure `config.json` docs match actual schema
@@ -166,30 +167,30 @@
 ## Planned Improvements
 
 ### High Impact Features
-- [ ] Instant feature switching (interrupt current feature mid-display via web command)
-- [ ] Brightness control from web panel
-- [ ] Per-feature duration settings (different duration for each feature)
-- [ ] Countdown timer (configurable from web panel)
-- [ ] Image slideshow (upload images via web panel)
-- [ ] Live matrix preview in dashboard (screenshot of current display)
-- [ ] Pixel art editor (draw on matrix from phone in real-time)
-- [ ] Feature scheduling (time-based: games during day, ambient at night)
+- [x] Instant feature switching (interrupt current feature mid-display via web command)
+- [x] Brightness control from web panel
+- [x] Per-feature duration settings (different duration for each feature)
+- [x] Countdown timer (configurable from web panel)
+- [x] Image slideshow (upload images via web panel)
+- [x] Live matrix preview in dashboard (screenshot of current display)
+- [x] Pixel art editor (draw on matrix from phone in real-time)
+- [x] Feature scheduling (time-based: games during day, ambient at night)
 
 ### New Display Modes
-- [ ] Lava lamp / metaball effect
-- [ ] QR code display (show WiFi password, custom URLs)
+- [x] Lava lamp / metaball effect
+- [x] QR code display (show WiFi password, custom URLs)
 
 ### Security
-- [ ] Password hashing (replace plaintext passwords in web.json)
-- [ ] Login rate limiting (prevent brute force)
-- [ ] HTTPS/TLS support for web panel
+- [x] Password hashing (replace plaintext passwords in web.json)
+- [x] Login rate limiting (prevent brute force)
+- [x] HTTPS/TLS support for web panel
 
 ### Web Panel Polish
-- [ ] Drag-and-drop feature reordering
-- [ ] Weather location configurable from web settings
-- [ ] Night mode (auto-dim/off schedule)
-- [ ] WebSocket for real-time status (replace polling)
+- [x] Drag-and-drop feature reordering
+- [x] Weather location configurable from web settings
+- [x] Night mode (auto-dim/off schedule)
+- [x] WebSocket for real-time status (replace polling)
 
 ### Code Quality
-- [ ] Update test suite for all 19+ display modules
-- [ ] Clean up stray files ($null in project root)
+- [x] Update test suite for all 19+ display modules
+- [x] Clean up stray files ($null in project root)

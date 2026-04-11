@@ -18,7 +18,8 @@ Pillow>=10.0.0
 #   sudo apt-get install python3-opencv
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
-yt-dlp>=2024.1.1
+# Install yt-dlp from GitHub source (gets extraction fixes hours before PyPI)
+yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
 
 # HTTP requests (for Bitcoin price, connectivity checks)
 requests>=2.31.0
@@ -29,6 +30,7 @@ pygame>=2.5.0; sys_platform == "win32" or sys_platform == "darwin"
 
 # Web control panel
 Flask>=3.0.0
+flask-sock>=0.7.0
 
 # QR code generation
 qrcode>=7.4

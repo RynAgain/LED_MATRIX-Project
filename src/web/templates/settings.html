@@ -50,10 +50,27 @@
     </form>
 </div>
 
-<div class="card">
-    <h2>Night Mode</h2>
-    <form method="POST" action="{{ url_for('settings') }}">
-        <input type="hidden" name="section" value="schedule">
+{% set existing_schedules = schedule_config.get('schedules', []) %}
+
+<form method="POST" action="{{ url_for('settings') }}" id="schedule-form">
+    <input type="hidden" name="section" value="schedule">
+    <input type="hidden" name="schedule_count" id="schedule_count" value="{{ existing_schedules|length }}">
+
+    {# Hidden inputs for all existing schedules #}
+    {% for sched in existing_schedules %}
+    <input type="hidden" name="sched_{{ loop.index0 }}_name" value="{{ sched.name }}">
+    <input type="hidden" name="sched_{{ loop.index0 }}_start" value="{{ sched.start_hour }}">
+    <input type="hidden" name="sched_{{ loop.index0 }}_end" value="{{ sched.end_hour }}">
+    {% if sched.brightness is not none and sched.brightness is defined %}
+    <input type="hidden" name="sched_{{ loop.index0 }}_brightness" value="{{ sched.brightness }}">
+    {% endif %}
+    {% for feat in sched.get('allowed_features', []) %}
+    <input type="hidden" name="sched_{{ loop.index0 }}_features" value="{{ feat }}">
+    {% endfor %}
+    {% endfor %}
+
+    <div class="card">
+        <h2>Night Mode</h2>
         <label class="toggle-row" style="padding: 0.5rem 0;">
             <span>Enable Night Mode</span>
             <input type="checkbox" name="night_enabled" {% if schedule_config.get('night_mode', {}).get('enabled') %}checked{% endif %}>
@@ -78,7 +95,116 @@
                    style="width: 100%;" oninput="this.nextElementSibling.textContent = this.value + '%'">
             <span>{{ schedule_config.get('night_mode', {}).get('brightness', 20) }}%</span>
         </div>
-        <button type="submit" class="btn btn-primary btn-full">Save Night Mode</button>
+    </div>
+
+    <div class="card">
+        <h2>Feature Schedules</h2>
+        <p class="card-hint">Define time-based schedules to restrict which features run during specific hours.</p>
+
+        {# Display existing schedules #}
+        {% if existing_schedules %}
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
+            {% for sched in existing_schedules %}
+            <div style="background: var(--bg-secondary); border-radius: 6px; padding: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+                <div style="flex: 1; min-width: 0;">
+                    <strong style="display: block; margin-bottom: 0.25rem;">{{ sched.name }}</strong>
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">
+                        {{ sched.start_hour }}:00 - {{ sched.end_hour }}:00
+                        {% if sched.brightness is not none and sched.brightness is defined %} | {{ sched.brightness }}%{% else %} | Default brightness{% endif %}
+                        | {{ sched.get('allowed_features', [])|length }} feature{{ 's' if sched.get('allowed_features', [])|length != 1 }}
+                    </span>
+                </div>
+                <button type="button" class="btn btn-danger btn-small" onclick="deleteSchedule({{ loop.index0 }})" style="flex-shrink: 0; margin-left: 0.5rem;">Delete</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: 1rem;">No schedules configured.</div>
+        {% endif %}
+
+        {# Add schedule button - hidden if 5 exist #}
+        {% if existing_schedules|length < 5 %}
+        <button type="button" id="add-schedule-btn" class="btn btn-info btn-full" onclick="toggleAddScheduleForm()" style="margin-bottom: 0.75rem;">[+ Add Schedule]</button>
+        {% endif %}
+
+        {# Add schedule inline form - hidden by default #}
+        {% set new_idx = existing_schedules|length %}
+        <div id="add-schedule-form" style="display: none; border: 1px solid var(--border-color); border-radius: 6px; padding: 1rem; margin-bottom: 0.75rem;">
+            <div class="form-group">
+                <label for="new_sched_name">Schedule Name</label>
+                <input type="text" id="new_sched_name" name="sched_{{ new_idx }}_name" maxlength="30" placeholder="e.g. Morning Games" disabled>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="new_sched_start">Start Hour (0-23)</label>
+                    <input type="number" id="new_sched_start" name="sched_{{ new_idx }}_start" value="8" min="0" max="23" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="new_sched_end">End Hour (0-23)</label>
+                    <input type="number" id="new_sched_end" name="sched_{{ new_idx }}_end" value="18" min="0" max="23" disabled>
+                </div>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                    <input type="checkbox" id="new_sched_default_brightness" checked onchange="toggleBrightnessSlider(this)">
+                    Use default brightness
+                </label>
+                <div id="new_sched_brightness_wrap" style="display: none;">
+                    <label for="new_sched_brightness" style="font-size: 0.85rem; color: var(--text-secondary);">Brightness (%)</label>
+                    <input type="range" id="new_sched_brightness" name="sched_{{ new_idx }}_brightness" value="80" min="5" max="100"
+                           style="width: 100%;" oninput="this.nextElementSibling.textContent = this.value + '%'" disabled>
+                    <span>80%</span>
+                </div>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Features</label>
+                <div style="margin-bottom: 0.5rem;">
+                    <button type="button" class="btn btn-small" style="background: var(--bg-secondary); color: var(--text-primary); margin-right: 0.5rem;" onclick="selectAllFeatures(true)">Select All</button>
+                    <button type="button" class="btn btn-small" style="background: var(--bg-secondary); color: var(--text-primary);" onclick="selectAllFeatures(false)">Deselect All</button>
+                </div>
+                {% for type, features in feature_list|groupby('type') %}
+                <div style="margin-bottom: 0.5rem;">
+                    <strong style="font-size: 0.75rem; color: var(--accent-primary); text-transform: uppercase; letter-spacing: 0.5px;">{{ type }}</strong>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.25rem 1rem;">
+                        {% for f in features %}
+                        <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.9rem; padding: 0.2rem 0;">
+                            <input type="checkbox" class="new-sched-feature" name="sched_{{ new_idx }}_features" value="{{ f.name }}" disabled>
+                            {{ f.name|replace('_', ' ')|title }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="button" class="btn btn-primary" style="flex: 1;" onclick="confirmAddSchedule()">Save Schedule</button>
+                <button type="button" class="btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary);" onclick="cancelAddSchedule()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full" style="margin-bottom: 1rem;">Save Schedule Settings</button>
+</form>
+
+<div class="card">
+    <h2>HTTPS / TLS</h2>
+    <form method="POST" action="{{ url_for('settings') }}">
+        <input type="hidden" name="section" value="https">
+        <label class="toggle-row" style="padding: 0.5rem 0;">
+            <span>Enable HTTPS</span>
+            <input type="checkbox" name="https_enabled" {% if https_config.get('enabled') %}checked{% endif %}>
+            <span class="toggle-switch"></span>
+        </label>
+        <div style="margin: 0.75rem 0; font-size: 0.85rem; color: var(--text-secondary);">
+            <div style="margin-bottom: 0.25rem;"><strong>Certificate:</strong> {{ https_config.get('cert_path', 'config/cert.pem') }}</div>
+            <div><strong>Private Key:</strong> {{ https_config.get('key_path', 'config/key.pem') }}</div>
+        </div>
+        <div style="background: var(--bg-secondary); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; font-size: 0.82rem; color: var(--text-secondary);">
+            <div style="margin-bottom: 0.35rem;">[i] A self-signed certificate will be generated automatically if none exists.</div>
+            <div style="margin-bottom: 0.35rem;">[!] Browsers will show a security warning for self-signed certificates -- this is expected.</div>
+            <div>[*] The web server must be restarted after changing TLS settings.</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Save HTTPS Settings</button>
     </form>
 </div>
 
@@ -110,6 +236,88 @@ function checkUpdate() {
         .then(r => r.json())
         .then(d => alert(d.message))
         .catch(e => alert('Error: ' + e));
+}
+
+/* --- Feature Schedules --- */
+
+function toggleAddScheduleForm() {
+    var form = document.getElementById('add-schedule-form');
+    var btn = document.getElementById('add-schedule-btn');
+    var visible = form.style.display !== 'none';
+    form.style.display = visible ? 'none' : 'block';
+    btn.textContent = visible ? '[+ Add Schedule]' : '[- Cancel]';
+    // Enable/disable new schedule fields so they only submit when form is open
+    var inputs = form.querySelectorAll('input, select');
+    for (var j = 0; j < inputs.length; j++) {
+        if (inputs[j].id === 'new_sched_default_brightness') continue;
+        inputs[j].disabled = visible;
+    }
+}
+
+function cancelAddSchedule() {
+    var form = document.getElementById('add-schedule-form');
+    var btn = document.getElementById('add-schedule-btn');
+    form.style.display = 'none';
+    if (btn) btn.textContent = '[+ Add Schedule]';
+    var inputs = form.querySelectorAll('input, select');
+    for (var j = 0; j < inputs.length; j++) {
+        inputs[j].disabled = true;
+    }
+}
+
+function confirmAddSchedule() {
+    var nameField = document.getElementById('new_sched_name');
+    if (!nameField.value.trim()) {
+        alert('Schedule name is required.');
+        nameField.focus();
+        return;
+    }
+    var featureChecks = document.querySelectorAll('.new-sched-feature:checked');
+    if (featureChecks.length === 0) {
+        alert('Select at least one feature.');
+        return;
+    }
+    // If using default brightness, clear the brightness field so it submits empty
+    var defaultBr = document.getElementById('new_sched_default_brightness');
+    if (defaultBr.checked) {
+        document.getElementById('new_sched_brightness').removeAttribute('name');
+    }
+    // Update schedule_count to include the new one
+    var countInput = document.getElementById('schedule_count');
+    countInput.value = parseInt(countInput.value) + 1;
+    // Submit the form
+    document.getElementById('schedule-form').submit();
+}
+
+function toggleBrightnessSlider(checkbox) {
+    var wrap = document.getElementById('new_sched_brightness_wrap');
+    wrap.style.display = checkbox.checked ? 'none' : 'block';
+}
+
+function selectAllFeatures(selectAll) {
+    var checks = document.querySelectorAll('.new-sched-feature');
+    for (var i = 0; i < checks.length; i++) {
+        checks[i].checked = selectAll;
+    }
+}
+
+function deleteSchedule(index) {
+    if (!confirm('Delete this schedule?')) return;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ url_for("settings") }}';
+    var sectionInput = document.createElement('input');
+    sectionInput.type = 'hidden';
+    sectionInput.name = 'section';
+    sectionInput.value = 'schedule_delete';
+    form.appendChild(sectionInput);
+    var indexInput = document.createElement('input');
+    indexInput.type = 'hidden';
+    indexInput.name = 'index';
+    indexInput.value = index;
+    form.appendChild(indexInput);
+    document.body.appendChild(form);
+    form.submit();
 }
 </script>
 {% endblock %}

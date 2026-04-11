@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - LED Matrix Control{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<h1>Dashboard <span id="ws-status" style="font-size: 0.7em; color: #4CAF50; vertical-align: middle;">--</span></h1>
 
 <div class="card">
     <h2>Display Status</h2>
@@ -127,49 +127,94 @@ function setBrightness() {
     });
 }
 
-// Auto-refresh status every 5 seconds
-setInterval(function() {
-    fetch('{{ url_for("api_status") }}')
-        .then(r => r.json())
-        .then(d => {
-            document.getElementById('status-state').textContent = d.status || 'unknown';
-            document.getElementById('status-feature').textContent = d.current_feature || 'N/A';
-            document.getElementById('status-uptime').textContent = d.uptime || 'N/A';
-        })
-        .catch(() => {});
-}, 5000);
+// --- WebSocket real-time updates ---
+var ws = null;
+var wsRetryCount = 0;
+var maxRetries = 10;
+var pollingFallbackId = null;
 
-// Auto-refresh system stats every 5 seconds
-function updateSystemStats() {
-    fetch('{{ url_for("api_system_stats") }}')
-        .then(r => r.json())
-        .then(d => {
-            var cpu = d.cpu_percent != null ? d.cpu_percent.toFixed(1) : '--';
-            var ram = d.ram_percent != null ? d.ram_percent.toFixed(1) : '--';
-            var disk = d.disk_percent != null ? d.disk_percent.toFixed(1) : '--';
-            document.getElementById('stat-cpu').textContent = cpu + '%';
-            document.getElementById('stat-ram').textContent = ram + '%';
-            document.getElementById('stat-disk').textContent = disk + '%';
-            document.getElementById('stat-cpu-bar').style.width = (d.cpu_percent || 0) + '%';
-            document.getElementById('stat-ram-bar').style.width = (d.ram_percent || 0) + '%';
-            document.getElementById('stat-disk-bar').style.width = (d.disk_percent || 0) + '%';
-            // CPU temp with color coding
-            var tempEl = document.getElementById('stat-temp');
-            if (d.cpu_temp != null) {
-                tempEl.textContent = d.cpu_temp + ' C';
-                if (d.cpu_temp < 50) tempEl.style.color = '#00c850';
-                else if (d.cpu_temp < 70) tempEl.style.color = '#ffc800';
-                else tempEl.style.color = '#ff2828';
-            } else {
-                tempEl.textContent = 'N/A';
-                tempEl.style.color = '';
-            }
-            document.getElementById('stat-uptime').textContent = d.uptime || 'N/A';
-        })
-        .catch(() => {});
+function updateDashboard(d) {
+    // Display status
+    var el = document.getElementById('status-state');
+    if (el && d.status) el.textContent = d.status;
+    el = document.getElementById('status-feature');
+    if (el) el.textContent = d.current_feature || 'N/A';
+    el = document.getElementById('status-uptime');
+    if (el) el.textContent = d.uptime || 'N/A';
+
+    // System stats (nested under d.system)
+    var sys = d.system;
+    if (sys) {
+        var cpu = sys.cpu_percent != null ? sys.cpu_percent.toFixed(1) : '--';
+        var ram = sys.ram_percent != null ? sys.ram_percent.toFixed(1) : '--';
+        var disk = sys.disk_percent != null ? sys.disk_percent.toFixed(1) : '--';
+        document.getElementById('stat-cpu').textContent = cpu + '%';
+        document.getElementById('stat-ram').textContent = ram + '%';
+        document.getElementById('stat-disk').textContent = disk + '%';
+        document.getElementById('stat-cpu-bar').style.width = (sys.cpu_percent || 0) + '%';
+        document.getElementById('stat-ram-bar').style.width = (sys.ram_percent || 0) + '%';
+        document.getElementById('stat-disk-bar').style.width = (sys.disk_percent || 0) + '%';
+        var tempEl = document.getElementById('stat-temp');
+        if (sys.cpu_temp != null) {
+            tempEl.textContent = sys.cpu_temp + ' C';
+            if (sys.cpu_temp < 50) tempEl.style.color = '#00c850';
+            else if (sys.cpu_temp < 70) tempEl.style.color = '#ffc800';
+            else tempEl.style.color = '#ff2828';
+        } else {
+            tempEl.textContent = 'N/A';
+            tempEl.style.color = '';
+        }
+        document.getElementById('stat-uptime').textContent = sys.uptime || 'N/A';
+    }
 }
-setInterval(updateSystemStats, 5000);
-updateSystemStats();
+
+function connectWebSocket() {
+    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(protocol + '//' + window.location.host + '/ws/status');
+
+    ws.onopen = function() {
+        wsRetryCount = 0;
+        console.log('WebSocket connected');
+        var indicator = document.getElementById('ws-status');
+        if (indicator) { indicator.textContent = 'Live'; indicator.style.color = '#4CAF50'; }
+        // Stop polling fallback if running
+        if (pollingFallbackId) { clearInterval(pollingFallbackId); pollingFallbackId = null; }
+    };
+
+    ws.onmessage = function(event) {
+        var data = JSON.parse(event.data);
+        updateDashboard(data);
+    };
+
+    ws.onclose = function() {
+        console.log('WebSocket closed, retrying...');
+        var indicator = document.getElementById('ws-status');
+        if (indicator) { indicator.textContent = 'Reconnecting...'; indicator.style.color = '#ffc800'; }
+        if (wsRetryCount < maxRetries) {
+            wsRetryCount++;
+            setTimeout(connectWebSocket, 3000);
+        } else {
+            if (indicator) { indicator.textContent = 'Polling'; indicator.style.color = '#ff9800'; }
+            startPollingFallback();
+        }
+    };
+
+    ws.onerror = function() {
+        ws.close();
+    };
+}
+
+function startPollingFallback() {
+    if (pollingFallbackId) return;
+    pollingFallbackId = setInterval(function() {
+        fetch('{{ url_for("api_status") }}')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { updateDashboard(d); })
+            .catch(function() {});
+    }, 5000);
+}
+
+connectWebSocket();
 
 function updatePreview() {
     fetch('/api/preview')

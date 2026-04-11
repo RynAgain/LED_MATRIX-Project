@@ -11,6 +11,7 @@ DISPLAY_MODULES = [
     "src.display.tic_tac_toe",
     "src.display.snake",
     "src.display.pong",
+    "src.display.breakout",
     "src.display.billiards",
     "src.display.time_display",
     "src.display.bitcoin_price",
@@ -30,6 +31,16 @@ DISPLAY_MODULES = [
     "src.display.lava_lamp",
     "src.display.qr_code",
     "src.display.slideshow",
+    "src.display.galaga",
+    "src.display.space_invaders",
+    "src.display.logo_wholefoods",
+    "src.display.github_stats",
+    "src.display.tanks",
+    "src.display.wireframe",
+    "src.display.maze_3d",
+    "src.display.terrain_ball",
+    "src.display.system_stats",
+    "src.display.living_world",
 ]
 
 
@@ -53,6 +64,10 @@ class TestDisplayModuleInterface:
         "src.display.tic_tac_toe",
         "src.display.snake",
         "src.display.pong",
+        "src.display.breakout",
+        "src.display.galaga",
+        "src.display.space_invaders",
+        "src.display.tanks",
     ])
     def test_game_runs_briefly(self, matrix, module_path):
         """Game modules should run for a short duration without crashing."""
@@ -68,6 +83,41 @@ class TestDisplayModuleInterface:
     def test_billiards_runs_briefly(self, matrix):
         """Billiards should run briefly without crashing."""
         mod = importlib.import_module("src.display.billiards")
+        mod.run(matrix, duration=2)
+
+    def test_logo_wholefoods_runs_briefly(self, matrix):
+        """Whole Foods logo should run briefly without crashing."""
+        mod = importlib.import_module("src.display.logo_wholefoods")
+        mod.run(matrix, duration=2)
+
+    def test_github_stats_runs_briefly(self, matrix):
+        """GitHub stats should run briefly without crashing."""
+        mod = importlib.import_module("src.display.github_stats")
+        mod.run(matrix, duration=2)
+
+    def test_wireframe_runs_briefly(self, matrix):
+        """Wireframe should run briefly without crashing."""
+        mod = importlib.import_module("src.display.wireframe")
+        mod.run(matrix, duration=2)
+
+    def test_maze_3d_runs_briefly(self, matrix):
+        """Maze 3D should run briefly without crashing."""
+        mod = importlib.import_module("src.display.maze_3d")
+        mod.run(matrix, duration=2)
+
+    def test_terrain_ball_runs_briefly(self, matrix):
+        """Terrain ball should run briefly without crashing."""
+        mod = importlib.import_module("src.display.terrain_ball")
+        mod.run(matrix, duration=2)
+
+    def test_system_stats_runs_briefly(self, matrix):
+        """System stats should run briefly without crashing."""
+        mod = importlib.import_module("src.display.system_stats")
+        mod.run(matrix, duration=2)
+
+    def test_living_world_runs_briefly(self, matrix):
+        """Living world should run briefly without crashing."""
+        mod = importlib.import_module("src.display.living_world")
         mod.run(matrix, duration=2)
 
 

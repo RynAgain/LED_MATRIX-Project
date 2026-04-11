@@ -240,6 +240,51 @@ class TestNewAPIs:
         assert response.status_code == 200
 
 
+class TestNewFeatureAPIs:
+    """Test newly added feature APIs."""
+
+    def test_reorder_features_api(self, auth_client):
+        """Test feature reorder endpoint."""
+        response = auth_client.post('/api/reorder-features',
+            data=json.dumps({"order": ["snake", "pong", "fire"]}),
+            content_type='application/json')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+
+    def test_schedule_settings_with_schedules(self, auth_client):
+        """Test saving feature schedules."""
+        response = auth_client.post('/settings', data={
+            'section': 'schedule',
+            'night_enabled': '',
+            'night_start': '22',
+            'night_end': '7',
+            'night_brightness': '20',
+            'schedule_count': '1',
+            'sched_0_name': 'Test Schedule',
+            'sched_0_start': '9',
+            'sched_0_end': '17',
+            'sched_0_features': ['snake', 'pong'],
+        }, follow_redirects=True)
+        assert response.status_code == 200
+
+    def test_schedule_delete(self, auth_client):
+        """Test deleting a feature schedule."""
+        response = auth_client.post('/settings', data={
+            'section': 'schedule_delete',
+            'index': '0',
+        }, follow_redirects=True)
+        assert response.status_code == 200
+
+    def test_https_settings(self, auth_client):
+        """Test saving HTTPS settings."""
+        response = auth_client.post('/settings', data={
+            'section': 'https',
+            'https_enabled': 'on',
+        }, follow_redirects=True)
+        assert response.status_code == 200
+
+
 class TestSecurity:
     """Test security features."""
 

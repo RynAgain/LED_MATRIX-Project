@@ -487,10 +487,11 @@ def _check_schedule():
     if not sched.get("enabled", False):
         return None
     
+    from datetime import datetime
+    hour = datetime.now().hour
+
     night = sched.get("night_mode", {})
     if night.get("enabled", False):
-        from datetime import datetime
-        hour = datetime.now().hour
         start = night.get("start_hour", 22)
         end = night.get("end_hour", 7)
         
@@ -507,6 +508,22 @@ def _check_schedule():
                 "allowed_features": night.get("allowed_features", [])
             }
     
+    # --- Feature schedules (first matching wins) ---
+    for entry in sched.get("schedules", []):
+        s = entry.get("start_hour", 0)
+        e = entry.get("end_hour", 0)
+        if s == e:
+            continue  # Skip invalid entries
+        in_range = (hour >= s or hour < e) if s > e else (s <= hour < e)
+        if in_range:
+            result = {
+                "allowed_features": entry.get("allowed_features", [])
+            }
+            brightness = entry.get("brightness")
+            if brightness is not None:
+                result["brightness"] = brightness
+            return result
+
     return None
 
 
@@ -836,11 +853,12 @@ def main():
             # Check night mode / scheduling
             schedule_override = _check_schedule()
             if schedule_override:
-                # Apply brightness
-                try:
-                    matrix.brightness = schedule_override["brightness"]
-                except Exception:
-                    pass
+                # Apply brightness (only if schedule specifies one)
+                if "brightness" in schedule_override:
+                    try:
+                        matrix.brightness = schedule_override["brightness"]
+                    except Exception:
+                        pass
                 # Filter features if night mode specifies allowed list
                 allowed = schedule_override.get("allowed_features", [])
                 if allowed:

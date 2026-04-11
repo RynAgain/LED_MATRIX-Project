@@ -19,6 +19,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, jsonify
 )
+from flask_sock import Sock
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,17 @@ def load_web_config():
             "users": {"admin": "ledmatrix"},
             "session_timeout_minutes": 60
         }
+
+
+def save_web_config(config):
+    """Save web server configuration."""
+    try:
+        with open(WEB_CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        logger.error("Failed to save web config: %s", e)
+        return False
 
 
 def load_display_config():
@@ -478,6 +490,63 @@ def _get_system_stats():
     return stats
 
 
+def _generate_self_signed_cert(cert_path, key_path):
+    """Generate a self-signed certificate for HTTPS."""
+    try:
+        import subprocess
+        # Use OpenSSL if available (common on Raspberry Pi)
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048",
+            "-keyout", key_path, "-out", cert_path,
+            "-days", "365", "-nodes",
+            "-subj", "/CN=ledmatrix/O=LED Matrix/C=US"
+        ], check=True, capture_output=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Fallback: try Python's cryptography package
+        try:
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            import datetime
+
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COMMON_NAME, "ledmatrix"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "LED Matrix"),
+            ])
+            cert = (x509.CertificateBuilder()
+                .subject_name(subject)
+                .issuer_name(issuer)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.datetime.utcnow())
+                .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+                .sign(key, hashes.SHA256()))
+
+            with open(key_path, "wb") as f:
+                f.write(key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption()))
+            with open(cert_path, "wb") as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
+            return True
+        except ImportError:
+            return False
+
+
+def _get_status_data():
+    """Gather current status data for API/WebSocket responses.
+
+    Combines display status and system stats into a single dict.
+    """
+    status = get_display_status()
+    status["system"] = _get_system_stats()
+    return status
+
+
 def create_app():
     """Create and configure the Flask application."""
     web_config = load_web_config()
@@ -487,6 +556,8 @@ def create_app():
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
         static_folder=os.path.join(os.path.dirname(__file__), "static")
     )
+
+    sock = Sock(app)
 
     app.secret_key = web_config.get("secret_key", secrets.token_hex(32))
     app.permanent_session_lifetime = timedelta(
@@ -657,8 +728,51 @@ def create_app():
                     "brightness": int(request.form.get("night_brightness", 20)),
                     "allowed_features": ["time_display", "binary_clock"]
                 }
+
+                # Feature schedules (new)
+                schedules = []
+                count = int(request.form.get("schedule_count", 0))
+                for i in range(min(count, 5)):  # Cap at 5
+                    name = request.form.get(f"sched_{i}_name", "").strip()
+                    if not name:
+                        continue
+                    start = int(request.form.get(f"sched_{i}_start", 0))
+                    end = int(request.form.get(f"sched_{i}_end", 0))
+                    brightness_val = request.form.get(f"sched_{i}_brightness", "")
+                    brightness = int(brightness_val) if brightness_val else None
+                    features = request.form.getlist(f"sched_{i}_features")
+                    if features:
+                        schedules.append({
+                            "name": name[:30],
+                            "start_hour": max(0, min(23, start)),
+                            "end_hour": max(0, min(23, end)),
+                            "allowed_features": features,
+                            "brightness": brightness
+                        })
+                sched["schedules"] = schedules
+
                 save_schedule(sched)
-                flash("Night mode settings saved", "success")
+                flash("Schedule settings saved", "success")
+                return redirect(url_for("settings"))
+
+            elif section == "https":
+                web_config = load_web_config()
+                https_conf = web_config.get("https", {})
+                https_conf["enabled"] = "https_enabled" in request.form
+                web_config["https"] = https_conf
+                save_web_config(web_config)
+                flash("HTTPS settings saved. Restart the web service to apply.", "success")
+                return redirect(url_for("settings"))
+
+            elif section == "schedule_delete":
+                idx = int(request.form.get("index", -1))
+                sched = load_schedule()
+                schedules = sched.get("schedules", [])
+                if 0 <= idx < len(schedules):
+                    removed = schedules.pop(idx)
+                    sched["schedules"] = schedules
+                    save_schedule(sched)
+                    flash(f"Removed schedule: {removed.get('name', '')}", "success")
                 return redirect(url_for("settings"))
 
             config["github_branch"] = request.form.get("github_branch", "main").strip()
@@ -669,13 +783,16 @@ def create_app():
 
         weather_config = load_weather_config()
         schedule_config = load_schedule()
-        return render_template("settings.html", config=config, weather_config=weather_config, schedule_config=schedule_config, user=session.get("user"))
+        web_config = load_web_config()
+        https_config = web_config.get("https", {})
+        feature_list = config.get("sequence", [])
+        return render_template("settings.html", config=config, weather_config=weather_config, schedule_config=schedule_config, feature_list=feature_list, https_config=https_config, user=session.get("user"))
 
     @app.route("/api/status")
     @login_required
     def api_status():
         """API endpoint for live status updates."""
-        return jsonify(get_display_status())
+        return jsonify(_get_status_data())
 
     @app.route("/api/system-stats")
     @login_required
@@ -683,6 +800,18 @@ def create_app():
         """API endpoint for system resource monitoring (CPU, RAM, disk, temp, uptime)."""
         stats = _get_system_stats()
         return jsonify(stats)
+
+    @sock.route("/ws/status")
+    def ws_status(ws):
+        """WebSocket endpoint for real-time status updates."""
+        import time as time_mod
+        while True:
+            try:
+                status_data = _get_status_data()
+                ws.send(json.dumps(status_data))
+                time_mod.sleep(2)
+            except Exception:
+                break  # Client disconnected
 
     @app.route("/api/restart", methods=["POST"])
     @login_required
@@ -936,6 +1065,40 @@ def create_app():
 
         return render_template("wireframe.html", config=cfg,
                                shape_names=shape_names, user=session.get("user"))
+
+    @app.route("/api/reorder-features", methods=["POST"])
+    @login_required
+    def api_reorder_features():
+        """Reorder features in the display sequence."""
+        try:
+            data = request.get_json()
+            new_order = data.get("order", [])
+            if not new_order:
+                return jsonify({"success": False, "error": "No order provided"})
+
+            config = load_display_config()
+            sequence = config.get("sequence", [])
+
+            # Build lookup by name
+            feature_map = {f["name"]: f for f in sequence}
+
+            # Rebuild sequence in new order, preserving all feature data
+            reordered = []
+            for name in new_order:
+                if name in feature_map:
+                    reordered.append(feature_map[name])
+                    del feature_map[name]
+
+            # Append any features not in the new order list (safety)
+            for remaining in feature_map.values():
+                reordered.append(remaining)
+
+            config["sequence"] = reordered
+            save_display_config(config)
+
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
 
     @app.route("/api/preview")
     @login_required
@@ -1206,6 +1369,7 @@ def main():
     )
 
     web_config = load_web_config()
+    host = web_config.get("host", "0.0.0.0")
     port = web_config.get("port", 5000)
 
     # Kill any stale processes on our port
@@ -1213,13 +1377,43 @@ def main():
 
     app = create_app()
 
-    logger.info("Starting LED Matrix Web Control Panel on %s:%d",
-                web_config.get("host", "0.0.0.0"), port)
+    # HTTPS / TLS support
+    https_config = web_config.get("https", {})
+    ssl_context = None
+
+    if https_config.get("enabled", False):
+        cert_path = https_config.get("cert_path", "config/cert.pem")
+        key_path = https_config.get("key_path", "config/key.pem")
+
+        # Resolve relative paths against project root
+        if not os.path.isabs(cert_path):
+            cert_path = os.path.join(PROJECT_ROOT, cert_path)
+        if not os.path.isabs(key_path):
+            key_path = os.path.join(PROJECT_ROOT, key_path)
+
+        # Auto-generate self-signed cert if files don't exist
+        if https_config.get("auto_generate", True):
+            if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+                logger.info("Generating self-signed certificate...")
+                if _generate_self_signed_cert(cert_path, key_path):
+                    logger.info("Certificate generated successfully")
+                else:
+                    logger.warning("Failed to generate certificate, falling back to HTTP")
+
+        if os.path.exists(cert_path) and os.path.exists(key_path):
+            ssl_context = (cert_path, key_path)
+            logger.info("HTTPS enabled with cert=%s key=%s", cert_path, key_path)
+        else:
+            logger.warning("HTTPS enabled but certificates not found, using HTTP")
+
+    protocol = "https" if ssl_context else "http"
+    logger.info("Starting LED Matrix Web Control Panel on %s://%s:%d", protocol, host, port)
 
     app.run(
-        host=web_config.get("host", "0.0.0.0"),
+        host=host,
         port=port,
-        debug=False
+        debug=False,
+        ssl_context=ssl_context
     )
 
 

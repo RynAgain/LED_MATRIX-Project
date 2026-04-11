@@ -22,11 +22,6 @@
   },
   "sequence": [
     {
-      "name": "tic_tac_toe",
-      "type": "game",
-      "enabled": false
-    },
-    {
       "name": "snake",
       "type": "game",
       "enabled": true
@@ -37,9 +32,19 @@
       "enabled": true
     },
     {
+      "name": "fire",
+      "type": "effect",
+      "enabled": false
+    },
+    {
+      "name": "tic_tac_toe",
+      "type": "game",
+      "enabled": false
+    },
+    {
       "name": "breakout",
       "type": "game",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "billiards",
@@ -59,11 +64,6 @@
     {
       "name": "youtube_stream",
       "type": "video",
-      "enabled": false
-    },
-    {
-      "name": "fire",
-      "type": "effect",
       "enabled": false
     },
     {
