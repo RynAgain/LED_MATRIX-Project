@@ -5,8 +5,8 @@ import time
 import random
 import math
 import logging
-from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from PIL import Image, ImageDraw, ImageFont
+from src.display._shared import should_stop, interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -240,10 +240,9 @@ def run(matrix, duration=60):
             draw = ImageDraw.Draw(image)
             
             # Stars
-            random.seed(99)
+            _star_rng = random.Random(99)
             for _ in range(15):
-                draw.point((random.randint(0, WIDTH-1), random.randint(0, 20)), fill=(30, 30, 50))
-            random.seed()
+                draw.point((_star_rng.randint(0, WIDTH-1), _star_rng.randint(0, 20)), fill=(30, 30, 50))
             
             # AI updates
             b1 = tank1.ai_update(tank2, terrain)
@@ -285,7 +284,8 @@ def run(matrix, duration=60):
             
             # Reset if both tanks dead
             if tank1.health <= 0 and tank2.health <= 0:
-                time.sleep(1)
+                if not interruptible_sleep(1):
+                    break
                 terrain = _generate_terrain()
                 tank1 = Tank(10, True, (50, 50, 200), (100, 100, 255))
                 tank2 = Tank(54, False, (200, 50, 50), (255, 100, 100))
@@ -338,7 +338,6 @@ def run(matrix, duration=60):
             
             # Score display
             try:
-                from PIL import ImageFont
                 font = ImageFont.load_default()
                 draw.text((1, 0), str(scores[0]), fill=(100, 100, 255), font=font)
                 draw.text((WIDTH - 8, 0), str(scores[1]), fill=(255, 100, 100), font=font)

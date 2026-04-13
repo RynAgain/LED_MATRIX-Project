@@ -17,7 +17,8 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
+from src.display._utils import _draw_digit, _draw_number, _lerp_color, _scale_color
 
 logger = logging.getLogger(__name__)
 
@@ -54,49 +55,6 @@ MIN_PADDLE_HEIGHT = 4
 # Ball settings
 BALL_SIZE = 2
 TRAIL_LENGTH = 5
-
-# Small 3x5 digit font bitmaps
-DIGITS = {
-    '0': [0b111, 0b101, 0b101, 0b101, 0b111],
-    '1': [0b010, 0b110, 0b010, 0b010, 0b111],
-    '2': [0b111, 0b001, 0b111, 0b100, 0b111],
-    '3': [0b111, 0b001, 0b111, 0b001, 0b111],
-    '4': [0b101, 0b101, 0b111, 0b001, 0b001],
-    '5': [0b111, 0b100, 0b111, 0b001, 0b111],
-    '6': [0b111, 0b100, 0b111, 0b101, 0b111],
-    '7': [0b111, 0b001, 0b010, 0b010, 0b010],
-    '8': [0b111, 0b101, 0b111, 0b101, 0b111],
-    '9': [0b111, 0b101, 0b111, 0b001, 0b111],
-}
-
-
-def _draw_digit(image, ch, x, y, color):
-    """Draw a 3x5 pixel digit."""
-    rows = DIGITS.get(ch, DIGITS['0'])
-    for ri, bits in enumerate(rows):
-        for ci in range(3):
-            if bits & (1 << (2 - ci)):
-                px, py = x + ci, y + ri
-                if 0 <= px < SIZE and 0 <= py < SIZE:
-                    image.putpixel((px, py), color)
-
-
-def _draw_number(image, number, x, y, color):
-    """Draw a multi-digit number."""
-    digits = str(number)
-    for i, ch in enumerate(digits):
-        _draw_digit(image, ch, x + i * 4, y, color)
-
-
-def _lerp_color(c1, c2, t):
-    """Linearly interpolate between two colors."""
-    t = max(0.0, min(1.0, t))
-    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
-
-
-def _scale_color(color, factor):
-    """Scale a color by a factor."""
-    return tuple(max(0, min(255, int(c * factor))) for c in color)
 
 
 class PongGame:
@@ -316,7 +274,8 @@ def run(matrix, duration=60):
             if game.round_over and time.time() - start_time < duration:
                 # Flash the score briefly
                 game.draw(matrix)
-                time.sleep(0.8)
+                if not interruptible_sleep(0.8):
+                    break
 
                 # Reset round but keep scores
                 old_p1 = game.p1_score
@@ -333,7 +292,8 @@ def run(matrix, duration=60):
                 if game.p1_score >= 5 or game.p2_score >= 5:
                     # Show final score for a moment
                     game.draw(matrix)
-                    time.sleep(1.5)
+                    if not interruptible_sleep(1.5):
+                        break
                     game.reset()
 
     except Exception as e:

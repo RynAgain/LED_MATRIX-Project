@@ -23,7 +23,7 @@ except ImportError:
 
 import logging
 import math
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
 import random
 import time
 
@@ -385,6 +385,8 @@ def main(matrix, _deadline=None):
                 if first_shot or random.random() < 0.3:  # Show cue stick sometimes
                     # Animate cue stick for a few frames
                     for anim_frame in range(6):
+                        if should_stop():
+                            return
                         canvas.Fill(*BLACK)
                         _draw_felt(canvas)
                         _draw_borders(canvas)

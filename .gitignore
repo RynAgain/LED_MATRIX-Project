@@ -44,8 +44,8 @@ downloaded_videos/*.avi
 .DS_Store
 Thumbs.db
 
-# Sensitive config (uncomment if wifi.json contains passwords you don't want in repo)
-# config/wifi.json
+# Sensitive config (contains WiFi passwords)
+config/wifi.json
 
 # Stray files
 $null

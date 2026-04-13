@@ -22,7 +22,7 @@
                 <input type="hidden" name="action" value="remove">
                 <input type="hidden" name="index" value="{{ loop.index0 }}">
                 <button type="submit" class="btn btn-danger btn-small"
-                        onclick="return confirm('Remove {{ network.ssid }}?')">Remove</button>
+                        onclick="return confirm('Remove ' + {{ network.ssid|tojson }} + '?')">Remove</button>
             </form>
         </div>
         {% endfor %}

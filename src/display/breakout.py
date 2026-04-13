@@ -16,7 +16,8 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
+from src.display._utils import _draw_digit, _draw_number, _scale_color
 
 logger = logging.getLogger(__name__)
 
@@ -62,43 +63,6 @@ PADDLE_WIDTH = 12
 PADDLE_HEIGHT = 2
 BALL_SIZE = 2
 TRAIL_LENGTH = 4
-
-# Small 3x5 digit font bitmaps (same as pong)
-DIGITS = {
-    '0': [0b111, 0b101, 0b101, 0b101, 0b111],
-    '1': [0b010, 0b110, 0b010, 0b010, 0b111],
-    '2': [0b111, 0b001, 0b111, 0b100, 0b111],
-    '3': [0b111, 0b001, 0b111, 0b001, 0b111],
-    '4': [0b101, 0b101, 0b111, 0b001, 0b001],
-    '5': [0b111, 0b100, 0b111, 0b001, 0b111],
-    '6': [0b111, 0b100, 0b111, 0b101, 0b111],
-    '7': [0b111, 0b001, 0b010, 0b010, 0b010],
-    '8': [0b111, 0b101, 0b111, 0b101, 0b111],
-    '9': [0b111, 0b101, 0b111, 0b001, 0b111],
-}
-
-
-def _draw_digit(image, ch, x, y, color):
-    """Draw a 3x5 pixel digit."""
-    rows = DIGITS.get(ch, DIGITS['0'])
-    for ri, bits in enumerate(rows):
-        for ci in range(3):
-            if bits & (1 << (2 - ci)):
-                px, py = x + ci, y + ri
-                if 0 <= px < SIZE and 0 <= py < SIZE:
-                    image.putpixel((px, py), color)
-
-
-def _draw_number(image, number, x, y, color):
-    """Draw a multi-digit number."""
-    digits = str(number)
-    for i, ch in enumerate(digits):
-        _draw_digit(image, ch, x + i * 4, y, color)
-
-
-def _scale_color(color, factor):
-    """Scale a color by a factor."""
-    return tuple(max(0, min(255, int(c * factor))) for c in color)
 
 
 class BreakoutGame:
@@ -358,7 +322,8 @@ def run(matrix, duration=60):
 
                 if result == "cleared":
                     # Flash and reset bricks, keep score
-                    time.sleep(1.0)
+                    if not interruptible_sleep(1.0):
+                        break
                     old_score = game.score
                     old_lives = game.lives
                     game._init_bricks()
@@ -368,12 +333,13 @@ def run(matrix, duration=60):
 
                 elif result == "lost_life":
                     # Brief pause on life loss
-                    time.sleep(0.5)
+                    if not interruptible_sleep(0.5):
+                        break
 
                 elif result == "game_over":
                     # Show final score briefly, then restart
                     game.draw(matrix)
-                    time.sleep(2.0)
+                    interruptible_sleep(2.0)
                     break
 
                 elapsed = time.time() - frame_start

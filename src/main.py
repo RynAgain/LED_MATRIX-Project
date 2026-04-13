@@ -25,10 +25,24 @@ INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap"
 
 
 def _check_internet(timeout=3):
-    """Quick connectivity check. Returns True if internet is reachable."""
+    """Quick connectivity check. Returns True if internet is reachable.
+
+    The endpoint is configurable via config.json -> internet_check_url.
+    Defaults to Google's connectivity check endpoint (returns 204, very fast).
+    """
+    # Load configurable endpoint (fallback to reliable Google endpoint)
+    url = "http://connectivitycheck.gstatic.com/generate_204"
+    try:
+        config_path = os.path.join(PROJECT_ROOT, "config", "config.json")
+        with open(config_path, "r") as f:
+            cfg = json.load(f)
+        url = cfg.get("internet_check_url", url)
+    except Exception:
+        pass
+
     try:
         import requests
-        requests.head("https://httpbin.org/get", timeout=timeout)
+        requests.head(url, timeout=timeout)
         return True
     except Exception:
         return False
@@ -60,6 +74,9 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
 # Global reference for web panel preview access
 _matrix_ref = None
 
+# Track the currently-running feature name for status updates
+_current_feature = None
+
 # Project root is one level up from this file
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -84,6 +101,24 @@ def write_status(feature_name=None, status="running"):
             data["uptime"] = f"{hours}h {minutes}m"
         with open(status_path, "w") as f:
             json.dump(data, f)
+    except Exception as e:
+        logger.debug("write_status failed: %s", e)
+
+
+def _save_preview(matrix):
+    """Save current matrix frame as PNG for web preview.
+
+    Called periodically by the command watcher thread so the web panel
+    (running in a separate process) can serve it without shared memory.
+    """
+    try:
+        preview_path = os.path.join(PROJECT_ROOT, "logs", "preview.png")
+        if matrix is not None and hasattr(matrix, 'get_frame_base64'):
+            import base64
+            b64 = matrix.get_frame_base64()
+            if b64:
+                with open(preview_path, 'wb') as f:
+                    f.write(base64.b64decode(b64))
     except Exception:
         pass
 
@@ -98,15 +133,14 @@ def write_pid():
         pass
 
 
-# Flag for graceful shutdown
-_shutdown = False
+# Flag for graceful shutdown (thread-safe Event instead of bare bool)
+_shutdown = threading.Event()
 
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
-    global _shutdown
     logger.info("Received signal %d, shutting down...", signum)
-    _shutdown = True
+    _shutdown.set()
 
 
 def sighup_handler(signum, frame):
@@ -141,22 +175,27 @@ def check_command():
             return cmd
 
     # Fallback: direct file check (for commands arriving between watcher polls)
-    try:
-        if os.path.exists(COMMAND_PATH):
-            mtime = os.path.getmtime(COMMAND_PATH)
-            # Only process commands less than 30 seconds old
-            if time.time() - mtime < 30:
-                with open(COMMAND_PATH, "r") as f:
-                    cmd = json.load(f)
-                # Delete the command file so it's not processed again
-                os.remove(COMMAND_PATH)
-                logger.info("Command received: %s", cmd.get("command"))
-                return cmd
-            else:
-                # Stale command, remove it
-                os.remove(COMMAND_PATH)
-    except (json.JSONDecodeError, OSError, KeyError):
-        pass
+    # Lock prevents TOCTOU race with the background _command_watcher thread.
+    with _pending_lock:
+        try:
+            if os.path.exists(COMMAND_PATH):
+                mtime = os.path.getmtime(COMMAND_PATH)
+                # Only process commands less than 30 seconds old
+                if time.time() - mtime < 30:
+                    with open(COMMAND_PATH, "r") as f:
+                        cmd = json.load(f)
+                    # Delete the command file so it's not processed again
+                    os.remove(COMMAND_PATH)
+                    logger.info("Command received: %s", cmd.get("command"))
+                    return cmd
+                else:
+                    # Stale command, remove it
+                    os.remove(COMMAND_PATH)
+        except (FileNotFoundError, OSError):
+            # File was already consumed by the watcher thread — not an error
+            pass
+        except (json.JSONDecodeError, KeyError):
+            pass
     return None
 
 
@@ -166,31 +205,54 @@ def _command_watcher():
     When a new command arrives, it stores the command in the pending buffer
     and calls request_stop() so the currently-running display module breaks
     out of its render loop immediately (within one frame / ~55ms).
+
+    Also periodically refreshes status.json (every 5s) and preview.png
+    (every ~2s) so the web panel always has fresh data.
     """
     global _pending_command
     logger.info("Command watcher thread started")
-    while not _shutdown:
-        try:
-            if os.path.exists(COMMAND_PATH):
-                mtime = os.path.getmtime(COMMAND_PATH)
-                if time.time() - mtime < 30:
-                    with open(COMMAND_PATH, "r") as f:
-                        cmd = json.load(f)
-                    os.remove(COMMAND_PATH)
-                    with _pending_lock:
-                        _pending_command = cmd
-                    # Signal the running display module to stop NOW
-                    request_stop()
-                    logger.info("Command watcher: detected '%s', requested stop",
-                                cmd.get("command"))
-                else:
-                    # Stale command, remove it
-                    try:
+    _last_status_write = 0.0
+    _last_preview_save = 0.0
+    _STATUS_INTERVAL = 5.0   # seconds between status file refreshes
+    _PREVIEW_INTERVAL = 2.0  # seconds between preview frame saves
+    while not _shutdown.is_set():
+        # Lock prevents TOCTOU race with the main thread's check_command().
+        with _pending_lock:
+            try:
+                if os.path.exists(COMMAND_PATH):
+                    mtime = os.path.getmtime(COMMAND_PATH)
+                    if time.time() - mtime < 30:
+                        with open(COMMAND_PATH, "r") as f:
+                            cmd = json.load(f)
                         os.remove(COMMAND_PATH)
-                    except OSError:
-                        pass
-        except (json.JSONDecodeError, OSError, KeyError):
-            pass
+                        _pending_command = cmd
+                        # Signal the running display module to stop NOW
+                        request_stop()
+                        logger.info("Command watcher: detected '%s', requested stop",
+                                    cmd.get("command"))
+                    else:
+                        # Stale command, remove it
+                        os.remove(COMMAND_PATH)
+            except (FileNotFoundError, OSError):
+                # File was already consumed by check_command() — not an error
+                pass
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        now = time.time()
+
+        # Periodic status refresh so the web dashboard stays current
+        if now - _last_status_write >= _STATUS_INTERVAL:
+            _last_status_write = now
+            feat = _current_feature
+            if feat is not None:
+                write_status(feat, "running")
+
+        # Periodic preview snapshot for the web live-preview panel
+        if now - _last_preview_save >= _PREVIEW_INTERVAL:
+            _last_preview_save = now
+            _save_preview(_matrix_ref)
+
         # Poll interval: 0.5 seconds for responsive UI
         time.sleep(0.5)
     logger.info("Command watcher thread stopped")
@@ -219,7 +281,7 @@ def handle_play_video(matrix, url, title="Unknown", duration=300):
             return
 
         start = time.time()
-        while cap.isOpened() and not _shutdown:
+        while cap.isOpened() and not _shutdown.is_set():
             frame_start = time.time()
 
             # Check for new commands (allows interrupting)
@@ -423,45 +485,8 @@ def _register_simulator_modules():
     logger.info("Registered simulator as rgbmatrix module")
 
 
-# Map of feature names to their module paths
-FEATURE_MODULES = {
-    # Existing
-    "tic_tac_toe": "src.display.tic_tac_toe",
-    "snake": "src.display.snake",
-    "pong": "src.display.pong",
-    "breakout": "src.display.breakout",
-    "billiards": "src.display.billiards",
-    "time_display": "src.display.time_display",
-    "bitcoin_price": "src.display.bitcoin_price",
-    "youtube_stream": "src.display.youtube_stream",
-    # New visual effects
-    "fire": "src.display.fire",
-    "plasma": "src.display.plasma",
-    "matrix_rain": "src.display.matrix_rain",
-    "starfield": "src.display.starfield",
-    "game_of_life": "src.display.game_of_life",
-    "rainbow_waves": "src.display.rainbow_waves",
-    # New info displays
-    "weather": "src.display.weather",
-    "text_scroller": "src.display.text_scroller",
-    "stock_ticker": "src.display.stock_ticker",
-    "sp500_heatmap": "src.display.sp500_heatmap",
-    "binary_clock": "src.display.binary_clock",
-    "countdown": "src.display.countdown",
-    "lava_lamp": "src.display.lava_lamp",
-    "living_world": "src.display.living_world",
-    "qr_code": "src.display.qr_code",
-    "slideshow": "src.display.slideshow",
-    "galaga": "src.display.galaga",
-    "space_invaders": "src.display.space_invaders",
-    "logo_wholefoods": "src.display.logo_wholefoods",
-    "github_stats": "src.display.github_stats",
-    "tanks": "src.display.tanks",
-    "wireframe": "src.display.wireframe",
-    "maze_3d": "src.display.maze_3d",
-    "terrain_ball": "src.display.terrain_ball",
-    "system_stats": "src.display.system_stats",
-}
+# Import canonical feature registry (single source of truth)
+from src.feature_registry import FEATURE_MODULES
 
 
 def run_feature(feature_name, matrix, duration):
@@ -694,7 +719,7 @@ def _precache_youtube_videos(matrix, enabled_features):
 
     def download_worker():
         for url, title, dur in urls:
-            if _shutdown or time.time() > boot_deadline:
+            if _shutdown.is_set() or time.time() > boot_deadline:
                 if time.time() > boot_deadline:
                     logger.info("Precache timeout reached, stopping downloads")
                 break
@@ -864,14 +889,14 @@ def main():
 
     # Main display loop
     logger.info("Entering display loop...")
-    while not _shutdown:
+    while not _shutdown.is_set():
         # Cache internet connectivity once per cycle (not per feature)
         _internet_available = _check_internet()
         if not _internet_available:
             logger.info("Internet unavailable this cycle -- internet features will be skipped")
 
         for feature in enabled_features:
-            if _shutdown:
+            if _shutdown.is_set():
                 break
 
             # Check for commands before each feature
@@ -890,6 +915,7 @@ def main():
 
             feat_duration = feature.get("duration", duration)  # Per-feature or global
             clear_stop()
+            _current_feature = name
             write_status(name, "running")
             run_feature(name, matrix, feat_duration)
 
@@ -901,14 +927,14 @@ def main():
                 continue
 
             # Brief pause + command check between features
-            if not _shutdown:
+            if not _shutdown.is_set():
                 time.sleep(0.5)
                 cmd = check_command()
                 if cmd:
                     _handle_command(cmd, matrix, duration)
 
         # Reload config between full cycles to pick up changes
-        if not _shutdown:
+        if not _shutdown.is_set():
             config = load_config()
             duration = config.get("display_duration", 60)
             sequence = config.get("sequence", [])
@@ -935,6 +961,7 @@ def main():
                 logger.warning("No features enabled after config reload, waiting 30s...")
                 time.sleep(30)
 
+    _current_feature = None
     write_status(None, "stopped")
 
     # Cleanup

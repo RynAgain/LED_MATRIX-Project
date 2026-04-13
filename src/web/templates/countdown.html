@@ -43,7 +43,7 @@
 function quickTimer(seconds, label) {
     fetch('{{ url_for("api_countdown") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({seconds: seconds, label: label})
     })
     .then(r => r.json())

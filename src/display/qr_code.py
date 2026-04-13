@@ -45,7 +45,7 @@ def _generate_qr_image(content, size=64):
         img = img.convert("RGB")
         
         # Resize to fit matrix (with padding)
-        qr_size = min(size - 4, size - 4)
+        qr_size = size - 4
         img = img.resize((qr_size, qr_size), Image.NEAREST)
         
         # Center on black background

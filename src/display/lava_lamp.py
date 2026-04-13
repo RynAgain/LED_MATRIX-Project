@@ -11,6 +11,7 @@ from src.display._shared import should_stop
 logger = logging.getLogger(__name__)
 
 WIDTH, HEIGHT = 64, 64
+_HALF_W, _HALF_H = WIDTH // 2, HEIGHT // 2  # Half-resolution for metaball calc
 FRAME_INTERVAL = 1.0 / 20  # 20 FPS for smooth blobs
 NUM_BLOBS = 6
 
@@ -78,18 +79,21 @@ def run(matrix, duration=60):
             for blob in blobs:
                 blob.update()
 
-            image = Image.new("RGB", (WIDTH, HEIGHT), (5, 2, 10))
-            pixels = image.load()
+            # Compute metaballs at half resolution for ~4x speedup
+            half_img = Image.new("RGB", (_HALF_W, _HALF_H), (5, 2, 10))
+            pixels = half_img.load()
 
-            for y in range(HEIGHT):
-                for x in range(WIDTH):
+            for y in range(_HALF_H):
+                fy = y * 2  # map to full-res coordinate
+                for x in range(_HALF_W):
+                    fx = x * 2  # map to full-res coordinate
                     # Calculate metaball field value
                     total = 0
                     weighted_hue = 0
                     for blob in blobs:
-                        dx = x - blob.x
-                        dy = y - blob.y
-                        dist_sq = dx * dx + dy * dy + 1
+                        ddx = fx - blob.x
+                        ddy = fy - blob.y
+                        dist_sq = ddx * ddx + ddy * ddy + 1
                         influence = (blob.radius * blob.radius) / dist_sq
                         total += influence
                         weighted_hue += influence * blob.hue
@@ -108,6 +112,8 @@ def run(matrix, duration=60):
                         r, g, b = _hsv_to_rgb(avg_hue, 0.6, edge_bright)
                         pixels[x, y] = (r, g, b)
 
+            # Upscale to full resolution using nearest-neighbor
+            image = half_img.resize((WIDTH, HEIGHT), Image.NEAREST)
             matrix.SetImage(image)
 
             elapsed = time.time() - frame_start

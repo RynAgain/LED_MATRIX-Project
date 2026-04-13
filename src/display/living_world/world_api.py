@@ -8,6 +8,7 @@ import json
 import os
 import logging
 import time
+import tempfile
 import threading
 
 logger = logging.getLogger(__name__)
@@ -80,8 +81,19 @@ def write_live_snapshot(*, villagers, structures, trees, farms, animals,
         }
         path = os.path.abspath(_LIVE_SNAPSHOT_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fp:
-            json.dump(snapshot, fp, separators=(",", ":"))
+        # Atomic write: write to temp file first, then replace
+        dir_name = os.path.dirname(path)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'w') as fp:
+                json.dump(snapshot, fp, separators=(",", ":"))
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception as e:
         logger.debug("Failed to write live snapshot: %s", e)
 

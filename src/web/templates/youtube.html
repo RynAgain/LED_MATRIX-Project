@@ -21,7 +21,7 @@
     {% if videos %}
     <div class="video-list">
         {% for video in videos %}
-        <div class="video-item" onclick="playVideo('{{ video.url }}', '{{ video.title }}')">
+        <div class="video-item" data-url={{ video.url|tojson }} data-title={{ video.title|tojson }}>
             <div class="video-info">
                 <span class="video-title">{{ video.title }}</span>
                 <span class="video-url">{{ video.url | truncate(50) }}</span>
@@ -66,7 +66,7 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="remove">
                 <input type="hidden" name="index" value="{{ loop.index0 }}">
-                <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Remove {{ video.title }}?')">Remove</button>
+                <button type="submit" class="btn btn-danger btn-small" data-title={{ video.title|tojson }} onclick="return confirm('Remove ' + this.dataset.title + '?')">Remove</button>
             </form>
         </div>
         {% endfor %}
@@ -79,7 +79,7 @@ function playVideo(url, title) {
     if (confirm('Play "' + title + '" now?')) {
         fetch('{{ url_for("api_play_video") }}', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
             body: JSON.stringify({url: url, title: title})
         })
         .then(r => r.json())
@@ -95,12 +95,18 @@ function playVideo(url, title) {
     }
 }
 
+document.querySelectorAll('.video-item[data-url]').forEach(function(el) {
+    el.addEventListener('click', function() {
+        playVideo(this.dataset.url, this.dataset.title);
+    });
+});
+
 function playCustomUrl(e) {
     e.preventDefault();
     var url = document.getElementById('custom_url').value;
     fetch('{{ url_for("api_play_video") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({url: url, title: 'Custom URL'})
     })
     .then(r => r.json())

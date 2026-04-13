@@ -17,7 +17,7 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,8 @@ def run(matrix, duration=60):
 
             # Show empty board briefly
             _draw_board(matrix, board, scores=scores, show_score=True)
-            time.sleep(0.5)
+            if not interruptible_sleep(0.5):
+                break
 
             while not game_over and time.time() - start_time < duration:
                 if should_stop():
@@ -256,22 +257,23 @@ def run(matrix, duration=60):
                         scores[1] += 1
                     # Show winning line highlighted for 2 seconds
                     _draw_board(matrix, board, win_line=win_line, scores=scores, show_score=True)
-                    time.sleep(2.0)
+                    interruptible_sleep(2.0)
                     game_over = True
                 elif _is_draw(board):
                     logger.info("Game ended in a draw")
                     scores[2] += 1
                     _draw_board(matrix, board, scores=scores, show_score=True)
-                    time.sleep(2.0)
+                    interruptible_sleep(2.0)
                     game_over = True
                 else:
                     # Pause before next move
-                    time.sleep(0.3)
+                    if not interruptible_sleep(0.3):
+                        break
                     current_player = 'O' if current_player == 'X' else 'X'
 
             # Show score briefly between games
             _draw_board(matrix, board, win_line=win_line, scores=scores, show_score=True)
-            time.sleep(1.0)
+            interruptible_sleep(1.0)
 
     except Exception as e:
         logger.error("Error in tic_tac_toe: %s", e, exc_info=True)

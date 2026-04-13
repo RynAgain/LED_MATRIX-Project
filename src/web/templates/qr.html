@@ -33,7 +33,7 @@
 function quickQR(content, label) {
     fetch('{{ url_for("api_qr") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({content: content, label: label})
     })
     .then(r => r.json())

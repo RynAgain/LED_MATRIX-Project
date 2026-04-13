@@ -11,7 +11,7 @@ import random
 import time
 import logging
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +456,8 @@ def run(matrix, duration=60):
 def _flash_solved(matrix):
     """Brief green flash when maze is solved."""
     for brightness in [80, 160, 255, 160, 80, 0]:
+        if should_stop():
+            return
         image = Image.new("RGB", (WIDTH, HEIGHT), (0, brightness, 0))
         try:
             from PIL import ImageDraw as ID2, ImageFont

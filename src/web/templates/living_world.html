@@ -190,9 +190,9 @@ function updateVillagerList(villagers) {
   }
   div.innerHTML = villagers.map((v, i) =>
     `<div style="cursor:pointer;padding:2px 4px;${selectedVillager===i?'background:#222244;':''}" onclick="selectVillager(${i})">
-      <span style="color:#dda;">${v.name}</span>
-      <span style="color:#888;"> [${v.trait}]</span>
-      <span style="color:#aaa;"> ${v.state}</span>
+      <span style="color:#dda;">${escapeHtml(v.name)}</span>
+      <span style="color:#888;"> [${escapeHtml(v.trait)}]</span>
+      <span style="color:#aaa;"> ${escapeHtml(v.state)}</span>
     </div>`
   ).join('');
 }
@@ -227,7 +227,7 @@ function showVillagerDetail(v) {
 function sendCmd(action, params) {
   fetch('/api/living-world/command', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
     body: JSON.stringify({action: action, params: params})
   })
   .then(r => r.json())

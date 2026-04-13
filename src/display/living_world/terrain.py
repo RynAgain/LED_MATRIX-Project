@@ -2,6 +2,7 @@
 
 import random
 import math
+import time
 
 from .constants import (
     WORLD_WIDTH, DISPLAY_HEIGHT, BASE_GROUND, TERRAIN_MIN, TERRAIN_MAX,
@@ -168,19 +169,20 @@ def _place_trees(heights, world, structures=None):
 def _generate_stars():
     return [(random.randint(0,DISPLAY_WIDTH-1), random.randint(0,28)) for _ in range(random.randint(15,25))]
 
-# Module-level cache for valley columns (expensive O(n*m) scan)
+# Module-level time-based cache for valley columns (expensive O(n*m) scan)
 _valley_cols_cache = None
-_valley_cols_generation = -1
+_valley_cols_cache_time = 0.0
 
 
-def _get_valley_cols(world, _cache_gen=None):
-    """Return set of columns near water.  Cached per generation tick.
+def _get_valley_cols(world):
+    """Return set of columns near water.  Cached for up to 1 second.
 
-    Call ``_invalidate_valley_cols_cache()`` when water changes, or pass
-    a new ``_cache_gen`` value each tick to auto-refresh periodically.
+    Uses a simple time-based cache to avoid 20+ recomputations per tick
+    without requiring an explicit invalidation mechanism.
     """
-    global _valley_cols_cache, _valley_cols_generation
-    if _cache_gen is not None and _cache_gen == _valley_cols_generation and _valley_cols_cache is not None:
+    global _valley_cols_cache, _valley_cols_cache_time
+    now = time.time()
+    if _valley_cols_cache is not None and (now - _valley_cols_cache_time) < 1.0:
         return _valley_cols_cache
     vc = set()
     for x in range(WORLD_WIDTH):
@@ -189,16 +191,15 @@ def _get_valley_cols(world, _cache_gen=None):
                 for dx in range(-2,3): vc.add(x+dx)
                 break
     _valley_cols_cache = vc
-    if _cache_gen is not None:
-        _valley_cols_generation = _cache_gen
+    _valley_cols_cache_time = now
     return vc
 
 
 def _invalidate_valley_cols_cache():
     """Force recomputation on next _get_valley_cols call."""
-    global _valley_cols_cache, _valley_cols_generation
+    global _valley_cols_cache, _valley_cols_cache_time
     _valley_cols_cache = None
-    _valley_cols_generation = -1
+    _valley_cols_cache_time = 0.0
 
 def _flatten_terrain(x, heights, world):
     col = x

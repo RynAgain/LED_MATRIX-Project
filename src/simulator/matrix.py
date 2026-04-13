@@ -90,6 +90,17 @@ class _SimulatorWindow:
                 cls._instance = cls()
             return cls._instance
 
+    @classmethod
+    def shutdown(cls):
+        """Clean up the singleton window on interpreter exit."""
+        if cls._instance is not None:
+            try:
+                import pygame
+                pygame.quit()
+            except Exception:
+                pass
+            cls._instance = None
+
     def __init__(self):
         self._running = False
         self._screen = None
@@ -116,7 +127,7 @@ class _SimulatorWindow:
             logger.error("Failed to initialize pygame: %s", e)
             self._initialized = False
 
-    def render(self, pixel_buffer):
+    def render(self, pixel_buffer, brightness=100):
         """Render the pixel buffer to the pygame window."""
         if not PYGAME_AVAILABLE or not self._initialized:
             return
@@ -132,12 +143,18 @@ class _SimulatorWindow:
 
         snapshot = pixel_buffer.get_snapshot()
         cell = PIXEL_SIZE + PIXEL_GAP
+        bright_factor = max(0, min(100, brightness)) / 100.0
 
         self._screen.fill(BG_COLOR)
 
         for y in range(MATRIX_SIZE):
             for x in range(MATRIX_SIZE):
-                color = snapshot[y][x]
+                r, g, b = snapshot[y][x]
+                color = (
+                    int(r * bright_factor),
+                    int(g * bright_factor),
+                    int(b * bright_factor),
+                )
                 rect = pygame.Rect(
                     PIXEL_GAP + x * cell,
                     PIXEL_GAP + y * cell,
@@ -160,6 +177,10 @@ class _SimulatorWindow:
             self._running = False
 
 
+import atexit
+atexit.register(_SimulatorWindow.shutdown)
+
+
 class FrameCanvas:
     """Simulated FrameCanvas matching the rgbmatrix.FrameCanvas API."""
 
@@ -167,6 +188,7 @@ class FrameCanvas:
         self._buffer = _PixelBuffer(width, height)
         self._width = width
         self._height = height
+        self._brightness = 100
 
     @property
     def width(self):
@@ -186,11 +208,11 @@ class FrameCanvas:
 
     @property
     def brightness(self):
-        return 100
+        return self._brightness
 
     @brightness.setter
-    def brightness(self, value):
-        pass  # No-op in simulator
+    def brightness(self, val):
+        self._brightness = max(0, min(100, val))
 
     def Fill(self, red, green, blue):
         self._buffer.fill(red, green, blue)
@@ -248,9 +270,11 @@ class RGBMatrix:
         if options is not None:
             self._rows = options.rows
             self._cols = options.cols
+            self._brightness = getattr(options, "brightness", 100)
         else:
             self._rows = rows if rows > 0 else MATRIX_SIZE
             self._cols = MATRIX_SIZE
+            self._brightness = 100
 
         self._buffer = _PixelBuffer(self._cols, self._rows)
         self._window = _SimulatorWindow.get_instance()
@@ -287,30 +311,30 @@ class RGBMatrix:
 
     @property
     def brightness(self):
-        return 100
+        return self._brightness
 
     @brightness.setter
-    def brightness(self, value):
-        pass
+    def brightness(self, val):
+        self._brightness = max(0, min(100, val))
 
     def Fill(self, red, green, blue):
         self._buffer.fill(red, green, blue)
-        self._window.render(self._buffer)
+        self._window.render(self._buffer, self._brightness)
 
     def Clear(self):
         self._buffer.clear()
-        self._window.render(self._buffer)
+        self._window.render(self._buffer, self._brightness)
 
     def SetPixel(self, x, y, red, green, blue):
         self._buffer.set_pixel(x, y, red, green, blue)
 
     def SetImage(self, image, offset_x=0, offset_y=0, unsafe=True):
         self._buffer.set_from_image(image, offset_x, offset_y)
-        self._window.render(self._buffer)
+        self._window.render(self._buffer, self._brightness)
 
     def SetPixelsPillow(self, xstart, ystart, width, height, image):
         self._buffer.set_from_image(image, xstart, ystart)
-        self._window.render(self._buffer)
+        self._window.render(self._buffer, self._brightness)
 
     def CreateFrameCanvas(self):
         canvas = FrameCanvas(self._cols, self._rows)
@@ -324,7 +348,7 @@ class RGBMatrix:
             for y in range(self._rows):
                 for x in range(self._cols):
                     self._buffer._pixels[y][x] = snapshot[y][x]
-        self._window.render(self._buffer)
+        self._window.render(self._buffer, self._brightness)
         # Return a new canvas for the next frame (simulates double buffering)
         new_canvas = FrameCanvas(self._cols, self._rows)
         return new_canvas
@@ -334,6 +358,11 @@ class RGBMatrix:
         import io
         import base64
         from PIL import Image as PILImage
+
+        try:
+            _NEAREST = PILImage.Resampling.NEAREST
+        except AttributeError:
+            _NEAREST = PILImage.NEAREST  # Pillow < 10
         
         snapshot = self._buffer.get_snapshot()
         img = PILImage.new("RGB", (self._cols, self._rows))
@@ -343,7 +372,7 @@ class RGBMatrix:
                 pixels[x, y] = snapshot[y][x]
         
         # Scale up for visibility (64x64 -> 256x256)
-        img = img.resize((256, 256), PILImage.NEAREST)
+        img = img.resize((256, 256), _NEAREST)
         
         buf = io.BytesIO()
         img.save(buf, format="PNG")

@@ -124,7 +124,9 @@ def _render_clouds(pixels, clouds, ambient, camera_x):
                         _clamp((bg[2] * bg_weight + base_col[2] * fg_weight) // 10, 0, 255),
                     )
 
-def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_phase, season_info=None):
+def _render_terrain_and_water(pixels, world, heights, ambient, camera_x, path_wear, day_phase, sim_tick, season_info=None):
+    """Merged terrain + water render pass. Handles both block types in a single
+    iteration over the visible columns, avoiding a redundant second full pass."""
     offset = _seasonal_color_offset(day_phase)
     # Compute blended seasonal colors for grass and leaves
     if season_info is not None:
@@ -147,39 +149,44 @@ def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_ph
         if wx < 0 or wx >= WORLD_WIDTH: continue
         for y in range(DISPLAY_HEIGHT):
             b = world[y][wx]
-            if b == AIR or b == WATER: continue
-            bc = BLOCK_COLORS.get(b)
-            if bc is None: continue
-            if b == GRASS and path_wear[wx] >= 50:
-                bc = BLOCK_COLORS[PATH_DIRT]
-            elif b == GRASS:
-                bc = grass_color
-            elif b == LEAF:
-                bc = leaf_color
-            c = _apply_ambient(bc, ambient)
-            if b in (GRASS, LEAF):
-                c = (_clamp(c[0] + offset[0], 0, 255),
-                     _clamp(c[1] + offset[1], 0, 255),
-                     _clamp(c[2] + offset[2], 0, 255))
-            pixels[sx, y] = c
+            if b == AIR: continue
+            if b == WATER:
+                # Water rendering (was _render_water)
+                is_surface = (y == 0 or world[y - 1][wx] != WATER)
+                if is_surface:
+                    bc = WATER_SURFACE_COLOR
+                else:
+                    bc = BLOCK_COLORS[WATER]
+                shimmer = int(15 * math.sin(wx * 0.5 + sim_tick * 0.15))
+                c = _apply_ambient(bc, ambient)
+                c = (_clamp(c[0], 0, 255), _clamp(c[1], 0, 255), _clamp(c[2] + shimmer, 0, 255))
+                if ambient < 0.3 and random.random() < 0.05:
+                    c = (_clamp(c[0] + 10, 0, 255), _clamp(c[1] + 15, 0, 255), _clamp(c[2] + 30, 0, 255))
+                pixels[sx, y] = c
+            else:
+                # Terrain rendering (was _render_terrain)
+                bc = BLOCK_COLORS.get(b)
+                if bc is None: continue
+                if b == GRASS and path_wear[wx] >= 50:
+                    bc = BLOCK_COLORS[PATH_DIRT]
+                elif b == GRASS:
+                    bc = grass_color
+                elif b == LEAF:
+                    bc = leaf_color
+                c = _apply_ambient(bc, ambient)
+                if b in (GRASS, LEAF):
+                    c = (_clamp(c[0] + offset[0], 0, 255),
+                         _clamp(c[1] + offset[1], 0, 255),
+                         _clamp(c[2] + offset[2], 0, 255))
+                pixels[sx, y] = c
+
+
+# Keep old names as aliases for backward compatibility
+def _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_phase, season_info=None):
+    _render_terrain_and_water(pixels, world, heights, ambient, camera_x, path_wear, day_phase, 0, season_info=season_info)
 
 def _render_water(pixels, world, heights, ambient, sim_tick, camera_x):
-    for sx in range(DISPLAY_WIDTH):
-        wx = sx + camera_x
-        if wx < 0 or wx >= WORLD_WIDTH: continue
-        for y in range(DISPLAY_HEIGHT):
-            if world[y][wx] != WATER: continue
-            is_surface = (y == 0 or world[y - 1][wx] != WATER)
-            if is_surface:
-                bc = WATER_SURFACE_COLOR
-            else:
-                bc = BLOCK_COLORS[WATER]
-            shimmer = int(15 * math.sin(wx * 0.5 + sim_tick * 0.15))
-            c = _apply_ambient(bc, ambient)
-            c = (_clamp(c[0], 0, 255), _clamp(c[1], 0, 255), _clamp(c[2] + shimmer, 0, 255))
-            if ambient < 0.3 and random.random() < 0.05:
-                c = (_clamp(c[0] + 10, 0, 255), _clamp(c[1] + 15, 0, 255), _clamp(c[2] + 30, 0, 255))
-            pixels[sx, y] = c
+    pass  # Water is now rendered in _render_terrain_and_water
 
 def _render_flowers(pixels, flowers, ambient, camera_x):
     for f in flowers:

@@ -15,6 +15,16 @@ if PROJECT_ROOT not in sys.path:
 from src.web.app import create_app
 
 
+@pytest.fixture(autouse=True)
+def _clear_login_attempts():
+    """Reset the global rate-limiter state between tests so that failed-login
+    counts from one test do not leak into the next."""
+    from src.web.app import _login_attempts
+    _login_attempts.clear()
+    yield
+    _login_attempts.clear()
+
+
 @pytest.fixture
 def app():
     """Create test Flask app."""
@@ -69,7 +79,7 @@ class TestAuth:
         assert "/login" in response.headers["Location"]
 
     def test_logout(self, auth_client):
-        response = auth_client.get("/logout", follow_redirects=True)
+        response = auth_client.post("/logout", follow_redirects=True)
         assert response.status_code == 200
         assert b"Sign In" in response.data
 
@@ -109,7 +119,7 @@ class TestFeatures:
             follow_redirects=True
         )
         assert response.status_code == 200
-        assert b"updated" in response.data.lower() or b"Features" in response.data
+        assert b"updated" in response.data.lower()
 
 
 class TestWifi:
@@ -153,7 +163,7 @@ class TestSettings:
             follow_redirects=True
         )
         assert response.status_code == 200
-        assert b"saved" in response.data.lower() or b"Settings" in response.data
+        assert b"saved" in response.data.lower()
 
 
 class TestAPI:
@@ -301,10 +311,6 @@ class TestSecurity:
         assert b"Too many" in response.data
 
     def test_password_change_wrong_current(self, client):
-        # Clear rate limit state from previous test
-        from src.web.app import _login_attempts
-        _login_attempts.clear()
-        
         # Log in fresh
         client.post("/login", data={"username": "admin", "password": "ledmatrix"})
         
@@ -372,6 +378,7 @@ class TestCSRF:
         response = client.post(
             "/api/brightness",
             json={"brightness": 50},
+            headers={"X-Requested-With": "XMLHttpRequest"},
         )
         assert response.status_code == 200
         data = response.get_json()

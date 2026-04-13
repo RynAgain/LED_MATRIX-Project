@@ -92,7 +92,7 @@ function clearCanvas() {
 function sendToMatrix() {
     fetch('{{ url_for("api_pixel_art") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({pixels: pixels})
     })
     .then(r => r.json())
@@ -107,14 +107,14 @@ function sendToMatrix() {
 function saveImage() {
     fetch('{{ url_for("api_save_pixel_art") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({pixels: pixels})
     })
     .then(r => r.json())
     .then(d => {
         if (d.success) {
             document.querySelector('.container').insertAdjacentHTML('afterbegin',
-                '<div class="alert alert-success">Saved as ' + d.filename + '</div>');
+                '<div class="alert alert-success">Saved as ' + escapeHtml(d.filename) + '</div>');
         }
     });
 }

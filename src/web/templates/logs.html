@@ -205,7 +205,7 @@ function toggleAutoRefresh() {
 
 function clearLogs() {
     if (!confirm('Clear the display log file? This cannot be undone.')) return;
-    fetch('/api/clear-logs', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+    fetch('/api/clear-logs', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}})
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (d.success) {

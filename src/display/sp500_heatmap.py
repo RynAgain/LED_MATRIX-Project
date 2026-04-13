@@ -11,7 +11,7 @@ import json
 import os
 import logging
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -143,60 +143,6 @@ def _change_to_color(change_pct):
         return (bright, 0, 0)  # Red
 
 
-def _render_heatmap(quotes, symbols):
-    """Render the S&P 500 heat map to a PIL Image.
-    
-    Layout: fills 64x64 grid with stock blocks.
-    Top stocks (by list order = market cap) get slightly larger blocks.
-    """
-    image = Image.new("RGB", (WIDTH, HEIGHT), (5, 5, 5))
-    pixels = image.load()
-    
-    num_stocks = min(len(symbols), len(quotes))
-    if num_stocks == 0:
-        return image
-    
-    # Calculate block layout
-    # With ~500 stocks on 64x64 (4096 pixels), each stock gets ~8 pixels
-    # Top 20 get 3x3 (9px), next 80 get 2x2 (4px), rest get 1x1
-    idx = 0
-    x, y = 0, 0
-    
-    for i, sym in enumerate(symbols):
-        if y >= HEIGHT:
-            break
-            
-        change = quotes.get(sym, 0)
-        color = _change_to_color(change)
-        
-        # Determine block size based on rank
-        if i < 10:
-            size = 3  # Top 10: 3x3
-        elif i < 50:
-            size = 2  # Next 40: 2x2
-        else:
-            size = 1  # Rest: 1x1
-        
-        # Draw the block
-        for dy in range(size):
-            for dx in range(size):
-                px, py = x + dx, y + dy
-                if 0 <= px < WIDTH and 0 <= py < HEIGHT:
-                    pixels[px, py] = color
-        
-        # Advance position
-        x += size
-        if x >= WIDTH:
-            x = 0
-            y += size if size > 1 else 1
-            # After big blocks, ensure we don't overlap
-            if i < 10:
-                if x == 0 and (i + 1) % (WIDTH // 3) == 0:
-                    pass  # Natural wrap
-    
-    return image
-
-
 def _render_heatmap_grid(quotes, symbols):
     """Simpler grid layout: fill row by row with adaptive block sizes."""
     image = Image.new("RGB", (WIDTH, HEIGHT), (5, 5, 5))
@@ -250,12 +196,14 @@ _bg_quotes = {}
 _bg_lock = threading.Lock()
 _bg_last_fetch = 0
 _bg_fetching = False
+_bg_started = False
 
 
 def _background_fetch():
     """Fetch S&P 500 data in background thread."""
     global _bg_quotes, _bg_last_fetch, _bg_fetching
-    _bg_fetching = True
+    with _bg_lock:
+        _bg_fetching = True
     try:
         # Try cache first
         cached = _load_cache()
@@ -277,16 +225,18 @@ def _background_fetch():
     except Exception as e:
         logger.error("BG: S&P 500 fetch error: %s", e)
     finally:
-        _bg_fetching = False
+        with _bg_lock:
+            _bg_fetching = False
 
 
 def _ensure_data():
     """Ensure data is available, trigger background fetch if stale."""
-    global _bg_fetching
     now = time.time()
     
     # If data is stale (>5 min) and not already fetching, start background fetch
-    if (now - _bg_last_fetch > 300 or not _bg_quotes) and not _bg_fetching:
+    with _bg_lock:
+        stale = (now - _bg_last_fetch > 300 or not _bg_quotes) and not _bg_fetching
+    if stale:
         t = threading.Thread(target=_background_fetch, daemon=True)
         t.start()
     
@@ -294,12 +244,13 @@ def _ensure_data():
         return dict(_bg_quotes)
 
 
-# Start prefetch immediately when module is imported
-threading.Thread(target=_background_fetch, daemon=True).start()
-
-
 def run(matrix, duration=60):
     """Run the S&P 500 heat map for the specified duration."""
+    global _bg_started
+    if not _bg_started:
+        _bg_started = True
+        threading.Thread(target=_background_fetch, daemon=True).start()
+
     start_time = time.time()
     
     try:
@@ -314,7 +265,6 @@ def run(matrix, duration=60):
                 matrix.SetImage(image)
             else:
                 # No data yet, show loading indicator
-                from PIL import ImageDraw, ImageFont
                 img = Image.new("RGB", (WIDTH, HEIGHT), (5, 5, 5))
                 draw = ImageDraw.Draw(img)
                 try:

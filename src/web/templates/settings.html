@@ -259,7 +259,7 @@
 <script>
 function restartService() {
     if (confirm('Restart the display service?')) {
-        fetch('{{ url_for("api_restart") }}', {method: 'POST'})
+        fetch('{{ url_for("api_restart") }}', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
             .then(r => r.json())
             .then(d => alert(d.message))
             .catch(e => alert('Error: ' + e));
@@ -267,7 +267,7 @@ function restartService() {
 }
 
 function checkUpdate() {
-    fetch('{{ url_for("api_update") }}', {method: 'POST'})
+    fetch('{{ url_for("api_update") }}', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
         .then(r => r.json())
         .then(d => alert(d.message))
         .catch(e => alert('Error: ' + e));
@@ -396,9 +396,9 @@ function loadGitLog() {
                 var div = document.createElement('div');
                 div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-color, #333);';
                 if (isCurrent) div.style.background = '#1a3a1a';
-                div.innerHTML = '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><code>' + c.hash + '</code> ' + c.message +
+                div.innerHTML = '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><code>' + escapeHtml(c.hash) + '</code> ' + escapeHtml(c.message) +
                     (isCurrent ? ' <span style="color:#4CAF50">[current]</span>' : '') + '</span>' +
-                    (isCurrent ? '' : '<button onclick="rollback(\'' + c.hash + '\')" style="flex-shrink:0;font-size:0.75em;padding:2px 8px;margin-left:8px;background:#ff9800;border:none;color:#fff;border-radius:3px;cursor:pointer;">Rollback</button>');
+                    (isCurrent ? '' : '<button onclick="rollback(\'' + escapeHtml(c.hash) + '\')" style="flex-shrink:0;font-size:0.75em;padding:2px 8px;margin-left:8px;background:#ff9800;border:none;color:#fff;border-radius:3px;cursor:pointer;">Rollback</button>');
                 container.appendChild(div);
             });
             if (data.commits.length === 0) {
@@ -418,7 +418,7 @@ function rollback(hash) {
     if (!confirm('Roll back to commit ' + hash + '? This will change files on disk. A config backup is recommended first.')) return;
     fetch('/api/git-rollback', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({hash: hash})
     }).then(function(r) { return r.json(); }).then(function(data) {
         if (data.success) {

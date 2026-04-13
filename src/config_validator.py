@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Configuration validator for LED Matrix Project.
-Validates config.json and wifi.json against expected schemas.
+Validates config.json, wifi.json, and schedule.json against expected schemas.
 """
 
 import json
@@ -9,22 +9,14 @@ import os
 import sys
 import logging
 
+from src.feature_registry import FEATURE_MODULES
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Known feature names that map to display modules
-VALID_FEATURE_NAMES = {
-    "tic_tac_toe", "snake", "pong", "billiards",
-    "time_display", "bitcoin_price", "breakout", "youtube_stream",
-    "fire", "plasma", "matrix_rain", "starfield",
-    "game_of_life", "rainbow_waves", "weather", "text_scroller",
-    "stock_ticker", "sp500_heatmap", "binary_clock", "countdown",
-    "lava_lamp", "living_world", "qr_code", "slideshow",
-    "galaga", "space_invaders", "logo_wholefoods",
-    "github_stats", "tanks", "wireframe", "maze_3d",
-    "terrain_ball", "system_stats"
-}
+# Known feature names derived from the canonical registry (single source of truth)
+VALID_FEATURE_NAMES = FEATURE_MODULES.keys()
 
 VALID_FEATURE_TYPES = {"game", "utility", "video", "effect"}
 
@@ -231,6 +223,149 @@ def validate_wifi_config(config_path=None):
     return errors
 
 
+def validate_hardware_config(config_path=None):
+    """
+    Validate the matrix_hardware block in config/config.json.
+
+    Only validates fields that are present -- no fields are required.
+
+    Args:
+        config_path: Path to config.json. Defaults to config/config.json.
+
+    Returns:
+        List of ConfigValidationError objects. Empty list means valid.
+    """
+    if config_path is None:
+        config_path = os.path.join(PROJECT_ROOT, "config", "config.json")
+
+    errors = []
+
+    if not os.path.exists(config_path):
+        return errors  # Nothing to validate
+
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return errors  # JSON errors are caught by validate_config()
+
+    hw = config.get("matrix_hardware")
+    if not isinstance(hw, dict):
+        return errors  # No hardware block or not a dict
+
+    # rows and cols: positive integers (typical values: 32, 64)
+    for key in ("rows", "cols"):
+        if key in hw:
+            val = hw[key]
+            if not isinstance(val, int) or isinstance(val, bool):
+                errors.append(ConfigValidationError(f"matrix_hardware.{key}", "Must be a positive integer"))
+            elif val <= 0:
+                errors.append(ConfigValidationError(f"matrix_hardware.{key}", "Must be a positive integer"))
+
+    # brightness: 0-100
+    if "brightness" in hw:
+        val = hw["brightness"]
+        if not isinstance(val, int) or isinstance(val, bool):
+            errors.append(ConfigValidationError("matrix_hardware.brightness", "Must be an integer 0-100"))
+        elif not (0 <= val <= 100):
+            errors.append(ConfigValidationError("matrix_hardware.brightness", "Must be between 0 and 100"))
+
+    # gpio_slowdown: 0-5
+    if "gpio_slowdown" in hw:
+        val = hw["gpio_slowdown"]
+        if not isinstance(val, int) or isinstance(val, bool):
+            errors.append(ConfigValidationError("matrix_hardware.gpio_slowdown", "Must be an integer 0-5"))
+        elif not (0 <= val <= 5):
+            errors.append(ConfigValidationError("matrix_hardware.gpio_slowdown", "Must be between 0 and 5"))
+
+    # chain_length and parallel: 1-4
+    for key in ("chain_length", "parallel"):
+        if key in hw:
+            val = hw[key]
+            if not isinstance(val, int) or isinstance(val, bool):
+                errors.append(ConfigValidationError(f"matrix_hardware.{key}", "Must be an integer 1-4"))
+            elif not (1 <= val <= 4):
+                errors.append(ConfigValidationError(f"matrix_hardware.{key}", "Must be between 1 and 4"))
+
+    return errors
+
+
+def validate_schedule_config(config_path=None):
+    """
+    Validate config/schedule.json.
+
+    Checks that start_hour/end_hour are 0-23 and enabled is boolean.
+    Only validates fields that are present.
+
+    Args:
+        config_path: Path to schedule.json. Defaults to config/schedule.json.
+
+    Returns:
+        List of ConfigValidationError objects. Empty list means valid.
+    """
+    if config_path is None:
+        config_path = os.path.join(PROJECT_ROOT, "config", "schedule.json")
+
+    errors = []
+
+    if not os.path.exists(config_path):
+        return errors  # File is optional
+
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        errors.append(ConfigValidationError("json", f"Invalid JSON in schedule.json: {e}"))
+        return errors
+
+    if not isinstance(config, dict):
+        errors.append(ConfigValidationError("root", "schedule.json must be a JSON object"))
+        return errors
+
+    # Top-level enabled
+    if "enabled" in config:
+        if not isinstance(config["enabled"], bool):
+            errors.append(ConfigValidationError("enabled", "Must be a boolean"))
+
+    # Night mode block
+    night = config.get("night_mode")
+    if isinstance(night, dict):
+        if "enabled" in night:
+            if not isinstance(night["enabled"], bool):
+                errors.append(ConfigValidationError("night_mode.enabled", "Must be a boolean"))
+
+        for key in ("start_hour", "end_hour"):
+            if key in night:
+                val = night[key]
+                if not isinstance(val, int) or isinstance(val, bool):
+                    errors.append(ConfigValidationError(f"night_mode.{key}", "Must be an integer 0-23"))
+                elif not (0 <= val <= 23):
+                    errors.append(ConfigValidationError(f"night_mode.{key}", "Must be between 0 and 23"))
+
+    # Schedules array
+    schedules = config.get("schedules")
+    if isinstance(schedules, list):
+        for i, entry in enumerate(schedules):
+            prefix = f"schedules[{i}]"
+            if not isinstance(entry, dict):
+                errors.append(ConfigValidationError(prefix, "Each schedule entry must be an object"))
+                continue
+
+            if "enabled" in entry:
+                if not isinstance(entry["enabled"], bool):
+                    errors.append(ConfigValidationError(f"{prefix}.enabled", "Must be a boolean"))
+
+            for key in ("start_hour", "end_hour"):
+                if key in entry:
+                    val = entry[key]
+                    if not isinstance(val, int) or isinstance(val, bool):
+                        errors.append(ConfigValidationError(f"{prefix}.{key}", "Must be an integer 0-23"))
+                    elif not (0 <= val <= 23):
+                        errors.append(ConfigValidationError(f"{prefix}.{key}", "Must be between 0 and 23"))
+
+    return errors
+
+
 def validate_all():
     """
     Validate all configuration files.
@@ -240,7 +375,9 @@ def validate_all():
     """
     return {
         "config.json": validate_config(),
-        "wifi.json": validate_wifi_config()
+        "config.json (hardware)": validate_hardware_config(),
+        "wifi.json": validate_wifi_config(),
+        "schedule.json": validate_schedule_config(),
     }
 
 

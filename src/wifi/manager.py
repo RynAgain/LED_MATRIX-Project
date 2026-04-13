@@ -90,7 +90,7 @@ class WiFiManager:
         result = self._run_nmcli(["-t", "-f", "TYPE,STATE", "device"])
         if result and result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
-                parts = line.split(":")
+                parts = line.split(":", 1)
                 if len(parts) >= 2 and parts[0] == "wifi" and parts[1] == "connected":
                     return True
         return False
@@ -105,7 +105,7 @@ class WiFiManager:
         result = self._run_nmcli(["-t", "-f", "active,ssid", "dev", "wifi"])
         if result and result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
-                parts = line.split(":")
+                parts = line.split(":", 1)
                 if len(parts) >= 2 and parts[0] == "yes":
                     return parts[1]
         return None
@@ -125,7 +125,7 @@ class WiFiManager:
         networks = []
         if result and result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
-                parts = line.split(":")
+                parts = line.rsplit(":", 2)
                 if len(parts) >= 3 and parts[0]:
                     networks.append({
                         "ssid": parts[0],
@@ -134,9 +134,20 @@ class WiFiManager:
                     })
         return networks
 
+    def _connection_profile_name(self, ssid):
+        """Return a deterministic NM connection profile name for the given SSID."""
+        return f"led-matrix-{ssid}"
+
     def connect_to_network(self, ssid, password="", hidden=False):
         """
         Connect to a specific WiFi network.
+
+        Uses a NetworkManager connection profile so the password is stored in
+        NM's secure keyring rather than being persistently visible on the
+        command line (e.g. in ``/proc/<pid>/cmdline`` or ``ps aux`` output).
+
+        On the first connection the profile is created with ``nmcli connection add``;
+        subsequent connections reuse the existing profile via ``nmcli connection up``.
 
         Args:
             ssid: Network SSID.
@@ -148,24 +159,74 @@ class WiFiManager:
         """
         logger.info("Attempting to connect to '%s'...", ssid)
 
-        # Build nmcli connect command
-        args = ["dev", "wifi", "connect", ssid]
+        con_name = self._connection_profile_name(ssid)
 
-        if password:
-            args.extend(["password", password])
-
-        if hidden:
-            args.extend(["hidden", "yes"])
-
-        result = self._run_nmcli(args, timeout=self.connection_timeout)
-
-        if result and result.returncode == 0:
-            logger.info("Successfully connected to '%s'", ssid)
-            return True
-        else:
+        # --- Open (no-password) networks: use the simple one-shot command ---
+        if not password:
+            args = ["dev", "wifi", "connect", ssid]
+            if hidden:
+                args.extend(["hidden", "yes"])
+            result = self._run_nmcli(args, timeout=self.connection_timeout)
+            if result and result.returncode == 0:
+                logger.info("Successfully connected to open network '%s'", ssid)
+                return True
             error_msg = result.stderr.strip() if result else "nmcli not available"
             logger.warning("Failed to connect to '%s': %s", ssid, error_msg)
             return False
+
+        # --- Secured networks: use a stored connection profile ---
+        # Check whether a profile already exists for this SSID.
+        check = self._run_nmcli(
+            ["-t", "-f", "NAME", "connection", "show"],
+            timeout=10,
+        )
+        profile_exists = False
+        if check and check.returncode == 0:
+            profile_exists = con_name in check.stdout.strip().split("\n")
+
+        if profile_exists:
+            # Update the existing profile's password (in case it changed)
+            self._run_nmcli(
+                ["connection", "modify", con_name,
+                 "wifi-sec.psk", password],
+                timeout=10,
+            )
+        else:
+            # Create a new connection profile.  The password is briefly on
+            # the command line during ``add`` but is then stored securely
+            # inside NetworkManager and never exposed again.
+            add_args = [
+                "connection", "add",
+                "type", "wifi",
+                "con-name", con_name,
+                "ssid", ssid,
+                "wifi-sec.key-mgmt", "wpa-psk",
+                "wifi-sec.psk", password,
+            ]
+            if hidden:
+                add_args.extend(["802-11-wireless.hidden", "yes"])
+
+            add_result = self._run_nmcli(add_args, timeout=self.connection_timeout)
+            if not add_result or add_result.returncode != 0:
+                error_msg = add_result.stderr.strip() if add_result else "nmcli not available"
+                logger.warning("Failed to create connection profile for '%s': %s",
+                               ssid, error_msg)
+                return False
+            logger.info("Created NM connection profile '%s'", con_name)
+
+        # Activate the profile (password is NOT on the command line here)
+        up_result = self._run_nmcli(
+            ["connection", "up", con_name],
+            timeout=self.connection_timeout,
+        )
+
+        if up_result and up_result.returncode == 0:
+            logger.info("Successfully connected to '%s'", ssid)
+            return True
+
+        error_msg = up_result.stderr.strip() if up_result else "nmcli not available"
+        logger.warning("Failed to activate connection '%s': %s", con_name, error_msg)
+        return False
 
     def check_internet_connectivity(self):
         """

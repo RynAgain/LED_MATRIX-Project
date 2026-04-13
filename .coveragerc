@@ -1,8 +1,5 @@
 [run]
 source = src
-omit =
-    src/display/living_world/*
-    src/simulator/*
 
 [report]
 show_missing = true

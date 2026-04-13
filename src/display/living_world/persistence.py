@@ -3,6 +3,7 @@
 import json
 import os
 import logging
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,19 @@ def save_world(*, villagers, structures, trees, farms, heights, world,
 
         path = os.path.abspath(_SAVE_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fp:
-            json.dump(data, fp, separators=(",", ":"))
+        # Atomic write: write to temp file first, then replace
+        dir_name = os.path.dirname(path)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'w') as fp:
+                json.dump(data, fp, separators=(",", ":"))
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.info("World state saved to %s", path)
         return True
     except Exception as e:

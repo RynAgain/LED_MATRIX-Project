@@ -85,7 +85,7 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js" integrity="sha384-eeLEhtwdMwD3X9y+3sspbpdkMo1s0FYwmATjTKMezPMB2KPAQ2Oy3T/10Lv06Q8" crossorigin="anonymous"></script>
 <script>
 function toggleAll(state) {
     document.querySelectorAll('.toggle-label input[type="checkbox"]').forEach(function(cb) {
@@ -105,7 +105,7 @@ function saveOrder() {
     var order = Array.from(items).map(function(el) { return el.dataset.featureName; });
     fetch('/api/reorder-features', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({order: order})
     }).then(function(r) { return r.json(); })
     .then(function(data) {

@@ -60,7 +60,7 @@ function toggleTokenVisibility() {
 function playGitHubStats() {
     fetch('/api/play_feature', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({feature: 'github_stats'})
     }).then(function(r) { return r.json(); })
       .then(function(data) {

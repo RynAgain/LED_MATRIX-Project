@@ -60,8 +60,8 @@ class Villager:
         self.hunger = 0.0              # 0.0 = full, 100.0 = starving
         self.name = random.choice(VILLAGER_FIRST_NAMES)
         self.trait = random.choice(VILLAGER_TRAITS)  # builder/farmer/lumberjack/explorer
-        self.head_color = random.choice(VILLAGER_CLOTHES_COLORS)
-        self.body_color = random.choice(VILLAGER_SKIN_COLORS)
+        self.head_color = random.choice(VILLAGER_SKIN_COLORS)
+        self.body_color = random.choice(VILLAGER_CLOTHES_COLORS)
         self.direction = random.choice([-1, 1])
         self.home, self.build_type, self.target_tree, self.idle_timer = None, None, None, 0
         self.age, self.max_age = 0, random.randint(VILLAGER_MIN_AGE, VILLAGER_MAX_AGE)
@@ -80,6 +80,8 @@ class Villager:
         self.boat = None               # active Boat entity when crossing water
         self.current_goal = None       # active goal string from GOAL_PRIORITY
         self.goal_timer = 0            # ticks since goal was set; reset on new goal
+        self.pending_lumber_cost = 0   # lumber cost deferred until build completes
+        self.pending_stone_cost = 0    # stone cost deferred until build completes
 
 class Structure:
     def __init__(self, stype, x, y, width, height):

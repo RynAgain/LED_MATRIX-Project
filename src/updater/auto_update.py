@@ -205,25 +205,27 @@ class AutoUpdater:
         logger.info("Pulling updates from origin/%s...", self.branch)
         result = self._run_git(["pull", "origin", self.branch, "--ff-only"])
 
-        if result and result.returncode == 0:
-            logger.info("Pull completed: %s", result.stdout.strip())
+        pull_ok = result and result.returncode == 0
 
-            # Try to restore stashed changes
+        if pull_ok:
+            logger.info("Pull completed: %s", result.stdout.strip())
+        else:
+            error = result.stderr.strip() if result else "git not available"
+            logger.error("Pull failed: %s", error)
+
+        # Only restore stash if pull succeeded; otherwise leave changes safely stashed
+        if pull_ok:
             stash_result = self._run_git(["stash", "pop"])
             if stash_result and stash_result.returncode != 0:
                 # Stash pop failed (conflict) or no stash exists
                 if "No stash entries found" not in (stash_result.stderr or ""):
                     logger.warning("Stash pop had conflicts, dropping stash: %s", stash_result.stderr.strip())
                     self._run_git(["stash", "drop"])
-
-            return True
         else:
-            error = result.stderr.strip() if result else "git not available"
-            logger.error("Pull failed: %s", error)
+            logger.warning("Skipping stash pop because pull failed. "
+                           "Run 'git stash pop' manually after resolving the issue.")
 
-            # Restore stash even on failure
-            self._run_git(["stash", "pop"])
-            return False
+        return pull_ok
 
     def install_dependencies(self):
         """
@@ -301,7 +303,7 @@ class AutoUpdater:
         optional = {
             "cv2": "opencv-python-headless",
             "numpy": "numpy",
-            "yt_dlp": "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz",
+            "yt_dlp": "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2025.03.31.tar.gz",
         }
 
         for module, package in critical.items():

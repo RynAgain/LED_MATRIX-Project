@@ -60,15 +60,11 @@ class TestRGBMatrix:
     """Tests for the simulated RGBMatrix."""
 
     def test_creation_default(self):
-        import os
-        os.environ["SDL_VIDEODRIVER"] = "dummy"
         m = RGBMatrix(rows=64)
         assert m.width == 64
         assert m.height == 64
 
     def test_creation_with_options(self):
-        import os
-        os.environ["SDL_VIDEODRIVER"] = "dummy"
         opts = RGBMatrixOptions()
         opts.rows = 64
         opts.cols = 64
@@ -77,23 +73,30 @@ class TestRGBMatrix:
         assert m.height == 64
 
     def test_set_pixel(self, matrix):
+        matrix.Clear()
         matrix.SetPixel(0, 0, 255, 0, 0)
-        # Should not raise
+        snapshot = matrix._buffer.get_snapshot()
+        assert snapshot[0][0] == (255, 0, 0), "SetPixel did not write expected colour"
 
     def test_fill(self, matrix):
         matrix.Fill(0, 0, 255)
-        # Should not raise
+        snapshot = matrix._buffer.get_snapshot()
+        assert snapshot[0][0] == (0, 0, 255), "Fill did not set pixel colour"
+        assert snapshot[32][32] == (0, 0, 255), "Fill did not cover centre pixel"
 
     def test_clear(self, matrix):
         matrix.Fill(255, 255, 255)
         matrix.Clear()
-        # Should not raise
+        snapshot = matrix._buffer.get_snapshot()
+        assert snapshot[0][0] == (0, 0, 0), "Clear did not reset pixel to black"
+        assert snapshot[63][63] == (0, 0, 0), "Clear did not reset last pixel"
 
     def test_set_image(self, matrix):
         from PIL import Image
         img = Image.new("RGB", (64, 64), color=(128, 128, 128))
         matrix.SetImage(img)
-        # Should not raise
+        snapshot = matrix._buffer.get_snapshot()
+        assert snapshot[0][0] == (128, 128, 128), "SetImage did not write pixels"
 
     def test_create_frame_canvas(self, matrix):
         canvas = matrix.CreateFrameCanvas()
@@ -119,20 +122,27 @@ class TestFrameCanvas:
 
     def test_fill(self, canvas):
         canvas.Fill(255, 0, 0)
-        # Should not raise
+        snapshot = canvas._buffer.get_snapshot()
+        assert snapshot[0][0] == (255, 0, 0), "Canvas Fill did not set pixel colour"
 
     def test_clear(self, canvas):
+        canvas.Fill(255, 255, 255)
         canvas.Clear()
-        # Should not raise
+        snapshot = canvas._buffer.get_snapshot()
+        assert snapshot[0][0] == (0, 0, 0), "Canvas Clear did not reset to black"
 
     def test_set_pixel(self, canvas):
+        canvas.Clear()
         canvas.SetPixel(32, 32, 0, 255, 0)
-        # Should not raise
+        snapshot = canvas._buffer.get_snapshot()
+        assert snapshot[32][32] == (0, 255, 0), "Canvas SetPixel did not write colour"
 
     def test_set_image(self, canvas):
         from PIL import Image
         img = Image.new("RGB", (64, 64), color=(64, 64, 64))
         canvas.SetImage(img)
+        snapshot = canvas._buffer.get_snapshot()
+        assert snapshot[0][0] == (64, 64, 64), "Canvas SetImage did not write pixels"
 
     def test_properties(self, canvas):
         assert canvas.width == 64
@@ -163,18 +173,44 @@ class TestGraphics:
         assert f.CharacterWidth(ord('A')) > 0
 
     def test_draw_text(self, canvas):
+        canvas.Clear()
         c = Color(255, 255, 255)
         f = Font()
         f.LoadFont("test.bdf")
         result = DrawText(canvas, f, 0, 10, c, "Hello")
         assert result > 0
+        # Verify at least one pixel in the text region is non-black
+        snapshot = canvas._buffer.get_snapshot()
+        text_region = [
+            snapshot[y][x]
+            for y in range(0, min(20, 64))
+            for x in range(0, min(result, 64))
+        ]
+        assert any(px != (0, 0, 0) for px in text_region), \
+            "DrawText did not produce any visible pixels"
 
     def test_draw_circle(self, canvas):
+        canvas.Clear()
         c = Color(255, 0, 0)
         DrawCircle(canvas, 32, 32, 10, c)
-        # Should not raise
+        # Check that at least one pixel around the circle perimeter is red
+        snapshot = canvas._buffer.get_snapshot()
+        circle_region = [
+            snapshot[y][x]
+            for y in range(22, 43)
+            for x in range(22, 43)
+        ]
+        assert any(px != (0, 0, 0) for px in circle_region), \
+            "DrawCircle did not produce any visible pixels"
 
     def test_draw_line(self, canvas):
+        canvas.Clear()
         c = Color(0, 255, 0)
         DrawLine(canvas, 0, 0, 63, 63, c)
-        # Should not raise
+        snapshot = canvas._buffer.get_snapshot()
+        # The diagonal line should colour the (0,0) pixel
+        assert snapshot[0][0] == (0, 255, 0), \
+            "DrawLine did not set start pixel"
+        # Also check a mid-point pixel
+        assert snapshot[32][32] == (0, 255, 0), \
+            "DrawLine did not set mid-point pixel"

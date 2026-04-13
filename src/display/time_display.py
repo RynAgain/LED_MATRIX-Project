@@ -16,7 +16,7 @@ import logging
 import time
 import math
 from datetime import datetime
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -457,7 +457,7 @@ def _draw_binary_clock(matrix, now, hue_offset):
     row_spacing = 12
 
     # Labels at top
-    r, g, b = _hsv_to_rgb(hue_offset / 360.0, 0.6, 0.8)
+    r, g, b = _hsv_to_rgb(hue_offset, 0.6, 0.8)
     try:
         font = ImageFont.load_default()
     except Exception:
@@ -476,7 +476,7 @@ def _draw_binary_clock(matrix, now, hue_offset):
 
             if is_set:
                 # Lit bit - colored
-                hue = ((hue_offset + col_idx * 40 + bit * 20) % 360) / 360.0
+                hue = (hue_offset + col_idx * 40 + bit * 20) % 360
                 r, g, b = _hsv_to_rgb(hue, 1.0, 1.0)
                 draw.rectangle([cx, by, cx + bit_size, by + bit_size], fill=(r, g, b))
             else:

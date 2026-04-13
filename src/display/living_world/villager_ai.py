@@ -491,6 +491,1009 @@ def _respawn_if_empty(villagers, heights, world, structures):
             villagers.append(baby)
             sp += 1
 
+
+# ---------------------------------------------------------------------------
+# Per-state handler functions extracted from _update_villagers
+# ---------------------------------------------------------------------------
+# Each handler returns True if the caller should ``continue`` to the next
+# villager (skip remaining per-tick processing), or False/None otherwise.
+# ---------------------------------------------------------------------------
+
+def _handle_entering(v, heights):
+    """Handle the 'entering' state -- villager walks toward target_x on spawn."""
+    if v.x < v.target_x:
+        v.direction = 1; nx = v.x + 1
+    elif v.x > v.target_x:
+        v.direction = -1; nx = v.x - 1
+    else:
+        v.state = "idle"; v.idle_timer = 0; v.entering = False; return True
+    nx = _clamp(nx, 0, WORLD_WIDTH - 1)
+    v.x = nx; v.y = heights[_clamp(int(nx), 0, WORLD_WIDTH - 1)]
+    if int(v.x) == int(v.target_x):
+        v.state = "idle"; v.idle_timer = 0; v.entering = False
+    return True
+
+
+def _handle_walking(v, heights, world, structures, trees, grass_fires,
+                    villagers, path_wear, flowers, sim_tick):
+    """Handle the 'walking' state -- bridge-aware movement toward target_x."""
+    # Consume climbing pause before moving again
+    if v.climb_timer > 0:
+        v.climb_timer -= 1
+        return True
+    # --- Fire detection while walking: interrupt to fight fire ---
+    fire = _find_nearest_fire(v, trees, grass_fires, villagers)
+    if fire is not None:
+        v.firefight_target = fire
+        fire_x = fire.x
+        v.target_x = fire_x
+        v.state = "firefighting"
+        v.task_timer = 0
+        _set_bubble(v, "firefighting")
+        return True
+    # --- Hunger speed penalty: critically hungry villagers move every other tick ---
+    if v.hunger >= HUNGER_CRITICAL and sim_tick % 2 != 0:
+        return True
+    if v.x < v.target_x:
+        v.direction = 1; nx = v.x + 1
+    elif v.x > v.target_x:
+        v.direction = -1; nx = v.x - 1
+    else:
+        v.state = "idle"; v.idle_timer = 0; v.on_bridge = None; return False
+    nx = _clamp(nx, 1, WORLD_WIDTH - 2); nc = int(nx)
+    # Bridge-aware walking
+    bridge_at_nc = _find_bridge_at(nc, structures)
+    bridge_at_cur = _find_bridge_at(int(v.x), structures)
+    if bridge_at_nc is not None:
+        v.x = nx; v.y = bridge_at_nc.y; v.on_bridge = bridge_at_nc
+    elif bridge_at_cur is not None and world[heights[nc]][nc] != WATER:
+        v.x = nx; v.y = heights[nc]; v.on_bridge = None
+    else:
+        height_diff = abs(heights[int(v.x)] - heights[nc])
+        if height_diff > VILLAGER_MAX_CLIMB:
+            v.state = "idle"; v.idle_timer = 0; return True
+        if world[heights[nc]][nc] == WATER:
+            bridge = _find_bridge_at(nc, structures)
+            if bridge is not None:
+                v.x = nx; v.y = bridge.y; v.on_bridge = bridge
+            elif v.has_boat or v.lumber >= BOAT_COST_LUMBER:
+                if not v.has_boat:
+                    v.lumber -= BOAT_COST_LUMBER
+                    v.has_boat = True
+                    log_event(sim_tick, CAT_ECONOMY, f"{v.name} crafted a boat")
+                water_y = heights[nc]
+                if v.boat is None:
+                    v.boat = Boat(v.x, water_y, v)
+                v.boat.active = True
+                v.boat.x = float(nx)
+                v.boat.y = water_y
+                v.x = nx; v.y = water_y; v.on_bridge = None
+            else:
+                v.state = "idle"; v.idle_timer = 0; return True
+        else:
+            v.x = nx; v.y = heights[nc]; v.on_bridge = None
+            if v.boat is not None and v.boat.active:
+                v.boat.active = False
+            if height_diff >= 2:
+                v.climb_timer = VILLAGER_CLIMB_SPEED
+    col = int(v.x)
+    if 0 <= col < WORLD_WIDTH:
+        path_wear[col] = min(path_wear[col] + 1, 100)
+    rm = [fi for fi, f in enumerate(flowers) if f.x == col and f.y == v.y]
+    for fi in reversed(rm):
+        flowers.pop(fi)
+    if int(v.x) == int(v.target_x):
+        v.state = "idle"; v.idle_timer = 0; v.on_bridge = None
+    return False
+
+
+def _handle_firefighting(v, heights, world, structures, trees, grass_fires,
+                         villagers, path_wear):
+    """Handle the 'firefighting' state -- walk to fire and extinguish it."""
+    target = v.firefight_target
+    if target is None:
+        v.state = "idle"; v.idle_timer = 0; return True
+    target_still_burning = False
+    if isinstance(target, Tree):
+        target_still_burning = target.alive and target.on_fire
+    elif isinstance(target, GrassFire):
+        if grass_fires is not None:
+            target_still_burning = target in grass_fires and target.timer > 0
+        else:
+            target_still_burning = False
+    if not target_still_burning:
+        v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; return True
+    fire_x = target.x
+    dist = abs(int(v.x) - fire_x)
+    if dist <= 2:
+        v.task_timer += 1
+        _set_bubble(v, "firefighting")
+        if v.task_timer >= FIREFIGHT_EXTINGUISH_TICKS:
+            if isinstance(target, Tree):
+                target.on_fire = False
+                target.fire_timer = 0
+            elif isinstance(target, GrassFire):
+                if grass_fires is not None and target in grass_fires:
+                    grass_fires.remove(target)
+            v.firefight_target = None; v.state = "idle"; v.idle_timer = 0
+    else:
+        v.target_x = fire_x
+        _set_bubble(v, "firefighting")
+        if v.x < v.target_x:
+            v.direction = 1; nx = v.x + 1
+        elif v.x > v.target_x:
+            v.direction = -1; nx = v.x - 1
+        else:
+            return True
+        nx = _clamp(nx, 1, WORLD_WIDTH - 2); nc = int(nx)
+        bridge_at_nc = _find_bridge_at(nc, structures)
+        bridge_at_cur = _find_bridge_at(int(v.x), structures)
+        if bridge_at_nc is not None:
+            v.x = nx; v.y = bridge_at_nc.y; v.on_bridge = bridge_at_nc
+        elif bridge_at_cur is not None and world[heights[nc]][nc] != WATER:
+            v.x = nx; v.y = heights[nc]; v.on_bridge = None
+        else:
+            height_diff = abs(heights[int(v.x)] - heights[nc])
+            if height_diff > VILLAGER_MAX_CLIMB:
+                v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; return True
+            if world[heights[nc]][nc] == WATER:
+                bridge = _find_bridge_at(nc, structures)
+                if bridge is not None:
+                    v.x = nx; v.y = bridge.y; v.on_bridge = bridge
+                else:
+                    v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; return True
+            else:
+                v.x = nx; v.y = heights[nc]; v.on_bridge = None
+                if height_diff >= 2:
+                    v.climb_timer = VILLAGER_CLIMB_SPEED
+        col = int(v.x)
+        if 0 <= col < WORLD_WIDTH:
+            path_wear[col] = min(path_wear[col] + 1, 100)
+    return False
+
+
+def _handle_chopping(v, trees, lumber_items, heights, sim_tick):
+    """Handle the 'chopping' state -- count down and fell a tree."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        # Only award lumber if the target tree is still alive
+        if v.target_tree is not None and v.target_tree.alive:
+            v.target_tree.alive = False; v.target_tree.dead_timer = 0
+            log_event(sim_tick, CAT_ECONOMY, f"{v.name} chopped a tree at x={v.target_tree.x}")
+            lumber_gained = random.randint(2, 3)
+            for _ in range(lumber_gained):
+                lx = _clamp(v.target_tree.x + random.randint(-1, 1), 0, WORLD_WIDTH - 1)
+                ly = heights[lx] - 1
+                if 0 <= ly < DISPLAY_HEIGHT:
+                    lumber_items.append(LumberItem(lx, ly))
+            v.lumber += 1
+        else:
+            # Tree died or disappeared before we finished -- no lumber awarded
+            pass
+        v.target_tree = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_planting(v, trees, heights, world, structures):
+    """Handle the 'planting' state -- count down and plant a sapling."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        col = int(v.x); tt = sum(1 for t in trees if t.alive)
+        v.lumber -= 1
+        if tt < 36 and not any(abs(t.x - col) < 8 for t in trees if t.alive) and 4 <= col <= WORLD_WIDTH - 5:
+            if not _too_close_to_structure(col, structures):
+                trees.append(Tree(col, heights[col], 0.0, random.randint(5, 9), random.randint(2, 4), random.randint(0, 1)))
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_building(v, structures, heights, world, farms, sim_tick):
+    """Handle the 'building' state -- count down and finalize the structure."""
+    v.task_timer -= 1
+    if v.building_target is not None and v.build_total_time > 0:
+        v.building_target.build_progress = _clamp(1.0 - (v.task_timer / v.build_total_time), 0.0, 1.0)
+    if v.task_timer <= 0:
+        col = int(v.x)
+        build_ok = True
+        if v.build_type == "campfire":
+            if _min_campfire_distance(col, structures) >= CAMPFIRE_MIN_SPACING:
+                structures.append(Structure("campfire", col, heights[col] - 1, 1, 1))
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} built a campfire at x={col}")
+            else:
+                build_ok = False  # campfire too close -- refund
+        elif v.build_type == "house_small":
+            if v.building_target is not None:
+                v.building_target.under_construction = False; v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a house at x={col}")
+        elif v.build_type == "mine":
+            s = Structure("mine", col, heights[col], 1, 1); s.depth = 0; structures.append(s)
+        elif v.build_type == "bridge":
+            gap_info = getattr(v, '_bridge_gap', None)
+            if gap_info is not None:
+                ws, we, wsy = gap_info
+                bw = we - ws + 1
+                by = wsy - 1
+                bs = Structure("bridge", ws, by, bw, 1)
+                structures.append(bs)
+                v._bridge_gap = None
+        elif v.build_type == "watchtower":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a watchtower at x={col}")
+        elif v.build_type == "granary":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a granary at x={col}")
+        elif v.build_type == "well":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a well at x={col}")
+        elif v.build_type == "castle":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a CASTLE at x={col}")
+        elif v.build_type == "storage":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a storage at x={col}")
+        elif v.build_type == "bank":
+            if v.building_target is not None:
+                v.building_target.under_construction = False
+                v.building_target.build_progress = 1.0
+                log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a bank at x={col}")
+        elif v.build_type == "farm":
+            if v.farm is not None:
+                pass  # farm is live and ready
+        # Refund lumber/stone if build failed (e.g., campfire spacing)
+        if not build_ok:
+            v.lumber += v.pending_lumber_cost
+            v.stone += v.pending_stone_cost
+        v.pending_lumber_cost = 0; v.pending_stone_cost = 0
+        v.build_type = None; v.building_target = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_upgrading(v):
+    """Handle the 'upgrading' state -- count down and upgrade the house level."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.upgrade_target is not None and v.upgrade_target.level < 3:
+            ol = v.upgrade_target.level; nl = ol + 1
+            ow, oh = HOUSE_DIMENSIONS[ol]; nw, nh = HOUSE_DIMENSIONS[nl]
+            v.upgrade_target.level = nl; v.upgrade_target.width = nw; v.upgrade_target.height = nh
+            v.upgrade_target.x = max(0, v.upgrade_target.x - (nw - ow) // 2)
+            v.upgrade_target.y -= (nh - oh)
+            tmpl = HOUSE_TEMPLATES[nl]
+            for _row in tmpl['grid']:
+                for _ci, _ch in enumerate(_row):
+                    if _ch == 'D':
+                        v.upgrade_target.door_x = v.upgrade_target.x + _ci; break
+                else:
+                    continue
+                break
+        v.pending_lumber_cost = 0; v.pending_stone_cost = 0
+        v.upgrade_target = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_refueling(v):
+    """Handle the 'refueling' state -- count down and add fuel to campfire."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.refuel_target is not None and v.lumber >= 1:
+            v.refuel_target.fuel += CAMPFIRE_REFUEL_AMOUNT; v.lumber -= 1
+        v.refuel_target = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_trading_state(v):
+    """Handle the 'trading' state -- count down trading animation."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_collecting(v, lumber_items):
+    """Handle the 'collecting' state -- count down and pick up a lumber item."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        col = int(v.x); bd = 999; bi = -1
+        for li, it in enumerate(lumber_items):
+            d = abs(it.x - col)
+            if d < bd and d <= 2:
+                bd = d; bi = li
+        if bi >= 0:
+            lumber_items.pop(bi); v.lumber += 1
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_resting(v, campfire_count, ambient, is_bad_weather):
+    """Handle the 'resting' state -- sleep until dawn or wake for emergencies."""
+    if campfire_count == 0 and v.lumber >= 2:
+        v.state = "idle"; v.idle_timer = 0
+    elif ambient > 0.4 and not is_bad_weather:
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_flattening(v, heights, world):
+    """Handle the 'flattening' state -- count down and level terrain."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.flatten_target is not None:
+            _flatten_terrain(v.flatten_target, heights, world)
+        v.flatten_target = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_mining(v, world, heights, sim_tick):
+    """Handle the 'mining' state -- dig deeper into mine, collect stone/gold."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.mine_target is not None and v.mine_target.depth < v.mine_target.max_depth:
+            m = v.mine_target; m.depth += 1
+            my = m.y + m.depth
+            if 0 <= my < DISPLAY_HEIGHT and 0 <= m.x < WORLD_WIDTH:
+                world[my][m.x] = AIR
+            if m.depth % 2 == 0:
+                v.stone += 1
+                if random.random() < GOLD_MINE_CHANCE:
+                    v.gold += 1
+                    log_event(sim_tick, CAT_ECONOMY, f"{v.name} found gold while mining!")
+            if m.depth < m.max_depth:
+                v.task_timer = MINE_DIG_FRAMES
+            else:
+                for cy in range(DISPLAY_HEIGHT):
+                    if world[cy][m.x] != AIR:
+                        heights[m.x] = cy
+                        if world[cy][m.x] not in (WATER, GRASS):
+                            world[cy][m.x] = GRASS
+                        break
+                v.mine_target = None; v.state = "idle"; v.idle_timer = 0
+        else:
+            v.mine_target = None; v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_farming_plant(v):
+    """Handle the 'farming_plant' state -- count down and plant all empty farm slots."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.farm is not None:
+            v.farm.plant_all_empty()
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_farming_harvest(v):
+    """Handle the 'farming_harvest' state -- count down and harvest mature crops."""
+    v.task_timer -= 1
+    if v.task_timer <= 0:
+        if v.farm is not None:
+            count = v.farm.harvest_all_mature()
+            v.food += count * CROP_HARVEST_YIELD
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_eating(v):
+    """Handle the 'eating' state -- count down eating animation and consume food."""
+    v.task_timer -= 1
+    _set_bubble(v, "eating")
+    if v.task_timer <= 0:
+        if v.food >= 1:
+            v.food -= 1
+            v.hunger = max(0.0, v.hunger - FOOD_SATIATION)
+        v.state = "idle"; v.idle_timer = 0
+    return False
+
+
+def _handle_hunting(v, heights, world, sim_tick):
+    """Handle the 'hunting' state -- chase or shoot an animal target."""
+    target = v.hunt_target
+    v.task_timer += 1
+    if target is None or not target.alive or v.task_timer > HUNTING_CHASE_FRAMES:
+        v.hunt_target = None; v.state = "idle"; v.idle_timer = 0; return True
+    _set_bubble(v, "hunting")
+    dist = abs(int(v.x) - int(round(target.x)))
+    if v.has_bow and dist <= BOW_RANGE:
+        v.direction = 1 if target.x > v.x else -1
+        if v.task_timer >= BOW_SHOOT_FRAMES:
+            target.alive = False
+            v.food += BOW_HUNTING_FOOD
+            log_event(sim_tick, CAT_COMBAT, f"{v.name} shot a {target.animal_type} with bow for {BOW_HUNTING_FOOD} food")
+            v.hunt_target = None; v.state = "idle"; v.idle_timer = 0
+    elif dist <= HUNTING_CATCH_RADIUS:
+        target.alive = False
+        v.food += HUNTING_KILL_FOOD
+        log_event(sim_tick, CAT_COMBAT, f"{v.name} hunted a {target.animal_type} for {HUNTING_KILL_FOOD} food")
+        v.hunt_target = None; v.state = "idle"; v.idle_timer = 0
+    else:
+        # Chase movement with terrain safety checks
+        if v.x < target.x:
+            v.direction = 1; nx = v.x + 1
+        elif v.x > target.x:
+            v.direction = -1; nx = v.x - 1
+        else:
+            return False
+        nx = _clamp(nx, 1, WORLD_WIDTH - 2)
+        nc = int(nx)
+        # Bounds check
+        if nc < 0 or nc >= WORLD_WIDTH:
+            v.hunt_target = None; v.state = "idle"; v.idle_timer = 0; return True
+        # Water check: don't chase into water
+        if world[heights[nc]][nc] == WATER:
+            v.hunt_target = None; v.state = "idle"; v.idle_timer = 0; return True
+        # Steep terrain check: reuse climbing limit from walking
+        height_diff = abs(heights[int(v.x)] - heights[nc])
+        if height_diff > VILLAGER_MAX_CLIMB:
+            v.hunt_target = None; v.state = "idle"; v.idle_timer = 0; return True
+        v.x = nx
+        v.y = heights[nc]
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Goal execution for idle state
+# ---------------------------------------------------------------------------
+
+def _execute_idle_goal(v, goal, structures, trees, heights, world, lumber_items,
+                       farms, villagers, animals, pop, storage, sim_tick):
+    """Execute a single goal chosen by the idle-state decision tree.
+
+    Returns True if the goal was successfully initiated, False otherwise
+    (caller should fall back to explore).
+    """
+    if goal == "build_campfire":
+        if v.lumber >= 2:
+            site = _find_campfire_site(structures, trees, heights, world)
+            if site is not None:
+                v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
+                v.pending_lumber_cost = 2; v.pending_stone_cost = 0
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - site) <= 1 else "walking"
+                return True
+
+    elif goal == "build_house":
+        if v.lumber >= 4 and v.home is None:
+            hw, hh = HOUSE_DIMENSIONS[1]
+            site = _find_build_site(structures, trees, heights, world, hw, hh)
+            if site is not None:
+                sx, sy = site; s = Structure("house_small", sx, sy, hw, hh)
+                _level_foundation(sx, hw, heights, world, v, structures)
+                sy = heights[sx] - hh; s.y = sy
+                s.under_construction = True; s.build_progress = 0.0; s.owner = v
+                stone_cost = 0
+                if v.stone >= 2:
+                    s.stone_built = True; v.stone -= 2; stone_cost = 2
+                for _r in HOUSE_TEMPLATES[1]['grid']:
+                    for _ci, _ch in enumerate(_r):
+                        if _ch == 'D':
+                            s.door_x = sx + _ci; break
+                    else:
+                        continue
+                    break
+                v.home = s; structures.append(s); v.target_x = sx; v.build_type = "house_small"
+                v.building_target = s; v.lumber -= 4; v.build_total_time = 120; v.task_timer = 120
+                v.pending_lumber_cost = 4; v.pending_stone_cost = stone_cost
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+            else:
+                steep = _find_steep_spot(heights, world, near_x=int(v.x), radius=15)
+                if steep is not None:
+                    v.flatten_target = steep; v.target_x = steep; v.task_timer = FLATTEN_DURATION
+                    v.state = "flattening" if abs(int(v.x) - steep) <= 1 else "walking"
+                    return True
+
+    elif goal == "upgrade_house":
+        if v.home is not None and v.home.level < 3 and v.lumber >= 6 and v.stone >= 2:
+            v.upgrade_target = v.home; v.target_x = v.home.x
+            v.lumber -= 6; v.stone -= 2; v.task_timer = 120
+            v.pending_lumber_cost = 6; v.pending_stone_cost = 2
+            _set_bubble(v, "building"); v.current_goal = None
+            v.state = "upgrading" if abs(int(v.x) - v.home.x) <= 1 else "walking"
+            return True
+
+    elif goal == "get_food":
+        if v.farm is not None and v.farm.has_mature_crops():
+            v.target_x = v.farm.x; v.task_timer = FARM_HARVEST_FRAMES
+            _set_bubble(v, "farming")
+            v.state = "farming_harvest" if abs(int(v.x) - v.farm.x) <= 2 else "walking"
+            return True
+        elif v.farm is not None and v.farm.has_empty_slots():
+            v.target_x = v.farm.x; v.task_timer = FARM_PLANT_FRAMES
+            _set_bubble(v, "farming")
+            v.state = "farming_plant" if abs(int(v.x) - v.farm.x) <= 2 else "walking"
+            return True
+        elif (v.home is not None and pop >= FARM_POPULATION_THRESHOLD
+                and v.lumber >= FARM_COST_LUMBER
+                and _count_villager_farms(v, farms) < MAX_FARMS_PER_HOUSE):
+            farm_x = _find_farm_site(v, farms, heights, world, structures, trees)
+            if farm_x is not None:
+                farm_y = heights[farm_x]
+                new_farm = Farm(farm_x, farm_y, FARM_WIDTH)
+                new_farm.owner = v; v.farm = new_farm; farms.append(new_farm)
+                v.lumber -= FARM_COST_LUMBER; v.target_x = farm_x
+                v.build_type = "farm"; v.task_timer = FARM_BUILD_FRAMES
+                v.build_total_time = FARM_BUILD_FRAMES; _set_bubble(v, "farming")
+                v.pending_lumber_cost = FARM_COST_LUMBER; v.pending_stone_cost = 0
+                v.state = "building" if abs(int(v.x) - farm_x) <= 1 else "walking"
+                return True
+
+    elif goal == "farm_harvest":
+        if v.farm is not None and v.farm.has_mature_crops():
+            v.target_x = v.farm.x; v.task_timer = FARM_HARVEST_FRAMES
+            _set_bubble(v, "farming"); v.current_goal = None
+            v.state = "farming_harvest" if abs(int(v.x) - v.farm.x) <= 2 else "walking"
+            return True
+
+    elif goal == "farm_plant":
+        if v.farm is not None and v.farm.has_empty_slots():
+            v.target_x = v.farm.x; v.task_timer = FARM_PLANT_FRAMES
+            _set_bubble(v, "farming"); v.current_goal = None
+            v.state = "farming_plant" if abs(int(v.x) - v.farm.x) <= 2 else "walking"
+            return True
+
+    elif goal == "build_farm":
+        if (v.home is not None and v.lumber >= FARM_COST_LUMBER
+                and _count_villager_farms(v, farms) < MAX_FARMS_PER_HOUSE):
+            farm_x = _find_farm_site(v, farms, heights, world, structures, trees)
+            if farm_x is not None:
+                farm_y = heights[farm_x]
+                new_farm = Farm(farm_x, farm_y, FARM_WIDTH)
+                new_farm.owner = v; v.farm = new_farm; farms.append(new_farm)
+                v.lumber -= FARM_COST_LUMBER; v.target_x = farm_x
+                v.build_type = "farm"; v.task_timer = FARM_BUILD_FRAMES
+                v.build_total_time = FARM_BUILD_FRAMES; _set_bubble(v, "farming")
+                v.pending_lumber_cost = FARM_COST_LUMBER; v.pending_stone_cost = 0
+                v.current_goal = None
+                v.state = "building" if abs(int(v.x) - farm_x) <= 1 else "walking"
+                return True
+
+    elif goal == "refuel_campfire":
+        if v.lumber >= 1:
+            for s in structures:
+                if s.type == "campfire" and s.fuel < CAMPFIRE_LOW_FUEL_THRESHOLD:
+                    v.refuel_target = s; v.target_x = s.x; v.task_timer = 20
+                    v.current_goal = None
+                    v.state = "refueling" if abs(int(v.x) - s.x) <= 1 else "walking"
+                    return True
+
+    elif goal == "build_granary":
+        if v.lumber >= GRANARY_COST_LUMBER:
+            site = _find_build_site(structures, trees, heights, world, GRANARY_WIDTH, GRANARY_HEIGHT)
+            if site is not None:
+                sx, sy = site
+                _level_foundation(sx, GRANARY_WIDTH, heights, world, v, structures)
+                sy = heights[sx] - GRANARY_HEIGHT
+                s = Structure("granary", sx, sy, GRANARY_WIDTH, GRANARY_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = sx; v.build_type = "granary"
+                v.building_target = s; v.lumber -= GRANARY_COST_LUMBER
+                v.build_total_time = GRANARY_BUILD_FRAMES; v.task_timer = GRANARY_BUILD_FRAMES
+                v.pending_lumber_cost = GRANARY_COST_LUMBER; v.pending_stone_cost = 0
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+
+    elif goal == "build_watchtower":
+        if v.lumber >= WATCHTOWER_COST_LUMBER and v.stone >= WATCHTOWER_COST_STONE:
+            site = _find_build_site(structures, trees, heights, world, WATCHTOWER_WIDTH, WATCHTOWER_HEIGHT)
+            if site is not None:
+                sx, sy = site
+                _level_foundation(sx, WATCHTOWER_WIDTH, heights, world, v, structures)
+                sy = heights[sx] - WATCHTOWER_HEIGHT
+                s = Structure("watchtower", sx, sy, WATCHTOWER_WIDTH, WATCHTOWER_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = sx; v.build_type = "watchtower"
+                v.building_target = s; v.lumber -= WATCHTOWER_COST_LUMBER; v.stone -= WATCHTOWER_COST_STONE
+                v.build_total_time = WATCHTOWER_BUILD_FRAMES; v.task_timer = WATCHTOWER_BUILD_FRAMES
+                v.pending_lumber_cost = WATCHTOWER_COST_LUMBER; v.pending_stone_cost = WATCHTOWER_COST_STONE
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+
+    elif goal == "build_mine":
+        if v.lumber >= 2:
+            mc = _find_mine_site(structures, trees, heights, world, int(v.x))
+            if mc is not None:
+                v.target_x = mc; v.build_type = "mine"; v.lumber -= 2; v.task_timer = MINE_DIG_FRAMES
+                v.pending_lumber_cost = 2; v.pending_stone_cost = 0
+                _set_bubble(v, "mining"); v.current_goal = None
+                v.state = "mining" if abs(int(v.x) - mc) <= 1 else "walking"
+                return True
+
+    elif goal == "build_bridge":
+        if v.lumber >= 2:
+            col = int(v.x)
+            for bd in (1, -1):
+                nc = col + bd
+                if 0 <= nc < WORLD_WIDTH and world[heights[nc]][nc] == WATER:
+                    gap = _find_water_gap(world, heights, nc, bd)
+                    if gap is not None:
+                        ws, we, wsy = gap; gw = we - ws + 1
+                        cost = 2 if gw <= 6 else 3
+                        if v.lumber >= cost:
+                            v.lumber -= cost; v._bridge_gap = gap
+                            v.target_x = ws; v.build_type = "bridge"
+                            v.build_total_time = BRIDGE_BUILD_FRAMES; v.task_timer = BRIDGE_BUILD_FRAMES
+                            v.pending_lumber_cost = cost; v.pending_stone_cost = 0
+                            _set_bubble(v, "building"); v.current_goal = None
+                            v.state = "building" if abs(col - ws) <= 1 else "walking"
+                            return True
+
+    elif goal == "build_well":
+        if v.lumber >= WELL_COST_LUMBER and v.stone >= WELL_COST_STONE:
+            wc = _find_well_site(structures, trees, heights, world, int(v.x))
+            if wc is not None:
+                v.lumber -= WELL_COST_LUMBER; v.stone -= WELL_COST_STONE
+                s = Structure("well", wc, heights[wc] - WELL_HEIGHT, WELL_WIDTH, WELL_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = wc; v.build_type = "well"
+                v.building_target = s
+                v.build_total_time = WELL_BUILD_FRAMES; v.task_timer = WELL_BUILD_FRAMES
+                v.pending_lumber_cost = WELL_COST_LUMBER; v.pending_stone_cost = WELL_COST_STONE
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - wc) <= 1 else "walking"
+                return True
+
+    elif goal == "build_castle":
+        if v.lumber >= CASTLE_COST_LUMBER and v.stone >= CASTLE_COST_STONE:
+            site = _find_build_site(structures, trees, heights, world, CASTLE_WIDTH, CASTLE_HEIGHT)
+            if site is not None:
+                sx, sy = site
+                _level_foundation(sx, CASTLE_WIDTH, heights, world, v, structures)
+                sy = heights[sx] - CASTLE_HEIGHT
+                s = Structure("castle", sx, sy, CASTLE_WIDTH, CASTLE_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = sx; v.build_type = "castle"
+                v.building_target = s
+                v.lumber -= CASTLE_COST_LUMBER; v.stone -= CASTLE_COST_STONE
+                v.build_total_time = CASTLE_BUILD_FRAMES; v.task_timer = CASTLE_BUILD_FRAMES
+                v.pending_lumber_cost = CASTLE_COST_LUMBER; v.pending_stone_cost = CASTLE_COST_STONE
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+
+    elif goal == "gather_lumber":
+        # Prefer collecting free items, then chopping
+        li_near = [li for li, it in enumerate(lumber_items) if abs(it.x - int(v.x)) < 15]
+        if li_near:
+            bi = min(li_near, key=lambda i: abs(lumber_items[i].x - int(v.x)))
+            v.target_x = lumber_items[bi].x; v.task_timer = 10
+            v.state = "collecting" if abs(int(v.x) - lumber_items[bi].x) <= 1 else "walking"
+            return True
+        else:
+            mt = [t for t in trees if t.alive and t.growth >= 1.0 and not t.dying and not t.on_fire and abs(t.x - int(v.x)) < 30]
+            if mt and (v.lumber == 0 or random.random() >= VILLAGER_EXPLORE_CHANCE):
+                tt = min(mt, key=lambda t: abs(t.x - int(v.x)))
+                v.target_tree = tt; v.target_x = tt.x - 1 if tt.x > int(v.x) else tt.x + 1
+                v.task_timer = 60; _set_bubble(v, "chopping")
+                v.state = "chopping" if abs(int(v.x) - tt.x) <= 1 else "walking"
+                return True
+
+    elif goal == "gather_stone":
+        for s in structures:
+            if s.type == "mine" and s.depth < s.max_depth:
+                v.mine_target = s; v.target_x = s.x; v.task_timer = MINE_DIG_FRAMES
+                _set_bubble(v, "mining")
+                v.state = "mining" if abs(int(v.x) - s.x) <= 1 else "walking"
+                return True
+
+    elif goal == "have_baby":
+        if (v.home is not None and v.age >= REPRODUCTION_MIN_AGE
+                and v.age <= REPRODUCTION_MAX_AGE and v.children_born < MAX_CHILDREN):
+            if abs(int(v.x) - v.home.x) <= 1:
+                v.current_goal = None
+                return True
+            else:
+                v.target_x = v.home.x
+                v.state = "walking"
+                return True
+
+    elif goal == "hunt":
+        # Auto-craft bow if villager has lumber and doesn't have one
+        if not v.has_bow and v.lumber >= BOW_COST_LUMBER:
+            v.lumber -= BOW_COST_LUMBER
+            v.has_bow = True
+            log_event(sim_tick, CAT_ECONOMY, f"{v.name} crafted a bow (lumber: {v.lumber})")
+        # Find nearest alive animal and hunt it
+        vx = int(v.x)
+        best_animal = None
+        best_d = 999
+        search_range = 30 if v.has_bow else 20
+        for a in animals:
+            if a.alive:
+                d = abs(int(round(a.x)) - vx)
+                if d < best_d and d < search_range:
+                    best_d = d
+                    best_animal = a
+        if best_animal is not None:
+            v.hunt_target = best_animal
+            v.task_timer = 0
+            v.state = "hunting"
+            v.current_goal = None
+            _set_bubble(v, "hunting")
+            return True
+
+    elif goal == "share_food":
+        # Find nearest hungry villager within range and give 1 food
+        vx = int(v.x)
+        best_target = None
+        best_dist = 999
+        for ov in villagers:
+            if ov is v:
+                continue
+            if ov.hunger >= HUNGER_THRESHOLD and ov.food == 0:
+                d = abs(int(ov.x) - vx)
+                if d < best_dist:
+                    best_dist = d
+                    best_target = ov
+        if best_target is not None:
+            if best_dist <= 2:
+                v.food -= 1
+                best_target.food += 1
+                _set_bubble(v, "trading"); _set_bubble(best_target, "trading")
+                log_event(sim_tick, CAT_ECONOMY, f"{v.name} shared 1 food with {best_target.name}")
+                v.current_goal = None
+                return True
+            else:
+                v.target_x = int(best_target.x)
+                v.state = "walking"; v.current_goal = None
+                return True
+
+    elif goal == "plant_tree":
+        if v.lumber >= 1:
+            col = int(v.x); nt = sum(1 for t in trees if t.alive and abs(t.x - col) < 10)
+            if nt < 2:
+                v.task_timer = 30; _set_bubble(v, "planting"); v.current_goal = None
+                v.state = "planting"
+                return True
+
+    elif goal == "build_storage":
+        if v.lumber >= STORAGE_COST_LUMBER and v.stone >= STORAGE_COST_STONE:
+            site = _find_storage_site(structures, trees, heights, world, int(v.x))
+            if site is not None:
+                sx, sy = site
+                _level_foundation(sx, STORAGE_WIDTH, heights, world, v, structures)
+                sy = heights[sx] - STORAGE_HEIGHT
+                s = Structure("storage", sx, sy, STORAGE_WIDTH, STORAGE_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = sx; v.build_type = "storage"
+                v.building_target = s
+                v.lumber -= STORAGE_COST_LUMBER; v.stone -= STORAGE_COST_STONE
+                v.build_total_time = STORAGE_BUILD_FRAMES; v.task_timer = STORAGE_BUILD_FRAMES
+                v.pending_lumber_cost = STORAGE_COST_LUMBER; v.pending_stone_cost = STORAGE_COST_STONE
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+
+    elif goal == "build_bank":
+        if v.lumber >= BANK_COST_LUMBER and v.stone >= BANK_COST_STONE:
+            site = _find_bank_site(structures, trees, heights, world, int(v.x))
+            if site is not None:
+                sx, sy = site
+                _level_foundation(sx, BANK_WIDTH, heights, world, v, structures)
+                sy = heights[sx] - BANK_HEIGHT
+                s = Structure("bank", sx, sy, BANK_WIDTH, BANK_HEIGHT)
+                s.under_construction = True; s.build_progress = 0.0
+                structures.append(s); v.target_x = sx; v.build_type = "bank"
+                v.building_target = s
+                v.lumber -= BANK_COST_LUMBER; v.stone -= BANK_COST_STONE
+                v.build_total_time = BANK_BUILD_FRAMES; v.task_timer = BANK_BUILD_FRAMES
+                v.pending_lumber_cost = BANK_COST_LUMBER; v.pending_stone_cost = BANK_COST_STONE
+                _set_bubble(v, "building"); v.current_goal = None
+                v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"
+                return True
+
+    elif goal == "withdraw_storage":
+        if storage is not None:
+            if abs(int(v.x) - storage.x) <= 2:
+                if v.lumber == 0 and storage.stored_lumber > 0:
+                    amt = min(2, storage.stored_lumber)
+                    v.lumber += amt; storage.stored_lumber -= amt
+                if v.food == 0 and storage.stored_food > 0:
+                    amt = min(2, storage.stored_food)
+                    v.food += amt; storage.stored_food -= amt
+                if v.stone == 0 and storage.stored_stone > 0:
+                    amt = min(2, storage.stored_stone)
+                    v.stone += amt; storage.stored_stone -= amt
+                v.current_goal = None
+                return True
+            else:
+                v.target_x = storage.x
+                v.state = "walking"; v.current_goal = None
+                return True
+
+    elif goal == "deposit_storage":
+        if storage is not None:
+            if abs(int(v.x) - storage.x) <= 2:
+                if v.lumber > STORAGE_DEPOSIT_THRESHOLD_LUMBER and storage.stored_lumber < STORAGE_MAX_LUMBER:
+                    amt = min(v.lumber - STORAGE_DEPOSIT_THRESHOLD_LUMBER, STORAGE_MAX_LUMBER - storage.stored_lumber)
+                    v.lumber -= amt; storage.stored_lumber += amt
+                if v.stone > STORAGE_DEPOSIT_THRESHOLD_STONE and storage.stored_stone < STORAGE_MAX_STONE:
+                    amt = min(v.stone - STORAGE_DEPOSIT_THRESHOLD_STONE, STORAGE_MAX_STONE - storage.stored_stone)
+                    v.stone -= amt; storage.stored_stone += amt
+                if v.food > STORAGE_DEPOSIT_THRESHOLD_FOOD and storage.stored_food < STORAGE_MAX_FOOD:
+                    amt = min(v.food - STORAGE_DEPOSIT_THRESHOLD_FOOD, STORAGE_MAX_FOOD - storage.stored_food)
+                    v.food -= amt; storage.stored_food += amt
+                bank = _get_bank(structures)
+                if bank is not None and v.gold > 0:
+                    bank.stored_gold += v.gold; v.gold = 0
+                v.current_goal = None
+                return True
+            else:
+                v.target_x = storage.x
+                v.state = "walking"; v.current_goal = None
+                return True
+
+    elif goal == "flatten_terrain":
+        steep = _find_steep_spot(heights, world, near_x=int(v.x), radius=12)
+        if steep is not None and random.random() < 0.4:
+            v.flatten_target = steep; v.target_x = steep; v.task_timer = FLATTEN_DURATION
+            v.current_goal = None
+            v.state = "flattening" if abs(int(v.x) - steep) <= 1 else "walking"
+            return True
+        else:
+            extreme = _find_extreme_terrain_near_home(v, heights, world)
+            if extreme is not None:
+                v.flatten_target = extreme; v.target_x = extreme; v.task_timer = FLATTEN_DURATION
+                v.current_goal = None
+                v.state = "flattening" if abs(int(v.x) - extreme) <= 1 else "walking"
+                return True
+
+    return False
+
+
+def _handle_idle(v, heights, world, trees, structures, lumber_items, flowers,
+                 path_wear, villagers, farms, animals, sim_tick, weather,
+                 grass_fires, is_night, is_bad_weather, ambient, pop,
+                 campfire_count, mine_count, bridge_count, well_count,
+                 castle_count, storage_count, bank_count,
+                 watchtower_exists, granary_exists, storage):
+    """Handle the 'idle' state -- goal evaluation and decision tree.
+
+    Returns True if the caller should ``continue`` to the next villager.
+    """
+    if v.idle_timer < 20:
+        return True
+    # Try to claim an unowned house first if homeless
+    if v.home is None:
+        _claim_unowned_house(v, structures)
+    # --- Fire detection: high priority interrupt from idle ---
+    fire = _find_nearest_fire(v, trees, grass_fires, villagers)
+    if fire is not None:
+        v.firefight_target = fire
+        fire_x = fire.x
+        v.target_x = fire_x
+        v.task_timer = 0
+        _set_bubble(v, "firefighting")
+        v.state = "firefighting"
+        return True
+    # --- Hunger: eat food when hungry (high priority after fire) ---
+    if v.hunger >= HUNGER_EAT_THRESHOLD and v.food >= 1:
+        v.state = "eating"
+        v.task_timer = EATING_FRAMES
+        _set_bubble(v, "eating")
+        return True
+    # --- Hunger: critically hungry with no food -- rush to farm ---
+    if v.hunger >= HUNGER_CRITICAL and v.food == 0:
+        if v.farm is not None and v.farm.has_mature_crops():
+            v.target_x = v.farm.x
+            v.task_timer = FARM_HARVEST_FRAMES
+            _set_bubble(v, "farming")
+            if abs(int(v.x) - v.farm.x) <= 2:
+                v.state = "farming_harvest"
+            else:
+                v.state = "walking"
+            return True
+        if v.farm is not None and v.farm.has_empty_slots():
+            v.target_x = v.farm.x
+            v.task_timer = FARM_PLANT_FRAMES
+            _set_bubble(v, "farming")
+            if abs(int(v.x) - v.farm.x) <= 2:
+                v.state = "farming_plant"
+            else:
+                v.state = "walking"
+            return True
+    # --- Night behavior: return home unless tasked ---
+    if is_night:
+        if campfire_count == 0 and v.lumber >= 2:
+            site = _find_campfire_site(structures, trees, heights, world)
+            if site is not None:
+                v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
+                v.pending_lumber_cost = 2; v.pending_stone_cost = 0
+                _set_bubble(v, "building")
+                v.state = "building" if abs(int(v.x) - site) <= 1 else "walking"
+                return True
+        if v.home is not None:
+            if abs(int(v.x) - v.home.x) <= 1:
+                v.state = "resting"; return True
+            else:
+                v.target_x = v.home.x; v.state = "walking"; return True
+        else:
+            cf_x = _nearest_campfire_x(int(v.x), structures)
+            if cf_x is not None:
+                if abs(int(v.x) - cf_x) <= 2:
+                    v.state = "resting"; return True
+                else:
+                    v.target_x = cf_x; v.state = "walking"; return True
+            return True
+    if is_bad_weather and v.home is not None:
+        v.target_x = v.home.x
+        v.state = "resting" if abs(int(v.x) - v.home.x) <= 1 else "walking"
+        return True
+    if campfire_count == 0 and v.lumber >= 2:
+        site = _find_campfire_site(structures, trees, heights, world)
+        if site is not None:
+            v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
+            v.pending_lumber_cost = 2; v.pending_stone_cost = 0
+            _set_bubble(v, "building")
+            v.state = "building" if abs(int(v.x) - site) <= 1 else "walking"
+            return True
+    if is_bad_weather and v.home is None:
+        pass  # continue to goal-based decision tree below
+    elif is_bad_weather and v.home is not None:
+        v.target_x = v.home.x
+        v.state = "resting" if abs(int(v.x) - v.home.x) <= 1 else "walking"
+        return True
+    # ===================================================================
+    # GOAL-BASED DECISION TREE
+    # ===================================================================
+    ctx = {
+        "structures": structures, "trees": trees,
+        "heights": heights, "world": world,
+        "pop": pop, "farms": farms,
+        "campfire_count": campfire_count,
+        "mine_count": mine_count,
+        "bridge_count": bridge_count,
+        "well_count": well_count,
+        "castle_count": castle_count,
+        "storage_count": storage_count,
+        "bank_count": bank_count,
+        "watchtower_exists": watchtower_exists,
+        "granary_exists": granary_exists,
+        "lumber_items": lumber_items,
+        "villagers": villagers,
+        "animals": animals,
+        "weather": weather,
+    }
+    if v.current_goal is None or v.goal_timer >= GOAL_EVAL_INTERVAL:
+        ranked = _evaluate_goals(v, ctx)
+        if ranked:
+            v.current_goal = ranked[0][1]
+            v.goal_timer = 0
+    v.goal_timer += 1
+    goal = v.current_goal if v.current_goal else "explore"
+
+    # --- Prerequisite chaining: if goal needs resources, redirect ---
+    if not _has_prereqs(v, goal):
+        sub = _resolve_prereq_action(v, goal, ctx)
+        if sub is not None:
+            goal = sub
+
+    # --- Execute the chosen goal ---
+    _executed = _execute_idle_goal(
+        v, goal, structures, trees, heights, world, lumber_items,
+        farms, villagers, animals, pop, storage, sim_tick)
+
+    # --- Fallback: explore if goal couldn't be executed ---
+    if not _executed:
+        v.current_goal = None
+        col = int(v.x)
+        v.target_x = _clamp(col + random.randint(-12, 12), 2, WORLD_WIDTH - 3)
+        v.state = "walking"
+    return False
+
+
 def _update_villagers(villagers, heights, world, trees, structures, lumber_items, flowers, path_wear, day_phase, sim_tick, weather=None, grass_fires=None, farms=None, animals=None):
     if farms is None:
         farms = []
@@ -537,833 +1540,61 @@ def _update_villagers(villagers, heights, world, trees, structures, lumber_items
             withdraw = min(2, granary.stored_lumber)
             v.lumber += withdraw
             granary.stored_lumber -= withdraw
+        # --- Refund pending build costs if interrupted ---
+        if (v.pending_lumber_cost > 0 or v.pending_stone_cost > 0) and v.state not in ("building", "upgrading", "walking"):
+            v.lumber += v.pending_lumber_cost
+            v.stone += v.pending_stone_cost
+            v.pending_lumber_cost = 0; v.pending_stone_cost = 0
+        # --- State dispatch ---
         if v.state == "entering":
-            if v.x < v.target_x: v.direction = 1; nx = v.x+1
-            elif v.x > v.target_x: v.direction = -1; nx = v.x-1
-            else: v.state = "idle"; v.idle_timer = 0; v.entering = False; continue
-            nx = _clamp(nx,0,WORLD_WIDTH-1); v.x = nx; v.y = heights[_clamp(int(nx),0,WORLD_WIDTH-1)]
-            if int(v.x) == int(v.target_x): v.state = "idle"; v.idle_timer = 0; v.entering = False
-            continue
-        if v.state == "walking":
-            # Consume climbing pause before moving again
-            if v.climb_timer > 0:
-                v.climb_timer -= 1
+            if _handle_entering(v, heights):
                 continue
-            # --- Fire detection while walking: interrupt to fight fire ---
-            fire = _find_nearest_fire(v, trees, grass_fires, villagers)
-            if fire is not None:
-                v.firefight_target = fire
-                fire_x = fire.x
-                v.target_x = fire_x
-                v.state = "firefighting"
-                v.task_timer = 0
-                _set_bubble(v, "firefighting")
-                # Fall through to firefighting handler below on next tick
+        elif v.state == "walking":
+            if _handle_walking(v, heights, world, structures, trees, grass_fires,
+                               villagers, path_wear, flowers, sim_tick):
                 continue
-            # --- Hunger speed penalty: critically hungry villagers move every other tick ---
-            if v.hunger >= HUNGER_CRITICAL and sim_tick % 2 != 0:
-                continue
-            if v.x < v.target_x: v.direction = 1; nx = v.x+1
-            elif v.x > v.target_x: v.direction = -1; nx = v.x-1
-            else: v.state = "idle"; v.idle_timer = 0; v.on_bridge = None; continue
-            nx = _clamp(nx,1,WORLD_WIDTH-2); nc = int(nx)
-            # Bridge-aware walking
-            bridge_at_nc = _find_bridge_at(nc, structures)
-            bridge_at_cur = _find_bridge_at(int(v.x), structures)
-            if bridge_at_nc is not None:
-                v.x = nx; v.y = bridge_at_nc.y; v.on_bridge = bridge_at_nc
-            elif bridge_at_cur is not None and world[heights[nc]][nc] != WATER:
-                v.x = nx; v.y = heights[nc]; v.on_bridge = None
-            else:
-                height_diff = abs(heights[int(v.x)] - heights[nc])
-                if height_diff > VILLAGER_MAX_CLIMB:
-                    v.state = "idle"; v.idle_timer = 0; continue
-                if world[heights[nc]][nc] == WATER:
-                    bridge = _find_bridge_at(nc, structures)
-                    if bridge is not None:
-                        v.x = nx; v.y = bridge.y; v.on_bridge = bridge
-                    elif v.has_boat or v.lumber >= BOAT_COST_LUMBER:
-                        # Boat travel: craft boat if needed, then ride across water
-                        if not v.has_boat:
-                            v.lumber -= BOAT_COST_LUMBER
-                            v.has_boat = True
-                            log_event(sim_tick, CAT_ECONOMY, f"{v.name} crafted a boat")
-                        # Create/activate boat and ride on water surface
-                        water_y = heights[nc]
-                        if v.boat is None:
-                            v.boat = Boat(v.x, water_y, v)
-                        v.boat.active = True
-                        v.boat.x = float(nx)
-                        v.boat.y = water_y
-                        v.x = nx; v.y = water_y; v.on_bridge = None
-                    else:
-                        v.state = "idle"; v.idle_timer = 0; continue
-                else:
-                    v.x = nx; v.y = heights[nc]; v.on_bridge = None
-                    # Deactivate boat when stepping onto land
-                    if v.boat is not None and v.boat.active:
-                        v.boat.active = False
-                    # Apply climbing pause for steep height differences (2-3 blocks)
-                    if height_diff >= 2:
-                        v.climb_timer = VILLAGER_CLIMB_SPEED
-            col = int(v.x)
-            if 0 <= col < WORLD_WIDTH: path_wear[col] = min(path_wear[col]+1, 100)
-            rm = [fi for fi,f in enumerate(flowers) if f.x == col and f.y == v.y]
-            for fi in reversed(rm): flowers.pop(fi)
-            if int(v.x) == int(v.target_x): v.state = "idle"; v.idle_timer = 0; v.on_bridge = None
         elif v.state == "firefighting":
-            # Validate target still exists and is on fire
-            target = v.firefight_target
-            if target is None:
-                v.state = "idle"; v.idle_timer = 0; continue
-            # Check if target is still a valid fire
-            target_still_burning = False
-            if isinstance(target, Tree):
-                target_still_burning = target.alive and target.on_fire
-            elif isinstance(target, GrassFire):
-                if grass_fires is not None:
-                    target_still_burning = target in grass_fires and target.timer > 0
-                else:
-                    target_still_burning = False
-            if not target_still_burning:
-                v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; continue
-            fire_x = target.x
-            dist = abs(int(v.x) - fire_x)
-            if dist <= 2:
-                # Adjacent to fire: extinguish
-                v.task_timer += 1
-                _set_bubble(v, "firefighting")
-                if v.task_timer >= FIREFIGHT_EXTINGUISH_TICKS:
-                    if isinstance(target, Tree):
-                        target.on_fire = False
-                        target.fire_timer = 0
-                    elif isinstance(target, GrassFire):
-                        if grass_fires is not None and target in grass_fires:
-                            grass_fires.remove(target)
-                    v.firefight_target = None; v.state = "idle"; v.idle_timer = 0
-            else:
-                # Walk toward the fire
-                v.target_x = fire_x
-                _set_bubble(v, "firefighting")
-                if v.x < v.target_x: v.direction = 1; nx = v.x+1
-                elif v.x > v.target_x: v.direction = -1; nx = v.x-1
-                else: continue
-                nx = _clamp(nx,1,WORLD_WIDTH-2); nc = int(nx)
-                # Bridge-aware walking (same as walking state)
-                bridge_at_nc = _find_bridge_at(nc, structures)
-                bridge_at_cur = _find_bridge_at(int(v.x), structures)
-                if bridge_at_nc is not None:
-                    v.x = nx; v.y = bridge_at_nc.y; v.on_bridge = bridge_at_nc
-                elif bridge_at_cur is not None and world[heights[nc]][nc] != WATER:
-                    v.x = nx; v.y = heights[nc]; v.on_bridge = None
-                else:
-                    height_diff = abs(heights[int(v.x)] - heights[nc])
-                    if height_diff > VILLAGER_MAX_CLIMB:
-                        v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; continue
-                    if world[heights[nc]][nc] == WATER:
-                        bridge = _find_bridge_at(nc, structures)
-                        if bridge is not None:
-                            v.x = nx; v.y = bridge.y; v.on_bridge = bridge
-                        else:
-                            # Can't cross water to reach fire; abandon
-                            v.firefight_target = None; v.state = "idle"; v.idle_timer = 0; continue
-                    else:
-                        v.x = nx; v.y = heights[nc]; v.on_bridge = None
-                        if height_diff >= 2:
-                            v.climb_timer = VILLAGER_CLIMB_SPEED
-                col = int(v.x)
-                if 0 <= col < WORLD_WIDTH: path_wear[col] = min(path_wear[col]+1, 100)
+            if _handle_firefighting(v, heights, world, structures, trees,
+                                    grass_fires, villagers, path_wear):
+                continue
         elif v.state == "chopping":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.target_tree is not None and v.target_tree.alive:
-                    v.target_tree.alive = False; v.target_tree.dead_timer = 0
-                    log_event(sim_tick, CAT_ECONOMY, f"{v.name} chopped a tree at x={v.target_tree.x}")
-                    lumber_gained = random.randint(2,3)
-                    for _ in range(lumber_gained):
-                        lx = _clamp(v.target_tree.x+random.randint(-1,1),0,WORLD_WIDTH-1)
-                        ly = heights[lx]-1
-                        if 0 <= ly < DISPLAY_HEIGHT: lumber_items.append(LumberItem(lx,ly))
-                    # Auto-collect one piece immediately so villager gets tangible reward
-                    v.lumber += 1
-                v.target_tree = None; v.state = "idle"; v.idle_timer = 0
+            _handle_chopping(v, trees, lumber_items, heights, sim_tick)
         elif v.state == "planting":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                col = int(v.x); tt = sum(1 for t in trees if t.alive)
-                v.lumber -= 1  # Planting costs 1 lumber
-                if tt < 36 and not any(abs(t.x-col)<8 for t in trees if t.alive) and 4<=col<=WORLD_WIDTH-5:
-                    if not _too_close_to_structure(col, structures):
-                        trees.append(Tree(col,heights[col],0.0,random.randint(5,9),random.randint(2,4),random.randint(0,1)))
-                v.state = "idle"; v.idle_timer = 0
+            _handle_planting(v, trees, heights, world, structures)
         elif v.state == "building":
-            v.task_timer -= 1
-            if v.building_target is not None and v.build_total_time > 0:
-                v.building_target.build_progress = _clamp(1.0-(v.task_timer/v.build_total_time),0.0,1.0)
-            if v.task_timer <= 0:
-                col = int(v.x)
-                if v.build_type == "campfire":
-                    if _min_campfire_distance(col,structures) >= CAMPFIRE_MIN_SPACING:
-                        structures.append(Structure("campfire",col,heights[col]-1,1,1))
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} built a campfire at x={col}")
-                elif v.build_type == "house_small":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False; v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a house at x={col}")
-                elif v.build_type == "mine":
-                    s = Structure("mine",col,heights[col],1,1); s.depth = 0; structures.append(s)
-                elif v.build_type == "bridge":
-                    gap_info = getattr(v, '_bridge_gap', None)
-                    if gap_info is not None:
-                        ws, we, wsy = gap_info
-                        bw = we - ws + 1
-                        by = wsy - 1
-                        bs = Structure("bridge", ws, by, bw, 1)
-                        structures.append(bs)
-                        v._bridge_gap = None
-                elif v.build_type == "watchtower":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a watchtower at x={col}")
-                elif v.build_type == "granary":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a granary at x={col}")
-                elif v.build_type == "well":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a well at x={col}")
-                elif v.build_type == "castle":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a CASTLE at x={col}")
-                elif v.build_type == "storage":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a storage at x={col}")
-                elif v.build_type == "bank":
-                    if v.building_target is not None:
-                        v.building_target.under_construction = False
-                        v.building_target.build_progress = 1.0
-                        log_event(sim_tick, CAT_BUILDING, f"{v.name} finished building a bank at x={col}")
-                elif v.build_type == "farm":
-                    # Farm was already created and added to farms list; mark complete
-                    if v.farm is not None:
-                        pass  # farm is live and ready
-                v.build_type = None; v.building_target = None; v.state = "idle"; v.idle_timer = 0
+            _handle_building(v, structures, heights, world, farms, sim_tick)
         elif v.state == "upgrading":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.upgrade_target is not None and v.upgrade_target.level < 3:
-                    ol = v.upgrade_target.level; nl = ol+1
-                    ow,oh = HOUSE_DIMENSIONS[ol]; nw,nh = HOUSE_DIMENSIONS[nl]
-                    v.upgrade_target.level = nl; v.upgrade_target.width = nw; v.upgrade_target.height = nh
-                    v.upgrade_target.x = max(0, v.upgrade_target.x-(nw-ow)//2)
-                    v.upgrade_target.y -= (nh-oh)
-                    tmpl = HOUSE_TEMPLATES[nl]
-                    for _row in tmpl['grid']:
-                        for _ci,_ch in enumerate(_row):
-                            if _ch == 'D': v.upgrade_target.door_x = v.upgrade_target.x+_ci; break
-                        else: continue
-                        break
-                v.upgrade_target = None; v.state = "idle"; v.idle_timer = 0
+            _handle_upgrading(v)
         elif v.state == "refueling":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.refuel_target is not None and v.lumber >= 1: v.refuel_target.fuel += CAMPFIRE_REFUEL_AMOUNT; v.lumber -= 1
-                v.refuel_target = None; v.state = "idle"; v.idle_timer = 0
+            _handle_refueling(v)
         elif v.state == "trading":
-            v.task_timer -= 1
-            if v.task_timer <= 0: v.state = "idle"; v.idle_timer = 0
+            _handle_trading_state(v)
         elif v.state == "collecting":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                col = int(v.x); bd = 999; bi = -1
-                for li,it in enumerate(lumber_items):
-                    d = abs(it.x-col)
-                    if d < bd and d <= 2: bd = d; bi = li
-                if bi >= 0: lumber_items.pop(bi); v.lumber += 1
-                v.state = "idle"; v.idle_timer = 0
+            _handle_collecting(v, lumber_items)
         elif v.state == "resting":
-            # Urgent: if no campfires and has lumber, wake up to build one
-            if campfire_count == 0 and v.lumber >= 2:
-                v.state = "idle"; v.idle_timer = 0
-            elif ambient > 0.4 and not is_bad_weather:
-                v.state = "idle"; v.idle_timer = 0
+            _handle_resting(v, campfire_count, ambient, is_bad_weather)
         elif v.state == "flattening":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.flatten_target is not None: _flatten_terrain(v.flatten_target, heights, world)
-                v.flatten_target = None; v.state = "idle"; v.idle_timer = 0
+            _handle_flattening(v, heights, world)
         elif v.state == "mining":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.mine_target is not None and v.mine_target.depth < v.mine_target.max_depth:
-                    m = v.mine_target; m.depth += 1
-                    my = m.y+m.depth
-                    if 0<=my<DISPLAY_HEIGHT and 0<=m.x<WORLD_WIDTH: world[my][m.x] = AIR
-                    if m.depth % 2 == 0:
-                        v.stone += 1
-                        # Gold mining chance
-                        if random.random() < GOLD_MINE_CHANCE:
-                            v.gold += 1
-                            log_event(sim_tick, CAT_ECONOMY, f"{v.name} found gold while mining!")
-                    if m.depth < m.max_depth: v.task_timer = MINE_DIG_FRAMES
-                    else:
-                        for cy in range(DISPLAY_HEIGHT):
-                            if world[cy][m.x] != AIR:
-                                heights[m.x] = cy
-                                if world[cy][m.x] not in (WATER,GRASS): world[cy][m.x] = GRASS
-                                break
-                        v.mine_target = None; v.state = "idle"; v.idle_timer = 0
-                else: v.mine_target = None; v.state = "idle"; v.idle_timer = 0
+            _handle_mining(v, world, heights, sim_tick)
         elif v.state == "farming_plant":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.farm is not None:
-                    v.farm.plant_all_empty()
-                v.state = "idle"; v.idle_timer = 0
+            _handle_farming_plant(v)
         elif v.state == "farming_harvest":
-            v.task_timer -= 1
-            if v.task_timer <= 0:
-                if v.farm is not None:
-                    count = v.farm.harvest_all_mature()
-                    v.food += count * CROP_HARVEST_YIELD
-                v.state = "idle"; v.idle_timer = 0
+            _handle_farming_harvest(v)
         elif v.state == "eating":
-            v.task_timer -= 1
-            _set_bubble(v, "eating")
-            if v.task_timer <= 0:
-                if v.food >= 1:
-                    v.food -= 1
-                    v.hunger = max(0.0, v.hunger - FOOD_SATIATION)
-                v.state = "idle"; v.idle_timer = 0
+            _handle_eating(v)
         elif v.state == "hunting":
-            target = v.hunt_target
-            v.task_timer += 1
-            if target is None or not target.alive or v.task_timer > HUNTING_CHASE_FRAMES:
-                v.hunt_target = None; v.state = "idle"; v.idle_timer = 0; continue
-            _set_bubble(v, "hunting")
-            dist = abs(int(v.x) - int(round(target.x)))
-            if v.has_bow and dist <= BOW_RANGE:
-                # Bow hunting: stand still and shoot after aiming
-                v.direction = 1 if target.x > v.x else -1
-                if v.task_timer >= BOW_SHOOT_FRAMES:
-                    target.alive = False
-                    v.food += BOW_HUNTING_FOOD
-                    log_event(sim_tick, CAT_COMBAT, f"{v.name} shot a {target.animal_type} with bow for {BOW_HUNTING_FOOD} food")
-                    v.hunt_target = None; v.state = "idle"; v.idle_timer = 0
-                # else: still aiming, stay put
-            elif dist <= HUNTING_CATCH_RADIUS:
-                # Melee catch (no bow, very close)
-                target.alive = False
-                v.food += HUNTING_KILL_FOOD
-                log_event(sim_tick, CAT_COMBAT, f"{v.name} hunted a {target.animal_type} for {HUNTING_KILL_FOOD} food")
-                v.hunt_target = None; v.state = "idle"; v.idle_timer = 0
-            else:
-                # Chase: move toward animal
-                if v.x < target.x: v.direction = 1; v.x += 1
-                elif v.x > target.x: v.direction = -1; v.x -= 1
-                v.x = _clamp(v.x, 1, WORLD_WIDTH - 2)
-                nc = int(v.x)
-                v.y = heights[nc]
+            if _handle_hunting(v, heights, world, sim_tick):
+                continue
         elif v.state == "idle":
-            if v.idle_timer < 20: continue
-            # Try to claim an unowned house first if homeless
-            if v.home is None:
-                _claim_unowned_house(v, structures)
-            # --- Fire detection: high priority interrupt from idle ---
-            fire = _find_nearest_fire(v, trees, grass_fires, villagers)
-            if fire is not None:
-                v.firefight_target = fire
-                fire_x = fire.x
-                v.target_x = fire_x
-                v.task_timer = 0
-                _set_bubble(v, "firefighting")
-                v.state = "firefighting"
+            if _handle_idle(v, heights, world, trees, structures, lumber_items,
+                            flowers, path_wear, villagers, farms, animals,
+                            sim_tick, weather, grass_fires, is_night,
+                            is_bad_weather, ambient, pop, campfire_count,
+                            mine_count, bridge_count, well_count, castle_count,
+                            storage_count, bank_count, watchtower_exists,
+                            granary_exists, storage):
                 continue
-            # --- Hunger: eat food when hungry (high priority after fire) ---
-            if v.hunger >= HUNGER_EAT_THRESHOLD and v.food >= 1:
-                v.state = "eating"
-                v.task_timer = EATING_FRAMES
-                _set_bubble(v, "eating")
-                continue
-            # --- Hunger: critically hungry with no food -- rush to farm ---
-            if v.hunger >= HUNGER_CRITICAL and v.food == 0:
-                # Prioritize harvesting mature crops
-                if v.farm is not None and v.farm.has_mature_crops():
-                    v.target_x = v.farm.x
-                    v.task_timer = FARM_HARVEST_FRAMES
-                    _set_bubble(v, "farming")
-                    if abs(int(v.x) - v.farm.x) <= 2:
-                        v.state = "farming_harvest"
-                    else:
-                        v.state = "walking"
-                    continue
-                # Prioritize planting if farm has empty slots
-                if v.farm is not None and v.farm.has_empty_slots():
-                    v.target_x = v.farm.x
-                    v.task_timer = FARM_PLANT_FRAMES
-                    _set_bubble(v, "farming")
-                    if abs(int(v.x) - v.farm.x) <= 2:
-                        v.state = "farming_plant"
-                    else:
-                        v.state = "walking"
-                    continue
-            # --- Night behavior: return home unless tasked ---
-            if is_night:
-                # Urgent: build campfire if none exist
-                if campfire_count == 0 and v.lumber >= 2:
-                    site = _find_campfire_site(structures,trees,heights,world)
-                    if site is not None:
-                        v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
-                        _set_bubble(v, "building")
-                        v.state = "building" if abs(int(v.x)-site)<=1 else "walking"; continue
-                # Go home and rest
-                if v.home is not None:
-                    if abs(int(v.x)-v.home.x) <= 1:
-                        v.state = "resting"; continue
-                    else:
-                        v.target_x = v.home.x; v.state = "walking"; continue
-                else:
-                    # No home: walk toward nearest campfire and idle there
-                    cf_x = _nearest_campfire_x(int(v.x), structures)
-                    if cf_x is not None:
-                        if abs(int(v.x)-cf_x) <= 2:
-                            v.state = "resting"; continue
-                        else:
-                            v.target_x = cf_x; v.state = "walking"; continue
-                    # No campfire either; just idle in place
-                    continue
-            if is_bad_weather and v.home is not None:
-                v.target_x = v.home.x
-                v.state = "resting" if abs(int(v.x)-v.home.x)<=1 else "walking"; continue
-            if campfire_count == 0 and v.lumber >= 2:
-                site = _find_campfire_site(structures,trees,heights,world)
-                if site is not None:
-                    v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
-                    _set_bubble(v, "building")
-                    v.state = "building" if abs(int(v.x)-site)<=1 else "walking"; continue
-            if is_bad_weather and v.home is None:
-                # Homeless in rain: fall through to goal tree so rain-boosted
-                # build_house priority motivates them to build shelter
-                pass  # continue to goal-based decision tree below
-            elif is_bad_weather and v.home is not None:
-                # Home-owning villagers with nothing urgent shelter at home in bad weather
-                # (This branch is dead -- already handled above at line 875. Keep for safety.)
-                v.target_x = v.home.x
-                v.state = "resting" if abs(int(v.x)-v.home.x)<=1 else "walking"; continue
-            # ===================================================================
-            # GOAL-BASED DECISION TREE
-            # Evaluates all possible goals, scores them, picks the best one.
-            # If the goal needs resources the villager doesn't have, the system
-            # chains to a prerequisite sub-goal (e.g. gather_lumber).
-            # ===================================================================
-            ctx = {
-                "structures": structures, "trees": trees,
-                "heights": heights, "world": world,
-                "pop": pop, "farms": farms,
-                "campfire_count": campfire_count,
-                "mine_count": mine_count,
-                "bridge_count": bridge_count,
-                "well_count": well_count,
-                "castle_count": castle_count,
-                "storage_count": storage_count,
-                "bank_count": bank_count,
-                "watchtower_exists": watchtower_exists,
-                "granary_exists": granary_exists,
-                "lumber_items": lumber_items,
-                "villagers": villagers,
-                "animals": animals,
-                "weather": weather,
-            }
-            # Re-evaluate goals periodically or when current goal is None
-            if v.current_goal is None or v.goal_timer >= GOAL_EVAL_INTERVAL:
-                ranked = _evaluate_goals(v, ctx)
-                if ranked:
-                    v.current_goal = ranked[0][1]
-                    v.goal_timer = 0
-            v.goal_timer += 1
-            goal = v.current_goal if v.current_goal else "explore"
-
-            # --- Prerequisite chaining: if goal needs resources, redirect ---
-            if not _has_prereqs(v, goal):
-                sub = _resolve_prereq_action(v, goal, ctx)
-                if sub is not None:
-                    goal = sub
-
-            # --- Execute the chosen goal ---
-            _executed = False
-
-            if goal == "build_campfire":
-                if v.lumber >= 2:
-                    site = _find_campfire_site(structures, trees, heights, world)
-                    if site is not None:
-                        v.target_x = site; v.build_type = "campfire"; v.lumber -= 2; v.task_timer = 60
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - site) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_house":
-                if v.lumber >= 4 and v.home is None:
-                    hw, hh = HOUSE_DIMENSIONS[1]
-                    site = _find_build_site(structures, trees, heights, world, hw, hh)
-                    if site is not None:
-                        sx, sy = site; s = Structure("house_small", sx, sy, hw, hh)
-                        _level_foundation(sx, hw, heights, world, v, structures)
-                        sy = heights[sx] - hh; s.y = sy
-                        s.under_construction = True; s.build_progress = 0.0; s.owner = v
-                        if v.stone >= 2: s.stone_built = True; v.stone -= 2
-                        for _r in HOUSE_TEMPLATES[1]['grid']:
-                            for _ci, _ch in enumerate(_r):
-                                if _ch == 'D': s.door_x = sx + _ci; break
-                            else: continue
-                            break
-                        v.home = s; structures.append(s); v.target_x = sx; v.build_type = "house_small"
-                        v.building_target = s; v.lumber -= 4; v.build_total_time = 120; v.task_timer = 120
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-                    else:
-                        steep = _find_steep_spot(heights, world, near_x=int(v.x), radius=15)
-                        if steep is not None:
-                            v.flatten_target = steep; v.target_x = steep; v.task_timer = FLATTEN_DURATION
-                            v.state = "flattening" if abs(int(v.x) - steep) <= 1 else "walking"; _executed = True
-
-            elif goal == "upgrade_house":
-                if v.home is not None and v.home.level < 3 and v.lumber >= 6 and v.stone >= 2:
-                    v.upgrade_target = v.home; v.target_x = v.home.x
-                    v.lumber -= 6; v.stone -= 2; v.task_timer = 120
-                    _set_bubble(v, "building"); v.current_goal = None
-                    v.state = "upgrading" if abs(int(v.x) - v.home.x) <= 1 else "walking"; _executed = True
-
-            elif goal == "get_food":
-                # Chain: harvest mature -> plant empty -> build farm
-                if v.farm is not None and v.farm.has_mature_crops():
-                    v.target_x = v.farm.x; v.task_timer = FARM_HARVEST_FRAMES
-                    _set_bubble(v, "farming")
-                    v.state = "farming_harvest" if abs(int(v.x) - v.farm.x) <= 2 else "walking"; _executed = True
-                elif v.farm is not None and v.farm.has_empty_slots():
-                    v.target_x = v.farm.x; v.task_timer = FARM_PLANT_FRAMES
-                    _set_bubble(v, "farming")
-                    v.state = "farming_plant" if abs(int(v.x) - v.farm.x) <= 2 else "walking"; _executed = True
-                elif (v.home is not None and pop >= FARM_POPULATION_THRESHOLD
-                        and v.lumber >= FARM_COST_LUMBER
-                        and _count_villager_farms(v, farms) < MAX_FARMS_PER_HOUSE):
-                    farm_x = _find_farm_site(v, farms, heights, world, structures, trees)
-                    if farm_x is not None:
-                        farm_y = heights[farm_x]
-                        new_farm = Farm(farm_x, farm_y, FARM_WIDTH)
-                        new_farm.owner = v; v.farm = new_farm; farms.append(new_farm)
-                        v.lumber -= FARM_COST_LUMBER; v.target_x = farm_x
-                        v.build_type = "farm"; v.task_timer = FARM_BUILD_FRAMES
-                        v.build_total_time = FARM_BUILD_FRAMES; _set_bubble(v, "farming")
-                        v.state = "building" if abs(int(v.x) - farm_x) <= 1 else "walking"; _executed = True
-
-            elif goal == "farm_harvest":
-                if v.farm is not None and v.farm.has_mature_crops():
-                    v.target_x = v.farm.x; v.task_timer = FARM_HARVEST_FRAMES
-                    _set_bubble(v, "farming"); v.current_goal = None
-                    v.state = "farming_harvest" if abs(int(v.x) - v.farm.x) <= 2 else "walking"; _executed = True
-
-            elif goal == "farm_plant":
-                if v.farm is not None and v.farm.has_empty_slots():
-                    v.target_x = v.farm.x; v.task_timer = FARM_PLANT_FRAMES
-                    _set_bubble(v, "farming"); v.current_goal = None
-                    v.state = "farming_plant" if abs(int(v.x) - v.farm.x) <= 2 else "walking"; _executed = True
-
-            elif goal == "build_farm":
-                if (v.home is not None and v.lumber >= FARM_COST_LUMBER
-                        and _count_villager_farms(v, farms) < MAX_FARMS_PER_HOUSE):
-                    farm_x = _find_farm_site(v, farms, heights, world, structures, trees)
-                    if farm_x is not None:
-                        farm_y = heights[farm_x]
-                        new_farm = Farm(farm_x, farm_y, FARM_WIDTH)
-                        new_farm.owner = v; v.farm = new_farm; farms.append(new_farm)
-                        v.lumber -= FARM_COST_LUMBER; v.target_x = farm_x
-                        v.build_type = "farm"; v.task_timer = FARM_BUILD_FRAMES
-                        v.build_total_time = FARM_BUILD_FRAMES; _set_bubble(v, "farming")
-                        v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - farm_x) <= 1 else "walking"; _executed = True
-
-            elif goal == "refuel_campfire":
-                if v.lumber >= 1:
-                    for s in structures:
-                        if s.type == "campfire" and s.fuel < CAMPFIRE_LOW_FUEL_THRESHOLD:
-                            v.refuel_target = s; v.target_x = s.x; v.task_timer = 20
-                            v.current_goal = None
-                            v.state = "refueling" if abs(int(v.x) - s.x) <= 1 else "walking"; _executed = True; break
-
-            elif goal == "build_granary":
-                if v.lumber >= GRANARY_COST_LUMBER:
-                    site = _find_build_site(structures, trees, heights, world, GRANARY_WIDTH, GRANARY_HEIGHT)
-                    if site is not None:
-                        sx, sy = site
-                        _level_foundation(sx, GRANARY_WIDTH, heights, world, v, structures)
-                        sy = heights[sx] - GRANARY_HEIGHT
-                        s = Structure("granary", sx, sy, GRANARY_WIDTH, GRANARY_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = sx; v.build_type = "granary"
-                        v.building_target = s; v.lumber -= GRANARY_COST_LUMBER
-                        v.build_total_time = GRANARY_BUILD_FRAMES; v.task_timer = GRANARY_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_watchtower":
-                if v.lumber >= WATCHTOWER_COST_LUMBER and v.stone >= WATCHTOWER_COST_STONE:
-                    site = _find_build_site(structures, trees, heights, world, WATCHTOWER_WIDTH, WATCHTOWER_HEIGHT)
-                    if site is not None:
-                        sx, sy = site
-                        _level_foundation(sx, WATCHTOWER_WIDTH, heights, world, v, structures)
-                        sy = heights[sx] - WATCHTOWER_HEIGHT
-                        s = Structure("watchtower", sx, sy, WATCHTOWER_WIDTH, WATCHTOWER_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = sx; v.build_type = "watchtower"
-                        v.building_target = s; v.lumber -= WATCHTOWER_COST_LUMBER; v.stone -= WATCHTOWER_COST_STONE
-                        v.build_total_time = WATCHTOWER_BUILD_FRAMES; v.task_timer = WATCHTOWER_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_mine":
-                if v.lumber >= 2:
-                    mc = _find_mine_site(structures, trees, heights, world, int(v.x))
-                    if mc is not None:
-                        v.target_x = mc; v.build_type = "mine"; v.lumber -= 2; v.task_timer = MINE_DIG_FRAMES
-                        _set_bubble(v, "mining"); v.current_goal = None
-                        v.state = "mining" if abs(int(v.x) - mc) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_bridge":
-                if v.lumber >= 2:
-                    col = int(v.x)
-                    for bd in (1, -1):
-                        nc = col + bd
-                        if 0 <= nc < WORLD_WIDTH and world[heights[nc]][nc] == WATER:
-                            gap = _find_water_gap(world, heights, nc, bd)
-                            if gap is not None:
-                                ws, we, wsy = gap; gw = we - ws + 1
-                                cost = 2 if gw <= 6 else 3
-                                if v.lumber >= cost:
-                                    v.lumber -= cost; v._bridge_gap = gap
-                                    v.target_x = ws; v.build_type = "bridge"
-                                    v.build_total_time = BRIDGE_BUILD_FRAMES; v.task_timer = BRIDGE_BUILD_FRAMES
-                                    _set_bubble(v, "building"); v.current_goal = None
-                                    v.state = "building" if abs(col - ws) <= 1 else "walking"; _executed = True; break
-
-            elif goal == "build_well":
-                if v.lumber >= WELL_COST_LUMBER and v.stone >= WELL_COST_STONE:
-                    wc = _find_well_site(structures, trees, heights, world, int(v.x))
-                    if wc is not None:
-                        v.lumber -= WELL_COST_LUMBER; v.stone -= WELL_COST_STONE
-                        s = Structure("well", wc, heights[wc] - WELL_HEIGHT, WELL_WIDTH, WELL_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = wc; v.build_type = "well"
-                        v.building_target = s
-                        v.build_total_time = WELL_BUILD_FRAMES; v.task_timer = WELL_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - wc) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_castle":
-                if v.lumber >= CASTLE_COST_LUMBER and v.stone >= CASTLE_COST_STONE:
-                    site = _find_build_site(structures, trees, heights, world, CASTLE_WIDTH, CASTLE_HEIGHT)
-                    if site is not None:
-                        sx, sy = site
-                        _level_foundation(sx, CASTLE_WIDTH, heights, world, v, structures)
-                        sy = heights[sx] - CASTLE_HEIGHT
-                        s = Structure("castle", sx, sy, CASTLE_WIDTH, CASTLE_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = sx; v.build_type = "castle"
-                        v.building_target = s
-                        v.lumber -= CASTLE_COST_LUMBER; v.stone -= CASTLE_COST_STONE
-                        v.build_total_time = CASTLE_BUILD_FRAMES; v.task_timer = CASTLE_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-
-            elif goal == "gather_lumber":
-                # Prefer collecting free items, then chopping
-                li_near = [li for li, it in enumerate(lumber_items) if abs(it.x - int(v.x)) < 15]
-                if li_near:
-                    bi = min(li_near, key=lambda i: abs(lumber_items[i].x - int(v.x)))
-                    v.target_x = lumber_items[bi].x; v.task_timer = 10
-                    v.state = "collecting" if abs(int(v.x) - lumber_items[bi].x) <= 1 else "walking"; _executed = True
-                else:
-                    mt = [t for t in trees if t.alive and t.growth >= 1.0 and not t.dying and not t.on_fire and abs(t.x - int(v.x)) < 30]
-                    if mt and (v.lumber == 0 or random.random() >= VILLAGER_EXPLORE_CHANCE):
-                        tt = min(mt, key=lambda t: abs(t.x - int(v.x)))
-                        v.target_tree = tt; v.target_x = tt.x - 1 if tt.x > int(v.x) else tt.x + 1
-                        v.task_timer = 60; _set_bubble(v, "chopping")
-                        v.state = "chopping" if abs(int(v.x) - tt.x) <= 1 else "walking"; _executed = True
-
-            elif goal == "gather_stone":
-                for s in structures:
-                    if s.type == "mine" and s.depth < s.max_depth:
-                        v.mine_target = s; v.target_x = s.x; v.task_timer = MINE_DIG_FRAMES
-                        _set_bubble(v, "mining")
-                        v.state = "mining" if abs(int(v.x) - s.x) <= 1 else "walking"; _executed = True; break
-
-            elif goal == "have_baby":
-                # Reproduction goal: walk home and idle there
-                if (v.home is not None and v.age >= REPRODUCTION_MIN_AGE
-                        and v.age <= REPRODUCTION_MAX_AGE and v.children_born < MAX_CHILDREN):
-                    if abs(int(v.x) - v.home.x) <= 1:
-                        # At home -- idle; reproduction is checked via _handle_reproduction
-                        v.current_goal = None
-                        _executed = True
-                    else:
-                        v.target_x = v.home.x
-                        v.state = "walking"; _executed = True
-                        # Don't clear goal -- keep walking home
-
-            elif goal == "hunt":
-                # Auto-craft bow if villager has lumber and doesn't have one
-                if not v.has_bow and v.lumber >= BOW_COST_LUMBER:
-                    v.lumber -= BOW_COST_LUMBER
-                    v.has_bow = True
-                    log_event(sim_tick, CAT_ECONOMY, f"{v.name} crafted a bow (lumber: {v.lumber})")
-                # Find nearest alive animal and hunt it
-                vx = int(v.x)
-                best_animal = None
-                best_d = 999
-                search_range = 20 if v.has_bow else 20
-                for a in animals:
-                    if a.alive:
-                        d = abs(int(round(a.x)) - vx)
-                        if d < best_d and d < search_range:
-                            best_d = d
-                            best_animal = a
-                if best_animal is not None:
-                    v.hunt_target = best_animal
-                    v.task_timer = 0
-                    v.state = "hunting"
-                    v.current_goal = None
-                    _set_bubble(v, "hunting")
-                    _executed = True
-
-            elif goal == "share_food":
-                # Find nearest hungry villager within range and give 1 food
-                vx = int(v.x)
-                best_target = None
-                best_dist = 999
-                for ov in villagers:
-                    if ov is v: continue
-                    if ov.hunger >= HUNGER_THRESHOLD and ov.food == 0:
-                        d = abs(int(ov.x) - vx)
-                        if d < best_dist:
-                            best_dist = d
-                            best_target = ov
-                if best_target is not None:
-                    if best_dist <= 2:
-                        # Adjacent: give food
-                        v.food -= 1
-                        best_target.food += 1
-                        _set_bubble(v, "trading"); _set_bubble(best_target, "trading")
-                        log_event(sim_tick, CAT_ECONOMY, f"{v.name} shared 1 food with {best_target.name}")
-                        v.current_goal = None; _executed = True
-                    else:
-                        # Walk toward hungry villager
-                        v.target_x = int(best_target.x)
-                        v.state = "walking"; v.current_goal = None; _executed = True
-
-            elif goal == "plant_tree":
-                if v.lumber >= 1:
-                    col = int(v.x); nt = sum(1 for t in trees if t.alive and abs(t.x - col) < 10)
-                    if nt < 2:
-                        v.task_timer = 30; _set_bubble(v, "planting"); v.current_goal = None
-                        v.state = "planting"; _executed = True
-
-            elif goal == "build_storage":
-                if v.lumber >= STORAGE_COST_LUMBER and v.stone >= STORAGE_COST_STONE:
-                    site = _find_storage_site(structures, trees, heights, world, int(v.x))
-                    if site is not None:
-                        sx, sy = site
-                        _level_foundation(sx, STORAGE_WIDTH, heights, world, v, structures)
-                        sy = heights[sx] - STORAGE_HEIGHT
-                        s = Structure("storage", sx, sy, STORAGE_WIDTH, STORAGE_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = sx; v.build_type = "storage"
-                        v.building_target = s
-                        v.lumber -= STORAGE_COST_LUMBER; v.stone -= STORAGE_COST_STONE
-                        v.build_total_time = STORAGE_BUILD_FRAMES; v.task_timer = STORAGE_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-
-            elif goal == "build_bank":
-                if v.lumber >= BANK_COST_LUMBER and v.stone >= BANK_COST_STONE:
-                    site = _find_bank_site(structures, trees, heights, world, int(v.x))
-                    if site is not None:
-                        sx, sy = site
-                        _level_foundation(sx, BANK_WIDTH, heights, world, v, structures)
-                        sy = heights[sx] - BANK_HEIGHT
-                        s = Structure("bank", sx, sy, BANK_WIDTH, BANK_HEIGHT)
-                        s.under_construction = True; s.build_progress = 0.0
-                        structures.append(s); v.target_x = sx; v.build_type = "bank"
-                        v.building_target = s
-                        v.lumber -= BANK_COST_LUMBER; v.stone -= BANK_COST_STONE
-                        v.build_total_time = BANK_BUILD_FRAMES; v.task_timer = BANK_BUILD_FRAMES
-                        _set_bubble(v, "building"); v.current_goal = None
-                        v.state = "building" if abs(int(v.x) - sx) <= 1 else "walking"; _executed = True
-
-            elif goal == "withdraw_storage":
-                if storage is not None:
-                    if abs(int(v.x) - storage.x) <= 2:
-                        # At storage: withdraw what we need
-                        if v.lumber == 0 and storage.stored_lumber > 0:
-                            amt = min(2, storage.stored_lumber)
-                            v.lumber += amt; storage.stored_lumber -= amt
-                        if v.food == 0 and storage.stored_food > 0:
-                            amt = min(2, storage.stored_food)
-                            v.food += amt; storage.stored_food -= amt
-                        if v.stone == 0 and storage.stored_stone > 0:
-                            amt = min(2, storage.stored_stone)
-                            v.stone += amt; storage.stored_stone -= amt
-                        v.current_goal = None; _executed = True
-                    else:
-                        v.target_x = storage.x
-                        v.state = "walking"; v.current_goal = None; _executed = True
-
-            elif goal == "deposit_storage":
-                if storage is not None:
-                    if abs(int(v.x) - storage.x) <= 2:
-                        # At storage: deposit excess
-                        if v.lumber > STORAGE_DEPOSIT_THRESHOLD_LUMBER and storage.stored_lumber < STORAGE_MAX_LUMBER:
-                            amt = min(v.lumber - STORAGE_DEPOSIT_THRESHOLD_LUMBER, STORAGE_MAX_LUMBER - storage.stored_lumber)
-                            v.lumber -= amt; storage.stored_lumber += amt
-                        if v.stone > STORAGE_DEPOSIT_THRESHOLD_STONE and storage.stored_stone < STORAGE_MAX_STONE:
-                            amt = min(v.stone - STORAGE_DEPOSIT_THRESHOLD_STONE, STORAGE_MAX_STONE - storage.stored_stone)
-                            v.stone -= amt; storage.stored_stone += amt
-                        if v.food > STORAGE_DEPOSIT_THRESHOLD_FOOD and storage.stored_food < STORAGE_MAX_FOOD:
-                            amt = min(v.food - STORAGE_DEPOSIT_THRESHOLD_FOOD, STORAGE_MAX_FOOD - storage.stored_food)
-                            v.food -= amt; storage.stored_food += amt
-                        # Deposit gold to bank if available
-                        bank = _get_bank(structures)
-                        if bank is not None and v.gold > 0:
-                            bank.stored_gold += v.gold; v.gold = 0
-                        v.current_goal = None; _executed = True
-                    else:
-                        v.target_x = storage.x
-                        v.state = "walking"; v.current_goal = None; _executed = True
-
-            elif goal == "flatten_terrain":
-                steep = _find_steep_spot(heights, world, near_x=int(v.x), radius=12)
-                if steep is not None and random.random() < 0.4:
-                    v.flatten_target = steep; v.target_x = steep; v.task_timer = FLATTEN_DURATION
-                    v.current_goal = None
-                    v.state = "flattening" if abs(int(v.x) - steep) <= 1 else "walking"; _executed = True
-                else:
-                    extreme = _find_extreme_terrain_near_home(v, heights, world)
-                    if extreme is not None:
-                        v.flatten_target = extreme; v.target_x = extreme; v.task_timer = FLATTEN_DURATION
-                        v.current_goal = None
-                        v.state = "flattening" if abs(int(v.x) - extreme) <= 1 else "walking"; _executed = True
-
-            # --- Fallback: explore if goal couldn't be executed ---
-            if not _executed:
-                v.current_goal = None
-                col = int(v.x)
-                v.target_x = _clamp(col + random.randint(-12, 12), 2, WORLD_WIDTH - 3)
-                v.state = "walking"
 
 def _maybe_spawn_villager(villagers, heights, world, structures, trees, sim_tick):
     pop_cap = _compute_population_cap(structures)

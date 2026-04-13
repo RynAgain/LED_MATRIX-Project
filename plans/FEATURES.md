@@ -250,3 +250,105 @@
 - [x] Code coverage reporting (pytest-cov integration)
 - [ ] Type hints across all Python modules -- deferred (large scope, low urgency)
 - [x] Pre-commit hooks (linting, formatting)
+
+---
+
+## Code Review Action Items
+
+> Findings from the full-project code review, organized by severity.
+> Each item is actionable with specific file references.
+
+### TIER 1: CRITICAL / SECURITY
+
+- [x] **[CRITICAL] WiFi credentials committed to git** -- `config/wifi.json` contains real SSIDs and passwords in version control. Add `config/wifi.json` to `.gitignore`, ship `config/wifi.json.example` with placeholders, and clean up the 20 duplicate TestNetwork entries.
+- [x] **[CRITICAL] WiFi password exposed on command line** -- `src/wifi/manager.py:155` passes WiFi passwords as CLI arguments visible in `ps aux`. Use `nmcli` connection profiles or pass credentials via stdin.
+- [x] **[CRITICAL] TOCTOU race in command file handling** -- `src/main.py:166-178` and the `_command_watcher` thread compete for the same command file without synchronization. Use `_pending_lock` to gate all command file I/O.
+- [x] **[CRITICAL] `NameError` in time_display binary clock** -- `src/display/time_display.py:462` references `ImageFont` which is never imported. Add `from PIL import ImageFont` to module imports.
+- [x] **[CRITICAL] Broken HSV colors in binary clock** -- `src/display/time_display.py:460,480` divides hue by 360 before passing to `_hsv_to_rgb()` which already expects 0-360 range. Remove the `/ 360.0` division.
+- [x] **[CRITICAL] Module-level network thread on import** -- `src/display/sp500_heatmap.py:298` starts a background HTTP thread at import time. Move the thread start inside `run()`.
+- [x] **[CRITICAL] Unauthenticated WebSocket endpoint** -- `src/web/app.py:866` `/ws/status` has no session validation. Add `if "user" not in session: ws.close(); return` at handler start.
+- [x] **[CRITICAL] `_update_villagers()` is 1370 lines** -- `src/display/living_world/villager_ai.py:494-1367` is unmaintainable. Refactor into per-state handler functions with a dispatcher.
+
+### TIER 2: HIGH
+
+- [x] **[HIGH] Pin yt-dlp to a specific release** -- `requirements.txt:22` pulls master HEAD. Pin to a specific release tag.
+- [x] **[HIGH] Fix git stash pop after failed pull** -- `src/updater/auto_update.py:202-226` pops stash even when pull fails, risking merge conflicts. Only pop stash on successful pull.
+- [x] **[HIGH] Weak SHA-256 password hashing** -- `src/web/app.py:30` uses SHA-256 without key stretching. Replace with `hashlib.pbkdf2_hmac` with >=600k iterations or bcrypt.
+- [x] **[HIGH] Hardcoded default credentials** -- `src/web/app.py:117` falls back to `admin/ledmatrix`. Force password change on first boot or generate random password.
+- [x] **[HIGH] XSS via onclick handlers in templates** -- `src/web/templates/youtube.html:24,69` and `wifi.html:25` inject server data into JS onclick attributes. Use `data-*` attributes with `|tojson` filter instead.
+- [x] **[HIGH] Silent `write_status()` failure** -- `src/main.py:88-91` bare `except: pass` swallows all errors. Log at debug level.
+- [x] **[HIGH] SSID parsing breaks on colons** -- `src/wifi/manager.py:109,129,94` splits on `:` which is valid in SSIDs. Use `nmcli -t --escape yes` mode.
+- [x] **[HIGH] Simulator DrawText renders blocks instead of text** -- `src/simulator/graphics.py:55-77` renders solid rectangles for all characters. Parse BDF fonts or use the bitmap font from `boot_screen.py`.
+- [x] **[HIGH] Simulator Font.LoadFont ignores font file** -- `src/simulator/graphics.py:31-36` stores path but never reads it. At minimum infer metrics from filename.
+- [x] **[HIGH] Simulator brightness is a no-op** -- `src/simulator/matrix.py:293-294` ignores brightness setting, making night-mode untestable. Apply as multiplier in render.
+- [x] **[HIGH] Simulator singleton never cleaned up** -- `src/simulator/matrix.py:86-91` `_SimulatorWindow._instance` persists forever. Add `shutdown()` classmethod with `atexit` registration.
+- [x] **[HIGH] Dev.py logs default password** -- `dev.py:63` logs `"Login: admin / ledmatrix"` to file. Remove password from log.
+- [x] **[HIGH] Missing `should_stop()` in game sleep loops** -- Add `should_stop()` checks to blocking sleeps in: `billiards.py:387`, `breakout.py:360-377`, `snake.py:252-270`, `pong.py:319,336`, `tic_tac_toe.py:228-274`, `tanks.py:288`, `maze_3d.py:456`, `stock_ticker.py:129`. Create shared `_interruptible_sleep()` helper in `_shared.py`.
+- [x] **[HIGH] Socket leak in system_stats** -- `src/display/system_stats.py:189-196` socket not wrapped in `try/finally` or `with`. Use context manager.
+- [x] **[HIGH] Race condition on `_bg_fetching` flag** -- `src/display/sp500_heatmap.py:257-289` reads/writes without lock. Protect with `_bg_lock`.
+- [x] **[HIGH] Atomic file writes for living world** -- `src/display/living_world/persistence.py:97` and `world_api.py:83` write directly to file. Use temp file + `os.replace()`.
+- [x] **[HIGH] Valley cols cache never invalidated** -- `src/display/living_world/terrain.py:171-194` cache is useless because `_invalidate_valley_cols_cache()` is never called and cache_gen never passed. Fix caching or remove it.
+- [x] **[HIGH] Dead `_reset_requested` handler** -- `src/display/living_world/simulation.py:157` sets attribute never checked. Implement the reset handler or remove the command.
+- [x] **[HIGH] Villager gets lumber from dead tree** -- `src/display/living_world/villager_ai.py:676-690` awards lumber even when target tree was already chopped by another villager. Check `target_tree.alive` before awarding.
+- [x] **[HIGH] Hunting movement bypasses terrain checks** -- `src/display/living_world/villager_ai.py:870-874` allows walking through water/cliffs during chase. Apply same terrain checks as normal walking.
+- [x] **[HIGH] `.coveragerc` excludes `living_world` and `simulator`** -- Remove these from the omit list since they have dedicated tests.
+- [x] **[HIGH] Test smoke tests have zero output assertions** -- `tests/test_display_modules.py:77-254` and `tests/test_simulator.py` only verify "no crash." Add pixel-change assertions.
+- [x] **[HIGH] Test global state leaks** -- Rate limiter, event log, `sys.modules`, real config files leak between tests. Use `tmp_path` and fixture-based isolation.
+
+### TIER 3: MEDIUM
+
+- [x] **[MEDIUM] `VALID_FEATURE_NAMES` duplicated** -- `src/config_validator.py:17-27` duplicates list from `main.py`. Define canonical list in one shared location.
+- [x] **[MEDIUM] No validation of `matrix_hardware` config block** -- `src/config_validator.py` does not validate hardware settings. Add `validate_hardware_config()`.
+- [x] **[MEDIUM] No validation of `schedule.json`** -- Add `validate_schedule_config()` to `config_validator.py`.
+- [x] **[MEDIUM] Replace `_stop_flag` bool+Lock with `threading.Event`** -- `src/display/_shared.py:4` would allow `wait(timeout)` for near-instant command response.
+- [x] **[MEDIUM] Internet check uses unreliable `httpbin.org`** -- `src/main.py:27-34`. Use a configurable, more reliable endpoint.
+- [x] **[MEDIUM] Thread-unsafe globals in main.py** -- `src/main.py:61-64` `_shutdown`, `_current_feature` accessed by multiple threads without locks. Use `threading.Event` for shutdown.
+- [x] **[MEDIUM] CSRF bypass for JSON API endpoints** -- `src/web/app.py:619` skips CSRF for `request.is_json`. Validate custom header like `X-Requested-With`.
+- [x] **[MEDIUM] Unchecked `int()` on form input** -- `src/web/app.py` multiple routes (737,753,787-789,795,800-803,829,930,1028,1061-1063). Add `try/except ValueError`.
+- [x] **[MEDIUM] Config restore can overwrite `web.json`** -- `src/web/app.py:1598-1606`. Exclude `web.json` from restore or add backslash path traversal check.
+- [x] **[MEDIUM] XSS via `insertAdjacentHTML`** -- Multiple templates (`youtube.html:89`, `countdown.html:52`, `settings.html:399`, `living_world.html:191`, `slideshow.html:94`, `pixel_editor.html:102`). Use `textContent` instead of `innerHTML`.
+- [x] **[MEDIUM] External CDN script without SRI hash** -- `src/web/templates/features.html:88` loads SortableJS without integrity check. Add SRI hash or vendor locally.
+- [x] **[MEDIUM] `random.seed()` reseeds global state** -- `src/display/galaga.py:100` and `tanks.py:244`. Use local `random.Random(42)` instance.
+- [x] **[MEDIUM] Repeated import inside render loops** -- `countdown.py:90`, `galaga.py:166`, `space_invaders.py:171`, `tanks.py:341`, `wireframe.py:348`, `sp500_heatmap.py:317`. Move imports to module level.
+- [x] **[MEDIUM] Performance: lava_lamp pure Python metaballs** -- `src/display/lava_lamp.py:84-109` O(W*H*N) per frame. Consider numpy or lookup tables.
+- [x] **[MEDIUM] Performance: plasma sin() calls** -- `src/display/plasma.py:38-48` 16K+ trig calls per frame. Use precomputed sine tables.
+- [x] **[MEDIUM] Dead code: `_render_heatmap()`** -- `src/display/sp500_heatmap.py:146-197` never called. Remove or consolidate.
+- [x] **[MEDIUM] `ip_addr` computed but never displayed** -- `src/display/system_stats.py:332,365,376`. Either display it or stop computing it.
+- [x] **[MEDIUM] YouTube private attribute access** -- `src/display/youtube_stream.py:489` accesses `downloader._ready_queue`. Add public `has_pending()` method.
+- [x] **[MEDIUM] Entity head/body color names swapped** -- `src/display/living_world/entities.py:63-64` `head_color` from clothes palette, `body_color` from skin. Rename to `top_color`/`bottom_color`.
+- [x] **[MEDIUM] Event log thread safety** -- `src/display/living_world/event_log.py:22` module-level deque without lock. Add `threading.Lock`.
+- [x] **[MEDIUM] Lighting performance on RPi** -- `src/display/living_world/lighting.py:12-84` O(structures * mask_size) per frame. Pre-filter visible structures.
+- [x] **[MEDIUM] Non-atomic snapshot writes** -- `src/display/living_world/world_api.py:83`. Use temp + `os.replace()`.
+- [x] **[MEDIUM] Command file checked every frame** -- `src/display/living_world/simulation.py:82-95`. Throttle to every ~30 ticks.
+- [x] **[MEDIUM] Snow flake list unbounded** -- `src/display/living_world/world_updates.py:519-544`. Cap at `max_snow = 200`.
+- [x] **[MEDIUM] Merge terrain + water render passes** -- `src/display/living_world/rendering.py:127-182` two full 4096-pixel passes. Merge into single pass.
+- [x] **[MEDIUM] Separate test deps from production** -- `requirements.txt:41-42` has pytest in main requirements. Move to `requirements-dev.txt`.
+- [x] **[MEDIUM] pygame platform marker misses Linux** -- `requirements.txt:29`. Add `sys_platform == "linux"`.
+- [x] **[MEDIUM] Conditional assertions in living world tests** -- `tests/test_living_world.py:3449,3871,4013-4015` silently pass. Force deterministic behavior.
+- [x] **[MEDIUM] Weak test assertions in web tests** -- `tests/test_web.py:101-156` use `or` that always passes. Assert specific flash messages.
+- [x] **[MEDIUM] Add `--cov` to pytest defaults** -- `pytest.ini` doesn't invoke coverage automatically.
+
+### TIER 4: LOW
+
+- [x] **[LOW] Add docstrings to package `__init__.py` files** -- `src/__init__.py`, `src/display/__init__.py`.
+- [x] **[LOW] Move `FONT_5X7` to shared `fonts.py`** -- `src/display/boot_screen.py:46-90`. Reusable by other modules.
+- [x] **[LOW] Extract duplicated bitmap font/color utilities** -- `pong.py`, `breakout.py`, `snake.py`, `tic_tac_toe.py` share `DIGITS`, `_draw_digit`, `_lerp_color`, `_hsv_to_rgb`. Create `src/display/_utils.py`.
+- [x] **[LOW] Remove dead `main()` from bitcoin_price** -- `src/display/bitcoin_price.py:61-67`. Unused function.
+- [x] **[LOW] Remove unused `canvas` parameter** -- `src/display/bitcoin_price.py:12`. Never used.
+- [x] **[LOW] Move DIGITS constant to module level** -- `src/display/countdown.py:45-57`. Recreated every function call.
+- [x] **[LOW] Redundant `min()` in qr_code** -- `src/display/qr_code.py:48` both operands identical.
+- [x] **[LOW] Hardcoded `arial.ttf` font** -- `src/display/bitcoin_price.py:20`. Remove truetype attempt.
+- [x] **[LOW] Color clamping in simulator** -- `src/simulator/graphics.py:14` `Color` doesn't clamp to 0-255.
+- [x] **[LOW] Deprecated `PILImage.NEAREST`** -- `src/simulator/matrix.py:346`. Use `Resampling.NEAREST`.
+- [x] **[LOW] Deprecated `datetime.utcnow()`** -- `src/web/app.py:526`. Use `datetime.now(timezone.utc)`.
+- [x] **[LOW] Logout via GET** -- `src/web/app.py:668`. Change to POST with CSRF.
+- [x] **[LOW] Add CSP headers** -- `src/web/app.py`. Add `Content-Security-Policy` via `@app.after_request`.
+- [x] **[LOW] Broken `toggle-slider` CSS class** -- `src/web/templates/wireframe.html:18`. Change to `toggle-switch`.
+- [x] **[LOW] Add pytest markers for slow/integration** -- `pytest.ini`. Define and apply markers.
+- [x] **[LOW] Add pytest-timeout** -- Prevent hanging tests. Set `timeout = 30`.
+- [x] **[LOW] Slideshow loads all images into memory** -- `src/display/slideshow.py:17-34`. Load lazily one at a time.
+- [x] **[LOW] `_apply_campfire_light` missing lower clamp** -- `src/display/living_world/lighting.py:25-27`. Add `max(0, ...)`.
+- [x] **[LOW] Dead `_compute_season()` function** -- `src/display/living_world/day_night.py:87-91`. Remove.
+- [x] **[LOW] Dead villager AI branch** -- `src/display/living_world/villager_ai.py:956-960`. Remove acknowledged dead code.
+- [x] **[LOW] Bow search range is identical** -- `src/display/living_world/villager_ai.py:1229` `20 if v.has_bow else 20`. Fix to differentiate.
+- [x] **[LOW] Lumber deducted before building completes** -- `src/display/living_world/villager_ai.py:924-926`. Defer deduction or refund on interruption.

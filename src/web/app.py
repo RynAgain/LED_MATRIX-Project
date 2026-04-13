@@ -25,22 +25,48 @@ from flask_sock import Sock
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(value, default=0):
+    """Safely convert a form value to int, returning default on failure."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # --- Password hashing utilities ---
 
 def _hash_password(password, salt=None):
-    """Hash a password with SHA-256 + salt."""
+    """Hash a password with PBKDF2-HMAC-SHA256 + salt."""
     if salt is None:
         salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac(
+        'sha256', password.encode(), salt.encode(), 600000
+    ).hex()
+    return f"{salt}:{hashed}"
+
+
+def _hash_password_sha256_legacy(password, salt):
+    """Legacy SHA-256 hash for backward compatibility verification only."""
     hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
     return f"{salt}:{hashed}"
 
 
 def _verify_password(password, stored_hash):
-    """Verify a password against a stored hash. Also accepts plaintext for migration."""
+    """Verify a password against a stored hash.
+
+    Tries PBKDF2 first, then falls back to legacy SHA-256 for existing
+    users who haven't changed their password yet. Also accepts plaintext
+    for migration from very old configs.
+    """
     if ':' in stored_hash and len(stored_hash) > 40:
-        # Hashed format: salt:hash
         salt = stored_hash.split(':')[0]
-        return _hash_password(password, salt) == stored_hash
+        # Try PBKDF2 first (current method)
+        if _hash_password(password, salt) == stored_hash:
+            return True
+        # Fall back to legacy SHA-256 for old hashes
+        if _hash_password_sha256_legacy(password, salt) == stored_hash:
+            return True
+        return False
     else:
         # Plaintext (legacy) - verify directly
         return password == stored_hash
@@ -110,12 +136,15 @@ def load_web_config():
         with open(WEB_CONFIG_PATH, "r") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
+        password = secrets.token_urlsafe(12)
+        print(f"[FIRST RUN] Generated admin password: {password}")
         return {
             "host": "0.0.0.0",
             "port": 5000,
             "secret_key": secrets.token_hex(32),
-            "users": {"admin": "ledmatrix"},
-            "session_timeout_minutes": 60
+            "users": {"admin": _hash_password(password)},
+            "session_timeout_minutes": 60,
+            "force_password_change": True
         }
 
 
@@ -523,8 +552,8 @@ def _generate_self_signed_cert(cert_path, key_path):
                 .issuer_name(issuer)
                 .public_key(key.public_key())
                 .serial_number(x509.random_serial_number())
-                .not_valid_before(datetime.datetime.utcnow())
-                .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+                .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+                .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
                 .sign(key, hashes.SHA256()))
 
             with open(key_path, "wb") as f:
@@ -616,12 +645,19 @@ def create_app():
             # Allow tests to disable CSRF via app.config["WTF_CSRF_ENABLED"]
             if not app.config.get("WTF_CSRF_ENABLED", True):
                 return
-            # Skip CSRF for JSON API endpoints (they use Content-Type check)
-            if request.is_json:
-                return
             # Skip CSRF for login (first POST creates the session)
             if request.endpoint == "login":
                 return
+            # For JSON API endpoints, require custom header (prevents cross-origin attacks)
+            if request.is_json:
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return  # Safe - custom headers can't be set in cross-origin simple requests
+                # Also accept if CSRF token is present in header
+                csrf_header = request.headers.get("X-CSRF-Token", "")
+                if csrf_header and csrf_header == session.get("_csrf_token", ""):
+                    return
+                # Fall through -- reject if neither header is present
+                abort(403)
             token = session.get('_csrf_token', '')
             form_token = request.form.get('_csrf_token', '')
             if not token or token != form_token:
@@ -665,7 +701,7 @@ def create_app():
 
         return render_template("login.html")
 
-    @app.route("/logout")
+    @app.route("/logout", methods=["POST"])
     def logout():
         user = session.pop("user", None)
         if user:
@@ -706,12 +742,9 @@ def create_app():
                     del feature["duration"]  # Remove if cleared
 
             # Update display duration
-            try:
-                duration = int(request.form.get("display_duration", 60))
-                if duration > 0:
-                    config["display_duration"] = duration
-            except (ValueError, TypeError):
-                pass
+            duration = _safe_int(request.form.get("display_duration", 60), 0)
+            if duration > 0:
+                config["display_duration"] = duration
 
             save_display_config(config)
             flash("Features updated. Changes take effect on next cycle.", "success")
@@ -734,7 +767,7 @@ def create_app():
             if action == "add":
                 ssid = request.form.get("ssid", "").strip()
                 password = request.form.get("password", "")
-                priority = int(request.form.get("priority", 99))
+                priority = _safe_int(request.form.get("priority", 99), 99)
                 hidden = "hidden" in request.form
 
                 if ssid:
@@ -750,7 +783,7 @@ def create_app():
                     flash(f"Network '{ssid}' added", "success")
 
             elif action == "remove":
-                idx = int(request.form.get("index", -1))
+                idx = _safe_int(request.form.get("index", -1), -1)
                 networks = wifi_config.get("networks", [])
                 if 0 <= idx < len(networks):
                     removed = networks.pop(idx)
@@ -784,23 +817,23 @@ def create_app():
                 sched["enabled"] = True
                 sched["night_mode"] = {
                     "enabled": "night_enabled" in request.form,
-                    "start_hour": int(request.form.get("night_start", 22)),
-                    "end_hour": int(request.form.get("night_end", 7)),
-                    "brightness": int(request.form.get("night_brightness", 20)),
+                    "start_hour": _safe_int(request.form.get("night_start", 22), 22),
+                    "end_hour": _safe_int(request.form.get("night_end", 7), 7),
+                    "brightness": _safe_int(request.form.get("night_brightness", 20), 20),
                     "allowed_features": ["time_display", "binary_clock"]
                 }
 
                 # Feature schedules (new)
                 schedules = []
-                count = int(request.form.get("schedule_count", 0))
+                count = _safe_int(request.form.get("schedule_count", 0), 0)
                 for i in range(min(count, 5)):  # Cap at 5
                     name = request.form.get(f"sched_{i}_name", "").strip()
                     if not name:
                         continue
-                    start = int(request.form.get(f"sched_{i}_start", 0))
-                    end = int(request.form.get(f"sched_{i}_end", 0))
+                    start = _safe_int(request.form.get(f"sched_{i}_start", 0), 0)
+                    end = _safe_int(request.form.get(f"sched_{i}_end", 0), 0)
                     brightness_val = request.form.get(f"sched_{i}_brightness", "")
-                    brightness = int(brightness_val) if brightness_val else None
+                    brightness = _safe_int(brightness_val, None) if brightness_val else None
                     features = request.form.getlist(f"sched_{i}_features")
                     if features:
                         schedules.append({
@@ -826,7 +859,7 @@ def create_app():
                 return redirect(url_for("settings"))
 
             elif section == "schedule_delete":
-                idx = int(request.form.get("index", -1))
+                idx = _safe_int(request.form.get("index", -1), -1)
                 sched = load_schedule()
                 schedules = sched.get("schedules", [])
                 if 0 <= idx < len(schedules):
@@ -865,6 +898,9 @@ def create_app():
     @sock.route("/ws/status")
     def ws_status(ws):
         """WebSocket endpoint for real-time status updates."""
+        if "user" not in session:
+            ws.close()
+            return
         import time as time_mod
         while True:
             try:
@@ -927,7 +963,7 @@ def create_app():
                     flash(f"Added '{title}' to playlist", "success")
 
             elif action == "remove":
-                idx = int(request.form.get("index", -1))
+                idx = _safe_int(request.form.get("index", -1), -1)
                 if 0 <= idx < len(videos):
                     removed = videos.pop(idx)
                     save_youtube_playlist(videos)
@@ -988,7 +1024,7 @@ def create_app():
                     flash(f"Message added", "success")
 
             elif action == "remove":
-                idx = int(request.form.get("index", -1))
+                idx = _safe_int(request.form.get("index", -1), -1)
                 if 0 <= idx < len(msgs):
                     removed = msgs.pop(idx)
                     save_messages(msgs)
@@ -1024,7 +1060,7 @@ def create_app():
                     flash(f"{symbol} already tracked", "error")
 
             elif action == "remove":
-                idx = int(request.form.get("index", -1))
+                idx = _safe_int(request.form.get("index", -1), -1)
                 if 0 <= idx < len(symbols):
                     removed = symbols.pop(idx)
                     save_stocks(symbols)
@@ -1058,9 +1094,9 @@ def create_app():
         config = load_countdown()
         if request.method == "POST":
             label = request.form.get("label", "Timer").strip()[:10]
-            hours = int(request.form.get("hours", 0))
-            minutes = int(request.form.get("minutes", 5))
-            secs = int(request.form.get("secs", 0))
+            hours = _safe_int(request.form.get("hours", 0), 0)
+            minutes = _safe_int(request.form.get("minutes", 5), 5)
+            secs = _safe_int(request.form.get("secs", 0), 0)
             total = hours * 3600 + minutes * 60 + secs
             save_countdown({"label": label, "seconds": total})
             send_command("play_feature", {"feature": "countdown"})
@@ -1117,7 +1153,7 @@ def create_app():
             for s in shape_names:
                 shapes[s] = request.form.get(f"shape_{s}") == "on"
             cfg["shapes"] = shapes
-            cfg["seconds_per_shape"] = max(3, int(request.form.get("seconds_per_shape", 10)))
+            cfg["seconds_per_shape"] = max(3, _safe_int(request.form.get("seconds_per_shape", 10), 10))
             cfg["rotation_speed"] = max(0.1, min(5.0, float(request.form.get("rotation_speed", 1.0))))
             save_wireframe_config(cfg)
             signal_display_reload()
@@ -1206,13 +1242,20 @@ def create_app():
     @app.route("/api/preview")
     @login_required
     def api_preview():
-        """Get a base64 PNG of the current matrix display."""
+        """Get a base64 PNG of the current matrix display.
+
+        Reads the preview image saved periodically by the display process
+        (separate systemd service), so no shared memory is needed.
+        """
+        preview_path = os.path.join(PROJECT_ROOT, "logs", "preview.png")
         try:
-            import src.main as main_module
-            matrix = getattr(main_module, '_matrix_ref', None)
-            if matrix and hasattr(matrix, 'get_frame_base64'):
-                data = matrix.get_frame_base64()
-                return jsonify({"success": True, "image": data})
+            if os.path.exists(preview_path):
+                # Only serve if fresh (< 10 seconds old)
+                if time.time() - os.path.getmtime(preview_path) < 10:
+                    import base64
+                    with open(preview_path, 'rb') as f:
+                        data = base64.b64encode(f.read()).decode('utf-8')
+                    return jsonify({"success": True, "image": data})
         except Exception as e:
             logger.debug("Preview failed: %s", e)
         return jsonify({"success": False, "message": "Preview not available"})
@@ -1243,7 +1286,7 @@ def create_app():
     def api_living_world_events():
         """API: get recent event log entries."""
         try:
-            count = int(request.args.get("count", 100))
+            count = _safe_int(request.args.get("count", 100), 100)
             category = request.args.get("category")
             if category == "":
                 category = None
@@ -1389,7 +1432,7 @@ def create_app():
             filter: optional text filter (case-insensitive substring match)
         """
         log_file = request.args.get("file", "display")
-        num_lines = min(int(request.args.get("lines", 200)), 2000)
+        num_lines = min(_safe_int(request.args.get("lines", 200), 200), 2000)
         text_filter = request.args.get("filter", "").strip().lower()
 
         # Map log file names to actual paths
@@ -1595,6 +1638,12 @@ def create_app():
             restored = 0
             for name in zf.namelist():
                 if name.endswith(('.json', '.csv')) and '/' not in name and '..' not in name:
+                    # Skip web.json to prevent overwriting auth credentials
+                    if name == "web.json":
+                        continue
+                    # Reject backslashes (path traversal on Windows)
+                    if '\\' in name:
+                        continue
                     zf.extract(name, config_dir)
                     restored += 1
 
@@ -1700,6 +1749,19 @@ def create_app():
     def api_docs_page():
         """API documentation page."""
         return render_template("api_docs.html")
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self' ws: wss:"
+        )
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        return response
 
     return app
 

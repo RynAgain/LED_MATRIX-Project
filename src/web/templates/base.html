@@ -28,7 +28,10 @@
             <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Logs</a>
             <a href="{{ url_for('api_docs_page') }}" class="{% if request.endpoint == 'api_docs_page' %}active{% endif %}">API</a>
             <a href="{{ url_for('settings') }}" class="{% if request.endpoint == 'settings' %}active{% endif %}">Settings</a>
-            <a href="{{ url_for('logout') }}" class="nav-logout">Logout</a>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="nav-link nav-logout" style="background:none;border:none;cursor:pointer;color:inherit;padding:inherit;font:inherit;">Logout</button>
+            </form>
         </div>
         <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Menu">
             &#9776;
@@ -47,5 +50,12 @@
 
         {% block content %}{% endblock %}
     </main>
+<script>
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+</script>
 </body>
 </html>

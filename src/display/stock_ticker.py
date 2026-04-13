@@ -7,7 +7,7 @@ import os
 import logging
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,8 @@ def run(matrix, duration=60):
                     matrix.SetImage(image)
 
             # Show each stock for 5 seconds
-            time.sleep(5)
+            if not interruptible_sleep(5):
+                break
             sym_idx += 1
 
     except Exception as e:

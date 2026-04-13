@@ -54,7 +54,7 @@ from .world_updates import (
 from .rendering import (
     _render_sky, _render_sun_moon, _render_stars, _render_shooting_stars,
     _render_clouds,
-    _render_terrain, _render_water, _render_flowers, _render_bridges,
+    _render_terrain_and_water, _render_flowers, _render_bridges,
     _render_structures, _render_trees, _render_lumber_items,
     _render_villagers, _render_birds, _render_fish_jumps,
     _render_smoke, _render_fireflies, _render_rain,
@@ -269,6 +269,55 @@ def run(matrix, duration=900):
         while not should_stop():
             if duration > 0 and time.time() - start_time >= duration:
                 break
+            # --- Check for world reset request (e.g. from web UI) ---
+            if getattr(weather, '_reset_requested', False):
+                weather._reset_requested = False
+                logger.info("World reset requested -- regenerating")
+                seed = random.randint(0, 999999)
+                heights = _generate_height_profile(seed)
+                world = [[AIR] * WORLD_WIDTH for _ in range(DISPLAY_HEIGHT)]
+                _fill_terrain(world, heights)
+                _flood_valleys(world, heights)
+                _guarantee_pond(heights, world)
+                _settle_water(world, ticks=20)
+                _place_sand(world)
+                trees = _place_trees(heights, world)
+                stars = _generate_stars()
+                clouds, birds = [], []
+                villagers, structures, lumber_items = [], [], []
+                animals = []
+                shooting_stars = []
+                caravans = []
+                farms = []
+                fireflies, smoke_particles, fish_jumps = [], [], []
+                snow_flakes = []
+                flowers, rain_drops, grass_fires = [], [], []
+                path_wear = [0] * WORLD_WIDTH
+                torch_posts = []
+                weather = Weather()
+                camera_x = WORLD_WIDTH // 2 - DISPLAY_WIDTH // 2
+                follow_target = None
+                sim_tick = 0
+                vc = _get_valley_cols(world)
+                center = WORLD_WIDTH // 2
+                for _ in range(2):
+                    for __ in range(30):
+                        col = random.randint(center - 15, center + 15)
+                        col = _clamp(col, 4, WORLD_WIDTH - 5)
+                        if col in vc:
+                            continue
+                        sy = heights[col]
+                        if 0 <= sy < DISPLAY_HEIGHT and world[sy][col] == GRASS:
+                            villagers.append(Villager(col, sy))
+                            break
+                for _ in range(random.randint(3, 6)):
+                    x = random.randint(4, WORLD_WIDTH - 5)
+                    sy = heights[x]
+                    if 0 <= sy < DISPLAY_HEIGHT and world[sy][x] == GRASS:
+                        if not any(f.x == x for f in flowers):
+                            flowers.append(Flower(x, sy, random.choice(FLOWER_COLORS)))
+                start_time = time.time()
+                continue
             frame_start = time.time()
             elapsed = time.time() - start_time
             day_phase = _compute_day_phase(elapsed)
@@ -334,8 +383,7 @@ def run(matrix, duration=900):
             _render_stars(pixels, stars, ambient, sim_tick)
             _render_shooting_stars(pixels, shooting_stars, ambient)
             _render_clouds(pixels, clouds, ambient, camera_x)
-            _render_terrain(pixels, world, heights, ambient, camera_x, path_wear, day_phase, season_info=season_info)
-            _render_water(pixels, world, heights, ambient, sim_tick, camera_x)
+            _render_terrain_and_water(pixels, world, heights, ambient, camera_x, path_wear, day_phase, sim_tick, season_info=season_info)
             _render_flowers(pixels, flowers, ambient, camera_x)
             _render_bridges(pixels, structures, ambient, camera_x)
             _render_structures(pixels, structures, ambient, sim_tick, camera_x, day_phase)
@@ -370,8 +418,10 @@ def run(matrix, duration=900):
                 farms=farms, animals=animals, heights=heights,
                 weather=weather, camera_x=camera_x, sim_tick=sim_tick,
             )
-            # --- Check for web UI commands (non-disruptive) ---
-            lw_cmd = _check_living_world_command()
+            # --- Check for web UI commands (non-disruptive, throttled) ---
+            lw_cmd = None
+            if sim_tick % 30 == 0:
+                lw_cmd = _check_living_world_command()
             if lw_cmd is not None:
                 _apply_living_world_command(lw_cmd, weather, villagers, heights, world, structures, sim_tick, start_time)
             sim_tick += 1

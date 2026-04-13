@@ -11,7 +11,7 @@ import math
 import os
 import time
 import logging
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -345,7 +345,6 @@ def run(matrix, duration=60):
 
             # Shape name at bottom
             try:
-                from PIL import ImageFont
                 font = ImageFont.load_default()
                 tx = (WIDTH - len(name) * 6) // 2
                 draw.text((tx, HEIGHT - 9), name, fill=(60, 60, 80), font=font)

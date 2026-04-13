@@ -14,7 +14,7 @@
                 <label class="toggle-label">
                     <input type="checkbox" name="shape_{{ name }}"
                            {% if config.get('shapes', {}).get(name, true) %}checked{% endif %}>
-                    <span class="toggle-slider"></span>
+                    <span class="toggle-switch"></span>
                 </label>
             </div>
             {% endfor %}

@@ -1,0 +1,11 @@
+# LED Matrix Project - Development Dependencies
+# Install: pip install -r requirements-dev.txt
+#
+# Includes all production dependencies plus testing tools.
+
+-r requirements.txt
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-timeout>=2.0.0

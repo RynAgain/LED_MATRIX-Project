@@ -5,7 +5,7 @@ import time
 import random
 import math
 import logging
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -97,12 +97,11 @@ def run(matrix, duration=60):
             draw = ImageDraw.Draw(image)
 
             # Stars background
-            random.seed(42)
+            _star_rng = random.Random(42)
             for _ in range(30):
-                sx = random.randint(0, WIDTH - 1)
-                sy = random.randint(0, HEIGHT - 1)
+                sx = _star_rng.randint(0, WIDTH - 1)
+                sy = _star_rng.randint(0, HEIGHT - 1)
                 draw.point((sx, sy), fill=(40, 40, 60))
-            random.seed()
 
             # Move aliens
             alien_move_timer += 1
@@ -163,7 +162,6 @@ def run(matrix, duration=60):
 
             # Score
             try:
-                from PIL import ImageFont
                 font = ImageFont.load_default()
                 draw.text((1, HEIGHT - 8), str(score), fill=(100, 100, 100), font=font)
             except Exception:

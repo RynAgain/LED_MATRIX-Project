@@ -516,6 +516,9 @@ def _grow_crops(farms, weather=None, current_season=None):
             farm.crops[i] = min(1.0, g + rate)
 
 
+MAX_SNOW_FLAKES = 200
+
+
 def _update_snow(snow_flakes, heights, world, camera_x, current_season):
     """Update snow particles: fall, drift, land on terrain. Only active in winter."""
     if current_season != "winter":
@@ -536,12 +539,15 @@ def _update_snow(snow_flakes, heights, world, camera_x, current_season):
             sf.landed = True
     # Cull landed/offscreen flakes
     snow_flakes[:] = [sf for sf in snow_flakes if not sf.landed and 0 <= sf.x < WORLD_WIDTH]
-    # Spawn new flakes
-    count = random.randint(*SNOW_FALL_COUNT)
-    active = len(snow_flakes)
-    for _ in range(min(3, count - active)):
-        sx = random.randint(max(0, camera_x - 5), min(WORLD_WIDTH - 1, camera_x + DISPLAY_WIDTH + 5))
-        snow_flakes.append(SnowFlake(sx, random.randint(-3, 3)))
+    # Spawn new flakes only if under the cap
+    if len(snow_flakes) < MAX_SNOW_FLAKES:
+        count = random.randint(*SNOW_FALL_COUNT)
+        active = len(snow_flakes)
+        for _ in range(min(3, count - active)):
+            if len(snow_flakes) >= MAX_SNOW_FLAKES:
+                break
+            sx = random.randint(max(0, camera_x - 5), min(WORLD_WIDTH - 1, camera_x + DISPLAY_WIDTH + 5))
+            snow_flakes.append(SnowFlake(sx, random.randint(-3, 3)))
 
 
 def _maybe_spawn_caravan(caravans, heights, world, sim_tick, villagers):

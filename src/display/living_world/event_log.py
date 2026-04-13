@@ -5,6 +5,7 @@ and human-readable message.  Designed for debugging villager behavior
 and world state changes without impacting performance.
 """
 
+import threading
 from collections import deque
 
 EVENT_LOG_MAX = 1000
@@ -20,6 +21,7 @@ CAT_DEATH = "death"
 CAT_BIRTH = "birth"
 
 _event_log = deque(maxlen=EVENT_LOG_MAX)
+_event_lock = threading.Lock()
 
 
 def log_event(tick, category, message):
@@ -30,11 +32,12 @@ def log_event(tick, category, message):
         category: One of the CAT_* constants for filtering.
         message: Human-readable description of the event.
     """
-    _event_log.append({
-        "tick": tick,
-        "category": category,
-        "message": message,
-    })
+    with _event_lock:
+        _event_log.append({
+            "tick": tick,
+            "category": category,
+            "message": message,
+        })
 
 
 def get_events(count=100, category=None):
@@ -47,23 +50,27 @@ def get_events(count=100, category=None):
     Returns:
         List of event dicts, newest first.
     """
-    if category is not None:
-        filtered = [e for e in _event_log if e["category"] == category]
-    else:
-        filtered = list(_event_log)
-    return list(reversed(filtered[-count:]))
+    with _event_lock:
+        if category is not None:
+            filtered = [e for e in _event_log if e["category"] == category]
+        else:
+            filtered = list(_event_log)
+        return list(reversed(filtered[-count:]))
 
 
 def get_all_events():
     """Return all events in the buffer, newest first."""
-    return list(reversed(_event_log))
+    with _event_lock:
+        return list(reversed(_event_log))
 
 
 def clear_events():
     """Clear the event log. Useful for testing."""
-    _event_log.clear()
+    with _event_lock:
+        _event_log.clear()
 
 
 def event_count():
     """Return the current number of events in the log."""
-    return len(_event_log)
+    with _event_lock:
+        return len(_event_log)

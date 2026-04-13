@@ -85,9 +85,10 @@ def _seasonal_color_offset(day_phase):
 
 
 def _compute_season(elapsed):
-    """Return current season name based on elapsed time."""
+    """Return the current season name for a given elapsed time."""
     full_cycle = SEASON_CYCLE_DAYS * DAY_CYCLE_SECONDS
-    season_index = int((elapsed % full_cycle) / DAY_CYCLE_SECONDS) % 4
+    time_in_cycle = elapsed % full_cycle
+    season_index = int(time_in_cycle / DAY_CYCLE_SECONDS) % 4
     return SEASONS[season_index]
 
 

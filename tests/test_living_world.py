@@ -2866,29 +2866,28 @@ from src.display.living_world.terrain import _get_valley_cols, _invalidate_valle
 
 
 class TestValleyColsCaching:
-    """Verify _get_valley_cols caching behavior."""
+    """Verify _get_valley_cols time-based caching behavior."""
 
     def test_cache_returns_same_result(self):
         heights, world = _make_flat_world()
         _invalidate_valley_cols_cache()
-        r1 = _get_valley_cols(world, _cache_gen=1)
-        r2 = _get_valley_cols(world, _cache_gen=1)
-        assert r1 is r2  # same object from cache
+        r1 = _get_valley_cols(world)
+        r2 = _get_valley_cols(world)
+        assert r1 is r2  # same object from cache (within 1s window)
 
     def test_cache_invalidation(self):
         heights, world = _make_flat_world()
         _invalidate_valley_cols_cache()
-        r1 = _get_valley_cols(world, _cache_gen=1)
+        r1 = _get_valley_cols(world)
         _invalidate_valley_cols_cache()
-        r2 = _get_valley_cols(world, _cache_gen=2)
+        r2 = _get_valley_cols(world)
         assert r1 is not r2  # different objects after invalidation
 
-    def test_no_cache_gen_always_recomputes(self):
+    def test_cache_returns_valid_set(self):
         heights, world = _make_flat_world()
         _invalidate_valley_cols_cache()
         r1 = _get_valley_cols(world)
         r2 = _get_valley_cols(world)
-        # Without _cache_gen, may or may not cache, but should still work
         assert isinstance(r1, set)
         assert isinstance(r2, set)
 
@@ -3445,10 +3444,10 @@ class TestBowCrafting:
             path_wear=path_wear, day_phase=0.25, sim_tick=100, weather=None,
             animals=[deer],
         )
-        # Villager should have crafted a bow (if hunting goal was chosen)
-        if v.state == "hunting":
-            assert v.has_bow is True
-            assert v.lumber == 1  # spent 1 on bow
+        # Villager should have entered hunting and crafted a bow
+        assert v.state == "hunting", "Expected villager to enter hunting state"
+        assert v.has_bow is True
+        assert v.lumber == 1  # spent 1 on bow
 
     def test_no_bow_craft_without_lumber(self):
         """Villager with no lumber should not craft bow."""
@@ -3867,10 +3866,10 @@ class TestBoatTravel:
             trees=[], structures=[], lumber_items=[], flowers=[],
             path_wear=path_wear, day_phase=0.25, sim_tick=100, weather=None,
         )
-        # Should have crafted a boat (or be idle if can't cross)
-        if v.has_boat:
-            assert v.lumber == 3  # spent 2 on boat
-            assert v.boat is not None
+        # Should have crafted a boat
+        assert v.has_boat, "Expected villager to craft a boat at water edge"
+        assert v.lumber == 3  # spent 2 on boat
+        assert v.boat is not None
 
     def test_villager_with_boat_crosses_water(self):
         """Villager with existing boat should cross water without crafting."""
@@ -4010,9 +4009,9 @@ class TestCaravanUpdate:
         v.lumber = 5
         v.stone = 0
         _update_caravans([c], heights, world, [v], sim_tick=100)
-        if c.trades_completed > 0:
-            assert v.lumber == 2  # gave 3
-            assert v.stone == 2  # got 2
+        assert c.trades_completed > 0, "Expected caravan to complete at least one trade"
+        assert v.lumber == 2  # gave 3
+        assert v.stone == 2  # got 2
 
 
 # ==========================================================================

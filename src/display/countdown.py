@@ -6,7 +6,7 @@ import math
 import json
 import os
 import logging
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -39,23 +39,25 @@ def _format_time(seconds):
     return f"{m:02d}:{s:02d}"
 
 
+# 3x5 pixel font for the countdown (string-pattern variant for scaled rendering).
+_COUNTDOWN_DIGITS = {
+    '0': ["###", "# #", "# #", "# #", "###"],
+    '1': [" # ", "## ", " # ", " # ", "###"],
+    '2': ["###", "  #", "###", "#  ", "###"],
+    '3': ["###", "  #", "###", "  #", "###"],
+    '4': ["# #", "# #", "###", "  #", "  #"],
+    '5': ["###", "#  ", "###", "  #", "###"],
+    '6': ["###", "#  ", "###", "# #", "###"],
+    '7': ["###", "  #", "  #", "  #", "  #"],
+    '8': ["###", "# #", "###", "# #", "###"],
+    '9': ["###", "# #", "###", "  #", "###"],
+    ':': ["   ", " # ", "   ", " # ", "   "],
+}
+
+
 def _draw_digit(draw, x, y, digit, color, scale=2):
     """Draw a large pixel digit at position (x,y)."""
-    # 3x5 pixel font scaled up
-    DIGITS = {
-        '0': ["###", "# #", "# #", "# #", "###"],
-        '1': [" # ", "## ", " # ", " # ", "###"],
-        '2': ["###", "  #", "###", "#  ", "###"],
-        '3': ["###", "  #", "###", "  #", "###"],
-        '4': ["# #", "# #", "###", "  #", "  #"],
-        '5': ["###", "#  ", "###", "  #", "###"],
-        '6': ["###", "#  ", "###", "# #", "###"],
-        '7': ["###", "  #", "  #", "  #", "  #"],
-        '8': ["###", "# #", "###", "# #", "###"],
-        '9': ["###", "# #", "###", "  #", "###"],
-        ':': ["   ", " # ", "   ", " # ", "   "],
-    }
-    pattern = DIGITS.get(digit, DIGITS['0'])
+    pattern = _COUNTDOWN_DIGITS.get(digit, _COUNTDOWN_DIGITS['0'])
     for row_idx, row in enumerate(pattern):
         for col_idx, ch in enumerate(row):
             if ch == '#':
@@ -87,7 +89,6 @@ def run(matrix, duration=60):
 
             # Label at top
             try:
-                from PIL import ImageFont
                 font = ImageFont.load_default()
             except Exception:
                 font = None

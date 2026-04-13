@@ -109,7 +109,7 @@
 <script>
 function restartService() {
     if (confirm('Restart the display service?')) {
-        fetch('{{ url_for("api_restart") }}', {method: 'POST'})
+        fetch('{{ url_for("api_restart") }}', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
             .then(r => r.json())
             .then(d => alert(d.message))
             .catch(e => alert('Error: ' + e));
@@ -117,7 +117,7 @@ function restartService() {
 }
 
 function checkUpdate() {
-    fetch('{{ url_for("api_update") }}', {method: 'POST'})
+    fetch('{{ url_for("api_update") }}', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
         .then(r => r.json())
         .then(d => alert(d.message))
         .catch(e => alert('Error: ' + e));
@@ -127,7 +127,7 @@ function setBrightness() {
     var val = document.getElementById('brightness-slider').value;
     fetch('{{ url_for("api_brightness") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({brightness: parseInt(val)})
     })
     .then(r => r.json())
@@ -206,7 +206,7 @@ function updateDashboard(d) {
 function dismissError() {
     _errorDismissed = true;
     document.getElementById('error-alert').style.display = 'none';
-    fetch('/api/dismiss-error', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+    fetch('/api/dismiss-error', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}})
         .catch(function() {});
 }
 

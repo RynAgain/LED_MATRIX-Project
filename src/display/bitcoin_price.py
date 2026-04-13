@@ -9,17 +9,13 @@ try:
 except ImportError:
     graphics = None
 
-def display_bitcoin_price_on_matrix(matrix, canvas, price):
+def display_bitcoin_price_on_matrix(matrix, price):
     """Display Bitcoin price on the LED matrix using PIL."""
     # Create an image for the matrix
     image = Image.new("RGB", (64, 64))
     draw = ImageDraw.Draw(image)
     
-    # Try to load a font, fall back to default if not available
-    try:
-        font = ImageFont.truetype("arial.ttf", 8)
-    except IOError:
-        font = ImageFont.load_default()
+    font = ImageFont.load_default()
     
     # Format the price text
     price_text = f"BTC: ${price}"
@@ -58,14 +54,6 @@ def fetch_bitcoin_price():
         logging.getLogger(__name__).error("All price APIs failed: %s", e)
         return None
 
-def main(matrix, canvas):
-    start_time = time.time()
-    while time.time() - start_time < 60:
-        price = fetch_bitcoin_price()
-        if price:
-            display_bitcoin_price_on_matrix(matrix, canvas, price)
-        time.sleep(10)  # Update every 10 seconds
-
 
 def run(matrix, duration=60):
     """Run the Bitcoin Price display feature for the specified duration.
@@ -82,7 +70,7 @@ def run(matrix, duration=60):
                 break
             price = fetch_bitcoin_price()
             if price:
-                display_bitcoin_price_on_matrix(matrix, None, price)
+                display_bitcoin_price_on_matrix(matrix, price)
             # Sleep in small increments to allow timely exit
             sleep_end = time.time() + 10
             while time.time() < sleep_end and time.time() - start_time < duration:

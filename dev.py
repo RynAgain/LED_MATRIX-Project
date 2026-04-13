@@ -60,7 +60,7 @@ def main():
         web_thread = threading.Thread(target=run_web, args=(port,), daemon=True)
         web_thread.start()
         logger.info("Web panel starting at http://127.0.0.1:%d", port)
-        logger.info("Login: admin / ledmatrix")
+        logger.info("Web panel ready -- credentials are in config/web.json")
         time.sleep(1)  # Let Flask start
 
     if mode in ("both", "display"):

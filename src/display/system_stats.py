@@ -186,12 +186,10 @@ def _get_ip_address():
     """Get the primary IP address."""
     try:
         # Connect to a public DNS to determine our local IP
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(1)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
     except Exception:
         return "NO IP"
 
@@ -251,7 +249,7 @@ def _draw_bar(draw, x, y, width, height, percent, bar_color, animated_pct=None):
     draw.rectangle([x, y, x + width - 1, y + height - 1], outline=(50, 50, 70))
 
 
-def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, hostname, ip_addr,
+def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, hostname,
                 anim_cpu, anim_ram):
     """Render one frame of the system stats display.
 
@@ -328,9 +326,8 @@ def run(matrix, duration=60):
     anim_cpu = 0.0
     anim_ram = 0.0
 
-    # Cache hostname and IP (don't re-query every frame)
+    # Cache hostname (don't re-query every frame)
     hostname = _get_hostname()
-    ip_addr = _get_ip_address()
 
     # Initial psutil CPU reading (first call always returns 0)
     try:
@@ -361,9 +358,6 @@ def run(matrix, duration=60):
                 cpu_temp = _get_cpu_temp()
                 last_refresh = now
 
-                # Refresh IP periodically in case network changes
-                ip_addr = _get_ip_address()
-
             # Animate bars toward target (smooth interpolation)
             lerp_speed = 0.15
             anim_cpu += (target_cpu - anim_cpu) * lerp_speed
@@ -374,7 +368,7 @@ def run(matrix, duration=60):
             draw = ImageDraw.Draw(image)
 
             _draw_frame(draw, target_cpu, target_ram, cpu_temp,
-                        hostname, ip_addr, anim_cpu, anim_ram)
+                        hostname, anim_cpu, anim_ram)
 
             matrix.SetImage(image)
 

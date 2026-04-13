@@ -17,7 +17,8 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
+from src.display._utils import _draw_digit, _draw_number, _lerp_color
 
 logger = logging.getLogger(__name__)
 
@@ -45,44 +46,6 @@ DOWN = (0, 1)
 LEFT = (-1, 0)
 RIGHT = (1, 0)
 DIRECTIONS = [UP, DOWN, LEFT, RIGHT]
-
-# Small 3x5 digit font bitmaps
-DIGITS = {
-    '0': [0b111, 0b101, 0b101, 0b101, 0b111],
-    '1': [0b010, 0b110, 0b010, 0b010, 0b111],
-    '2': [0b111, 0b001, 0b111, 0b100, 0b111],
-    '3': [0b111, 0b001, 0b111, 0b001, 0b111],
-    '4': [0b101, 0b101, 0b111, 0b001, 0b001],
-    '5': [0b111, 0b100, 0b111, 0b001, 0b111],
-    '6': [0b111, 0b100, 0b111, 0b101, 0b111],
-    '7': [0b111, 0b001, 0b010, 0b010, 0b010],
-    '8': [0b111, 0b101, 0b111, 0b101, 0b111],
-    '9': [0b111, 0b101, 0b111, 0b001, 0b111],
-}
-
-
-def _draw_digit(image, digit_char, x, y, color):
-    """Draw a 3x5 pixel digit at position (x, y)."""
-    rows = DIGITS.get(digit_char, DIGITS['0'])
-    for row_idx, row_bits in enumerate(rows):
-        for col_idx in range(3):
-            if row_bits & (1 << (2 - col_idx)):
-                px = x + col_idx
-                py = y + row_idx
-                if 0 <= px < SIZE and 0 <= py < SIZE:
-                    image.putpixel((px, py), color)
-
-
-def _draw_number(image, number, x, y, color):
-    """Draw a multi-digit number at position (x, y)."""
-    digits = str(number)
-    for i, ch in enumerate(digits):
-        _draw_digit(image, ch, x + i * 4, y, color)
-
-
-def _lerp_color(c1, c2, t):
-    """Linearly interpolate between two colors."""
-    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
 
 
 def _opposite(d):
@@ -250,6 +213,8 @@ class SnakeGame:
         red_count = 0
 
         while red_count < num_segments:
+            if should_stop():
+                break
             image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
             red_count = min(red_count + segments_per_frame, num_segments)
 
@@ -267,7 +232,7 @@ class SnakeGame:
             time.sleep(FRAME_DUR)
 
         # Hold death frame briefly
-        time.sleep(0.5)
+        interruptible_sleep(0.5)
 
 
 def run(matrix, duration=60):
@@ -303,7 +268,7 @@ def run(matrix, duration=60):
                 game.draw_death(matrix)
 
             # Brief pause between games
-            time.sleep(0.5)
+            interruptible_sleep(0.5)
 
     except Exception as e:
         logger.error("Error in snake: %s", e, exc_info=True)

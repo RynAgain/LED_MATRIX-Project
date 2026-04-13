@@ -317,6 +317,10 @@ class _BackgroundDownloader:
         """True if all videos have been attempted (downloaded or failed)."""
         return (self._downloaded + self._failed) >= self._total
 
+    def has_pending(self):
+        """True if there are downloaded videos waiting in the ready queue."""
+        return not self._ready_queue.empty()
+
     def get_next_ready(self, timeout=1.0):
         """Get the next ready-to-play video.
 
@@ -486,7 +490,7 @@ def stream_youtube_videos(urls, matrix):
     downloader.start()
 
     try:
-        while not downloader.is_done() or not downloader._ready_queue.empty():
+        while not downloader.is_done() or downloader.has_pending():
             item = downloader.get_next_ready(timeout=2.0)
             if item is None:
                 downloaded, failed, total = downloader.progress

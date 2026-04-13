@@ -91,7 +91,7 @@ function uploadFile(file) {
     .then(function(r) { return r.json(); })
     .then(function(d) {
         if (d.success) {
-            statusDiv.innerHTML = '<span style="color: var(--accent-primary);">Uploaded: ' + d.filename + '</span>';
+            statusDiv.innerHTML = '<span style="color: var(--accent-primary);">Uploaded: ' + escapeHtml(d.filename) + '</span>';
             setTimeout(function() { location.reload(); }, 800);
         } else {
             statusDiv.innerHTML = '<span style="color: var(--accent-danger);">Error: ' + d.error + '</span>';
@@ -109,7 +109,7 @@ function deleteImage(filename) {
 
     fetch('{{ url_for("api_delete_image") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({filename: filename})
     })
     .then(function(r) { return r.json(); })
@@ -131,7 +131,7 @@ function deleteImage(filename) {
 function playSlideshow() {
     fetch('{{ url_for("api_play_feature") }}', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
         body: JSON.stringify({feature: 'slideshow'})
     })
     .then(function(r) { return r.json(); })
