@@ -1,6 +1,6 @@
 # LED Matrix Project
 
-A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 30+ display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot with a web control panel.
+A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 35 display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot with a web control panel.
 
 ---
 
@@ -12,10 +12,12 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | Tic Tac Toe | AI vs AI on a 3x3 grid |
 | Snake | Autonomous AI pathfinding |
 | Pong | AI vs AI with increasing difficulty |
+| Breakout | Autonomous brick-breaking with AI paddle |
 | Billiards | Physics simulation with AI player |
 | Galaga | Classic arcade-style space shooter |
 | Space Invaders | Retro alien invasion game |
 | Tanks | Tank battle simulation |
+| Tetris | AI-driven falling blocks with line clears |
 
 ### Visual Effects
 | Feature | Description |
@@ -41,6 +43,7 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | Stock Ticker | Scrolling stock prices |
 | S&P 500 Heatmap | Color-coded sector performance |
 | Binary Clock | Time in binary representation |
+| Base 6 Clock | Senary time display (Project Hail Mary inspired) |
 | Countdown | Timer with custom target date |
 | Text Scroller | Scrolling custom messages |
 | QR Code | Display QR codes for URLs |
@@ -199,7 +202,7 @@ LED_MATRIX-Project/
   src/                     # Application code
     main.py                # Entry point: boot screen, config, feature loop
     config_validator.py    # JSON schema validation
-    display/               # 30+ display feature modules
+    display/               # 35 display feature modules
       boot_screen.py       # Boot animation + loading ring + pixel font
       _shared.py           # Shared stop signaling for features
       living_world/        # Procedural village simulation (multi-file)
