@@ -20,8 +20,9 @@ cdef class Canvas:
             try:
                 self.SetPixelsPillow(offset_x, offset_y, image.size[0], image.size[1], image)
                 return
-            except (AttributeError, KeyError, TypeError):
-                # unsafe_ptrs not available in this Pillow version, fall through
+            except (AttributeError, KeyError, TypeError, OverflowError):
+                # unsafe_ptrs not available in this Pillow version, or pointer
+                # value overflows uintptr_t on 32-bit ARM (negative int); fall through
                 pass
 
         # Medium-speed path: use tobytes() with nogil loop
