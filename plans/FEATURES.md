@@ -45,9 +45,9 @@
 
 ---
 
-## Display Features (33 modes)
+## Display Features (35 modes)
 
-### Games (8)
+### Games (9)
 - [x] Tic Tac Toe (AI vs AI)
 - [x] Snake (autonomous AI)
 - [x] Pong (AI vs AI)
@@ -56,6 +56,7 @@
 - [x] Galaga (classic arcade shooter)
 - [x] Space Invaders (classic arcade shooter)
 - [x] Tanks (artillery combat)
+- [x] Tetris (AI-driven falling blocks)
 
 ### Original Displays (1 video + 2 utility)
 - [x] Time Display (clock)
@@ -75,12 +76,13 @@
 - [x] Maze 3D (first-person maze walker)
 - [x] Terrain Ball (rolling ball on procedural terrain)
 
-### Utilities (11)
+### Utilities (12)
 - [x] Weather (live weather display)
 - [x] Text Scroller (scrolling message display)
 - [x] Stock Ticker (live stock prices)
 - [x] S&P 500 Heatmap (sector-based market heatmap)
 - [x] Binary Clock (binary-encoded time display)
+- [x] Base 6 Clock (senary time display -- Project Hail Mary / Eridian inspired)
 - [x] Countdown (configurable countdown timer)
 - [x] QR Code (display WiFi password, custom URLs)
 - [x] Slideshow (cycle uploaded images)

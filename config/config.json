@@ -185,6 +185,16 @@
       "name": "system_stats",
       "type": "utility",
       "enabled": false
+    },
+    {
+      "name": "base6_clock",
+      "type": "utility",
+      "enabled": false
+    },
+    {
+      "name": "tetris",
+      "type": "game",
+      "enabled": false
     }
   ]
 }

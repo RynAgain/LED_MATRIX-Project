@@ -40,4 +40,6 @@ FEATURE_MODULES = {
     "maze_3d": "src.display.maze_3d",
     "terrain_ball": "src.display.terrain_ball",
     "system_stats": "src.display.system_stats",
+    "base6_clock": "src.display.base6_clock",
+    "tetris": "src.display.tetris",
 }

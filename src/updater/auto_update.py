@@ -197,9 +197,10 @@ class AutoUpdater:
         # Backup configs before pull
         self._backup_configs()
 
-        # Stash any local changes (e.g., config edits)
-        logger.info("Stashing local changes...")
-        self._run_git(["stash", "push", "-m", "auto-update-stash"])
+        # Stash any local changes (e.g., config edits) AND untracked files
+        # that may conflict with incoming tracked files (e.g., rgbmatrix_src/)
+        logger.info("Stashing local changes (including untracked files)...")
+        self._run_git(["stash", "push", "--include-untracked", "-m", "auto-update-stash"])
 
         # Pull changes
         logger.info("Pulling updates from origin/%s...", self.branch)
