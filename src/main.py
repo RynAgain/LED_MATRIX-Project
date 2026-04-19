@@ -419,6 +419,21 @@ def init_matrix():
         matrix = RGBMatrix(options=options)
         logger.info("RGB LED Matrix initialized (%dx%d, mapping=%s, slowdown=%d)",
                      total_w, total_h, options.hardware_mapping, options.gpio_slowdown)
+
+        # Patch SetImage to handle OverflowError from Pillow unsafe_ptrs on
+        # 32-bit ARM. The compiled Cython binding's SetPixelsPillow can fail
+        # when a pointer value overflows uintptr_t. This wraps SetImage to
+        # catch that and fall back to the safe tobytes() path automatically.
+        _original_set_image = matrix.SetImage
+
+        def _safe_set_image(image, offset_x=0, offset_y=0, unsafe=True):
+            try:
+                _original_set_image(image, offset_x, offset_y, unsafe)
+            except OverflowError:
+                _original_set_image(image, offset_x, offset_y, unsafe=False)
+
+        matrix.SetImage = _safe_set_image
+
         return matrix
     except ImportError:
         logger.warning("rgbmatrix not available - using simulator")
