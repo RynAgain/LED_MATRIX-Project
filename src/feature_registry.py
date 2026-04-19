@@ -42,4 +42,5 @@ FEATURE_MODULES = {
     "system_stats": "src.display.system_stats",
     "base6_clock": "src.display.base6_clock",
     "tetris": "src.display.tetris",
+    "hail_mary_clock": "src.display.hail_mary_clock",
 }

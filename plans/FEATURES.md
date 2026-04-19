@@ -45,7 +45,7 @@
 
 ---
 
-## Display Features (35 modes)
+## Display Features (36 modes)
 
 ### Games (9)
 - [x] Tic Tac Toe (AI vs AI)
@@ -76,13 +76,14 @@
 - [x] Maze 3D (first-person maze walker)
 - [x] Terrain Ball (rolling ball on procedural terrain)
 
-### Utilities (12)
+### Utilities (13)
 - [x] Weather (live weather display)
 - [x] Text Scroller (scrolling message display)
 - [x] Stock Ticker (live stock prices)
 - [x] S&P 500 Heatmap (sector-based market heatmap)
 - [x] Binary Clock (binary-encoded time display)
 - [x] Base 6 Clock (senary time display -- Project Hail Mary / Eridian inspired)
+- [x] Hail Mary Clock (book-accurate Eridian symbols, 40-hour day, astrophage aesthetic)
 - [x] Countdown (configurable countdown timer)
 - [x] QR Code (display WiFi password, custom URLs)
 - [x] Slideshow (cycle uploaded images)

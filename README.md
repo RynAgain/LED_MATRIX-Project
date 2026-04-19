@@ -1,6 +1,6 @@
 # LED Matrix Project
 
-A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 35 display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot with a web control panel.
+A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 36 display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot with a web control panel.
 
 ---
 
@@ -44,6 +44,7 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | S&P 500 Heatmap | Color-coded sector performance |
 | Binary Clock | Time in binary representation |
 | Base 6 Clock | Senary time display (Project Hail Mary inspired) |
+| Hail Mary Clock | Book-accurate Eridian symbols, 40-hour day, astrophage glow |
 | Countdown | Timer with custom target date |
 | Text Scroller | Scrolling custom messages |
 | QR Code | Display QR codes for URLs |
@@ -202,7 +203,7 @@ LED_MATRIX-Project/
   src/                     # Application code
     main.py                # Entry point: boot screen, config, feature loop
     config_validator.py    # JSON schema validation
-    display/               # 35 display feature modules
+    display/               # 36 display feature modules
       boot_screen.py       # Boot animation + loading ring + pixel font
       _shared.py           # Shared stop signaling for features
       living_world/        # Procedural village simulation (multi-file)

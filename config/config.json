@@ -195,6 +195,11 @@
       "name": "tetris",
       "type": "game",
       "enabled": false
+    },
+    {
+      "name": "hail_mary_clock",
+      "type": "utility",
+      "enabled": false
     }
   ]
 }
