@@ -166,36 +166,96 @@ class AutoUpdater:
             return False
 
     def _backup_configs(self):
-        """Backup config/*.json before git pull to prevent data loss."""
+        """Backup config/*.json to a temp directory outside git's reach.
+
+        Returns the temp directory path so pull_updates() can restore from it,
+        completely bypassing git merge logic for config files.
+        """
         import shutil
+        import tempfile
         config_dir = os.path.join(self.project_root, "config")
-        backup_dir = os.path.join(self.project_root, "config", ".backup")
+
+        # Also keep the in-tree .backup/ for manual recovery
+        backup_dir = os.path.join(config_dir, ".backup")
         os.makedirs(backup_dir, exist_ok=True)
+
+        # Create a temp directory outside the repo for safe restoration
+        tmp_dir = tempfile.mkdtemp(prefix="ledmatrix-config-")
 
         backed_up = 0
         for filename in os.listdir(config_dir):
             if filename.endswith(".json"):
                 src = os.path.join(config_dir, filename)
-                dst = os.path.join(backup_dir, filename + ".bak")
                 try:
-                    shutil.copy2(src, dst)
+                    shutil.copy2(src, os.path.join(backup_dir, filename + ".bak"))
+                    shutil.copy2(src, os.path.join(tmp_dir, filename))
                     backed_up += 1
                 except OSError as e:
                     logger.warning("Could not backup %s: %s", filename, e)
 
         if backed_up:
-            logger.info("Backed up %d config files to config/.backup/", backed_up)
+            logger.info("Backed up %d config files to %s", backed_up, tmp_dir)
+
+        return tmp_dir
+
+    def _restore_configs(self, tmp_dir):
+        """Restore config/*.json from the temp backup directory.
+
+        This overwrites whatever git merge produced (including conflict markers)
+        with the user's original local config files.
+
+        Args:
+            tmp_dir: Path to temp directory containing the pre-pull config files.
+        """
+        import shutil
+        config_dir = os.path.join(self.project_root, "config")
+        restored = 0
+
+        if not os.path.isdir(tmp_dir):
+            logger.warning("Config backup dir %s missing, cannot restore", tmp_dir)
+            return
+
+        for filename in os.listdir(tmp_dir):
+            if filename.endswith(".json"):
+                src = os.path.join(tmp_dir, filename)
+                dst = os.path.join(config_dir, filename)
+                try:
+                    shutil.copy2(src, dst)
+                    restored += 1
+                except OSError as e:
+                    logger.warning("Could not restore %s: %s", filename, e)
+
+        if restored:
+            logger.info("Restored %d config files from pre-pull backup", restored)
+
+        # Clean up temp directory
+        try:
+            shutil.rmtree(tmp_dir)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _has_conflict_markers(filepath):
+        """Check if a file contains git merge conflict markers."""
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            return "<<<<<<< " in content or ">>>>>>> " in content
+        except OSError:
+            return False
 
     def pull_updates(self):
         """
         Pull latest changes from remote.
-        Backs up config files, stashes any local changes, then pulls, then pops stash.
+        Backs up config files to a temp dir, stashes local changes, pulls,
+        pops stash, then restores config files from the temp backup to avoid
+        git merge conflict markers in JSON configs.
 
         Returns:
             True if pull succeeded, False otherwise.
         """
-        # Backup configs before pull
-        self._backup_configs()
+        # Backup configs to temp dir BEFORE any git operations
+        config_tmp = self._backup_configs()
 
         # Stash any local changes (e.g., config edits) AND untracked files
         # that may conflict with incoming tracked files (e.g., rgbmatrix_src/)
@@ -220,11 +280,37 @@ class AutoUpdater:
             if stash_result and stash_result.returncode != 0:
                 # Stash pop failed (conflict) or no stash exists
                 if "No stash entries found" not in (stash_result.stderr or ""):
-                    logger.warning("Stash pop had conflicts, dropping stash: %s", stash_result.stderr.strip())
+                    logger.warning("Stash pop had conflicts: %s", stash_result.stderr.strip())
+                    # Abort the conflicted merge state and drop the stash
+                    self._run_git(["checkout", "--", "."])
                     self._run_git(["stash", "drop"])
+
+            # After stash pop (whether clean or conflicted), restore config
+            # files from the temp backup. This guarantees no conflict markers
+            # end up in config/*.json -- the user's local configs always win.
+            config_dir = os.path.join(self.project_root, "config")
+            conflict_found = False
+            for fname in os.listdir(config_dir):
+                if fname.endswith(".json"):
+                    fpath = os.path.join(config_dir, fname)
+                    if self._has_conflict_markers(fpath):
+                        logger.warning("Conflict markers detected in %s", fname)
+                        conflict_found = True
+
+            if conflict_found:
+                logger.info("Restoring config files from pre-pull backup to fix conflicts")
+
+            # Always restore from temp backup -- local config takes precedence
+            self._restore_configs(config_tmp)
         else:
             logger.warning("Skipping stash pop because pull failed. "
                            "Run 'git stash pop' manually after resolving the issue.")
+            # Clean up temp dir even on failure
+            import shutil
+            try:
+                shutil.rmtree(config_tmp)
+            except OSError:
+                pass
 
         return pull_ok
 

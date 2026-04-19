@@ -124,6 +124,9 @@ if [ "$IS_PI" = true ]; then
     STEP=$((STEP + 1))
     log_info "Step $STEP/$TOTAL_STEPS: Building rpi-rgb-led-matrix library..."
 
+    # Track whether rgbmatrix bindings are working in the venv
+    BINDINGS_OK=false
+
     # CRITICAL: Remove the rgbmatrix/ directory from the project root if it
     # exists. Old versions of this repo shipped uncompiled Cython source files
     # in rgbmatrix/. Python finds that directory before the real site-packages
@@ -136,6 +139,7 @@ if [ "$IS_PI" = true ]; then
     fi
 
     RGB_MATRIX_DIR="$ACTUAL_HOME/rpi-rgb-led-matrix"
+    VENV_PYTHON="$VENV_PATH/bin/python3"
 
     if [ -d "$RGB_MATRIX_DIR" ]; then
         log_info "rpi-rgb-led-matrix already cloned at $RGB_MATRIX_DIR -- pulling latest..."
@@ -146,6 +150,9 @@ if [ "$IS_PI" = true ]; then
         git clone https://github.com/hzeller/rpi-rgb-led-matrix.git "$RGB_MATRIX_DIR"
         cd "$RGB_MATRIX_DIR"
     fi
+
+    # Set pull.ff only to suppress divergent branch hints on future pulls
+    git -C "$RGB_MATRIX_DIR" config pull.ff only 2>/dev/null || true
 
     # Build the C library
     log_info "Compiling C library (this may take a few minutes on a Pi)..."
@@ -162,38 +169,58 @@ if [ "$IS_PI" = true ]; then
 
         # Build the Python bindings
         log_info "Building Python bindings (this may also take a few minutes)..."
-        VENV_PYTHON="$VENV_PATH/bin/python3"
 
         # Install Cython into the venv (needed for building the .pyx files)
         "$VENV_PATH/bin/pip" install --quiet cython
 
-        cd "$RGB_MATRIX_DIR/bindings/python"
+        SITE_PKG=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
 
-        # Build the .so files using the Makefile
-        make clean 2>/dev/null || true
-        if ! make build-python PYTHON="$VENV_PYTHON"; then
-            log_error "Python bindings build failed! See errors above."
-            log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make build-python PYTHON=$VENV_PYTHON"
+        # Check if bindings/python has a Makefile (some installs lack it)
+        if [ -f "$RGB_MATRIX_DIR/bindings/python/Makefile" ]; then
+            cd "$RGB_MATRIX_DIR/bindings/python"
+
+            # Build the .so files using the Makefile
+            make clean 2>/dev/null || true
+            if make build-python PYTHON="$VENV_PYTHON"; then
+                log_info "Installing bindings to $SITE_PKG/rgbmatrix/"
+                cp -r "$RGB_MATRIX_DIR/bindings/python/rgbmatrix" "$SITE_PKG/"
+            else
+                log_warn "make build-python failed -- will try direct copy fallback"
+            fi
         else
-            # Install into venv by direct copy.
-            # NOTE: 'make install-python' uses deprecated setup.py install which
-            # silently fails on newer setuptools/pip. The direct copy is reliable.
-            SITE_PKG=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
-            log_info "Installing bindings to $SITE_PKG/rgbmatrix/"
+            log_warn "No Makefile found at $RGB_MATRIX_DIR/bindings/python/"
+            log_warn "Will try direct copy of pre-compiled bindings"
+        fi
 
-            # Copy the built rgbmatrix package (contains __init__.py + .so files)
-            cp -r "$RGB_MATRIX_DIR/bindings/python/rgbmatrix" "$SITE_PKG/"
-
-            # Install the shared library system-wide so the .so bindings can link to it
+        # Install the shared library system-wide so the .so bindings can link to it
+        if [ -f "$RGB_MATRIX_DIR/lib/librgbmatrix.so.1" ]; then
             cp "$RGB_MATRIX_DIR/lib/librgbmatrix.so.1" /usr/lib/
             ldconfig
+        fi
 
-            # Verify the bindings actually import correctly
-            if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
-                log_info "rpi-rgb-led-matrix Python bindings installed successfully"
+        # Verify the bindings import correctly
+        if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
+            BINDINGS_OK=true
+            log_info "rpi-rgb-led-matrix Python bindings installed successfully"
+        else
+            # Fallback: direct copy of pre-compiled rgbmatrix directory
+            # This handles the case where the Makefile is missing or build-python
+            # failed but pre-compiled .so files exist from a previous install.
+            PRECOMPILED="$RGB_MATRIX_DIR/bindings/python/rgbmatrix"
+            if [ -d "$PRECOMPILED" ] && ls "$PRECOMPILED"/*.so 1>/dev/null 2>&1; then
+                log_warn "Build failed or skipped -- copying pre-compiled .so files from $PRECOMPILED"
+                cp -r "$PRECOMPILED" "$SITE_PKG/"
+                if "$VENV_PYTHON" -c "from rgbmatrix import RGBMatrix; print('rgbmatrix OK')" 2>/dev/null; then
+                    BINDINGS_OK=true
+                    log_info "Pre-compiled Python bindings installed successfully (fallback)"
+                else
+                    log_error "Pre-compiled bindings copied but import still fails!"
+                    log_error "Try manually: $VENV_PYTHON -c 'from rgbmatrix import RGBMatrix'"
+                fi
             else
-                log_error "Python bindings installed but import test failed!"
-                log_error "Try manually: $VENV_PYTHON -c 'from rgbmatrix import RGBMatrix'"
+                log_error "No pre-compiled .so files found at $PRECOMPILED"
+                log_error "Python bindings could NOT be installed."
+                log_error "Manual fix: cd $RGB_MATRIX_DIR/bindings/python && make build-python PYTHON=$VENV_PYTHON"
             fi
         fi
     fi
@@ -203,6 +230,9 @@ if [ "$IS_PI" = true ]; then
 
     cd "$PROJECT_ROOT"
 fi
+
+# Also set pull.ff only on the project repo itself
+git -C "$PROJECT_ROOT" config pull.ff only 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 5: Disable onboard audio -- GPIO conflict fix (Pi only)
@@ -317,7 +347,12 @@ echo ""
 if [ "$IS_PI" = true ]; then
     echo "  Hardware setup:"
     echo "    [+] rpi-rgb-led-matrix C library compiled"
-    echo "    [+] Python bindings installed into venv"
+    if [ "$BINDINGS_OK" = true ]; then
+        echo "    [+] Python bindings installed into venv"
+    else
+        echo "    [-] Python bindings NOT installed (simulator will be used)"
+        echo "        Fix: sudo bash scripts/install.sh  (or build manually)"
+    fi
     echo "    [+] Onboard audio disabled (GPIO 18 conflict)"
     echo "    [+] snd_bcm2835 kernel module blacklisted"
     echo ""

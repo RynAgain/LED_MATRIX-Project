@@ -458,7 +458,7 @@ def init_matrix():
         logger.warning("rgbmatrix not available - using simulator")
         return _create_simulator_matrix()
     except Exception as e:
-        logger.error("Failed to initialize matrix: %s", e)
+        logger.error("Failed to initialize matrix: %s", e, exc_info=True)
         logger.warning("Falling back to simulator")
         return _create_simulator_matrix()
 
