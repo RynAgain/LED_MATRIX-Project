@@ -377,6 +377,36 @@ def _create_simulator_matrix(options=None):
     return matrix
 
 
+class _SafeMatrixProxy:
+    """Thin proxy around the real RGBMatrix that catches OverflowError in SetImage.
+
+    On 32-bit ARM (Raspberry Pi), Pillow's unsafe_ptrs can return a pointer
+    value that overflows uintptr_t in the Cython binding's SetPixelsPillow.
+    This proxy intercepts SetImage, catches OverflowError, and retries with
+    unsafe=False to use the safe tobytes() code path instead.
+
+    All other attribute accesses are delegated transparently to the real matrix.
+    """
+
+    def __init__(self, matrix):
+        object.__setattr__(self, '_matrix', matrix)
+
+    def SetImage(self, image, offset_x=0, offset_y=0, unsafe=True):
+        try:
+            self._matrix.SetImage(image, offset_x, offset_y, unsafe)
+        except OverflowError:
+            self._matrix.SetImage(image, offset_x, offset_y, unsafe=False)
+
+    def __getattr__(self, name):
+        return getattr(self._matrix, name)
+
+    def __setattr__(self, name, value):
+        if name == '_matrix':
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._matrix, name, value)
+
+
 def init_matrix():
     """
     Initialize the RGB LED matrix.
@@ -420,21 +450,10 @@ def init_matrix():
         logger.info("RGB LED Matrix initialized (%dx%d, mapping=%s, slowdown=%d)",
                      total_w, total_h, options.hardware_mapping, options.gpio_slowdown)
 
-        # Patch SetImage to handle OverflowError from Pillow unsafe_ptrs on
-        # 32-bit ARM. The compiled Cython binding's SetPixelsPillow can fail
-        # when a pointer value overflows uintptr_t. This wraps SetImage to
-        # catch that and fall back to the safe tobytes() path automatically.
-        _original_set_image = matrix.SetImage
-
-        def _safe_set_image(image, offset_x=0, offset_y=0, unsafe=True):
-            try:
-                _original_set_image(image, offset_x, offset_y, unsafe)
-            except OverflowError:
-                _original_set_image(image, offset_x, offset_y, unsafe=False)
-
-        matrix.SetImage = _safe_set_image
-
-        return matrix
+        # Wrap in a proxy to handle OverflowError from Pillow unsafe_ptrs on
+        # 32-bit ARM. Cython extension types don't allow attribute assignment,
+        # so we use a thin proxy that intercepts SetImage calls.
+        return _SafeMatrixProxy(matrix)
     except ImportError:
         logger.warning("rgbmatrix not available - using simulator")
         return _create_simulator_matrix()
