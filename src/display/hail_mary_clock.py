@@ -3,7 +3,7 @@ Hail Mary Clock -- Eridian time display from Project Hail Mary.
 
 Book-accurate representation of Rocky's base-6 numbering system:
 - Eridian digit symbols: 0(circle), 1(line), 2(V), 3(lambda), 4(+), 5(nabla)
-- Eridian time: day divided into 10,000 base-6 units (7,776 decimal)
+- Eridian time: day divided into 10,000 base-6 units (1,296 decimal)
 - Astrophage amber glow aesthetic
 - Shows both Earth time and Eridian time
 - Rocky's "musical note" communication visualized as waveforms
@@ -18,7 +18,7 @@ import math
 import random
 import logging
 from datetime import datetime
-from PIL import Image, ImageDraw
+from PIL import Image
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 WIDTH, HEIGHT = 64, 64
 FRAME_INTERVAL = 1.0 / 12
 
-# Astrophage-inspired colors (the glowing organisms from the book)
+# Astrophage-inspired colors
 ASTROPHAGE_BRIGHT = (255, 180, 30)
 ASTROPHAGE_MED = (200, 130, 15)
 ASTROPHAGE_DIM = (120, 75, 8)
@@ -40,86 +40,65 @@ SPACE_BG = (1, 1, 3)
 
 # Dim labels / separators
 BRACKET_COLOR = (50, 40, 20)
-LABEL_DIM = (60, 45, 15)
+LABEL_DIM = (55, 40, 12)
 
-# Eridian day = 40 Earth hours = 144,000 Earth seconds
-# Divided into 10,000 (base-6) Eridian units
-# 10000 in base 6 = 1296 in decimal
-# So 1 Eridian time unit = 144000 / 1296 ~= 111.11 Earth seconds
-ERIDIAN_DAY_EARTH_SECONDS = 40.0 * 3600.0  # 144000
-ERIDIAN_UNITS_PER_DAY = 6 ** 4  # 1296 (= "10000" in base 6)
+# Eridian day = 40 Earth hours, divided into base-6 "10000" = 1296 decimal units
+ERIDIAN_UNITS_PER_DAY = 6 ** 4  # 1296
 
 # ---------------------------------------------------------------
-# Book-accurate Eridian digit symbols as 7x7 pixel bitmaps
-# 0 = circle        (empty/nothing)
-# 1 = single line   (one appendage)
-# 2 = V shape       (two lines meeting at bottom)
-# 3 = lambda         (line with branch)
-# 4 = plus/cross    (four directions)
-# 5 = inverted triangle / nabla (five points implied)
+# Book-accurate Eridian digit symbols as 5x5 pixel bitmaps
+# Compact version for 64x64 display (fits 6 symbols + separators)
+# 0 = circle, 1 = line, 2 = V, 3 = lambda, 4 = plus, 5 = nabla
 # ---------------------------------------------------------------
-# Each symbol is a list of (x, y) pixel offsets from top-left of a 7x7 cell.
-
 ERIDIAN_SYMBOLS = {
     0: [  # Circle (hollow)
-        (2, 0), (3, 0), (4, 0),
-        (1, 1), (5, 1),
-        (0, 2), (6, 2),
-        (0, 3), (6, 3),
-        (0, 4), (6, 4),
-        (1, 5), (5, 5),
-        (2, 6), (3, 6), (4, 6),
+        (1, 0), (2, 0), (3, 0),
+        (0, 1), (4, 1),
+        (0, 2), (4, 2),
+        (0, 3), (4, 3),
+        (1, 4), (2, 4), (3, 4),
     ],
     1: [  # Single vertical line
-        (3, 0),
-        (3, 1),
-        (3, 2),
-        (3, 3),
-        (3, 4),
-        (3, 5),
-        (3, 6),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+        (2, 3),
+        (2, 4),
     ],
-    2: [  # V shape (two lines meeting at bottom)
-        (0, 0), (6, 0),
-        (0, 1), (6, 1),
-        (1, 2), (5, 2),
-        (1, 3), (5, 3),
-        (2, 4), (4, 4),
-        (2, 5), (4, 5),
-        (3, 6),
+    2: [  # V shape
+        (0, 0), (4, 0),
+        (0, 1), (4, 1),
+        (1, 2), (3, 2),
+        (1, 3), (3, 3),
+        (2, 4),
     ],
-    3: [  # Lambda shape (line with branch going right)
+    3: [  # Lambda (diagonal with branch)
         (0, 0),
-        (0, 1), (1, 1),
-        (1, 2), (2, 2),
-        (2, 3), (3, 3),
-        (3, 4), (4, 4),
-        (3, 5), (5, 5),
-        (3, 6), (6, 6),
+        (1, 1),
+        (2, 2), (3, 2),
+        (2, 3), (4, 3),
+        (2, 4), (4, 4),
     ],
     4: [  # Plus / cross
-        (3, 0),
-        (3, 1),
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2),
-        (3, 3),
-        (3, 4),
-        (3, 5),
-        (3, 6),
+        (2, 0),
+        (2, 1),
+        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2),
+        (2, 3),
+        (2, 4),
     ],
     5: [  # Inverted triangle / nabla
-        (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0),
-        (0, 1), (6, 1),
-        (1, 2), (5, 2),
-        (1, 3), (5, 3),
-        (2, 4), (4, 4),
-        (2, 5), (4, 5),
-        (3, 6),
+        (0, 0), (1, 0), (2, 0), (3, 0), (4, 0),
+        (0, 1), (4, 1),
+        (1, 2), (3, 2),
+        (1, 3), (3, 3),
+        (2, 4),
     ],
 }
 
-# Symbol width (including 1px gap on right)
-SYMBOL_W = 8
-SYMBOL_H = 7
+SYMBOL_W = 5  # 5px wide symbol
+SYMBOL_GAP = 1  # 1px gap between symbols in same group
+SYMBOL_H = 5
+GROUP_GAP = 3  # gap between digit groups (includes separator dot space)
 
 
 def _to_base6(n):
@@ -143,51 +122,48 @@ def _draw_eridian_digit(image, digit, x, y, color):
             image.putpixel((px, py), color)
 
 
-def _draw_eridian_number(image, digits, x, y, color, gap=1):
-    """Draw a multi-digit Eridian number. Returns total width."""
+def _draw_eridian_group(image, digits, x, y, color):
+    """Draw a group of Eridian digits. Returns width used."""
     cx = x
     for d in digits:
         _draw_eridian_digit(image, d, cx, y, color)
-        cx += SYMBOL_W + gap
-    return cx - x
+        cx += SYMBOL_W + SYMBOL_GAP
+    return cx - x - SYMBOL_GAP  # subtract trailing gap
 
 
-def _draw_separator_dots(image, x, y, color, phase):
-    """Draw pulsing separator dots between digit groups."""
-    blink = math.sin(phase) > 0
-    if blink:
-        for dy in [1, 4]:
+def _draw_separator(image, x, y, color, blink_on):
+    """Draw two separator dots (like colon in time)."""
+    if blink_on:
+        for dy in [1, 3]:
             py = y + dy
             if 0 <= x < WIDTH and 0 <= py < HEIGHT:
                 image.putpixel((x, py), color)
 
 
 def _draw_astrophage(image, x, y, phase, intensity=1.0):
-    """Draw a single glowing astrophage particle."""
+    """Draw a glowing astrophage particle with halo."""
     pulse = 0.6 + 0.4 * math.sin(phase)
-    brightness = pulse * intensity
-
-    r = min(255, int(ASTROPHAGE_BRIGHT[0] * brightness))
-    g = min(255, int(ASTROPHAGE_BRIGHT[1] * brightness))
-    b = min(255, int(ASTROPHAGE_BRIGHT[2] * brightness))
+    b = pulse * intensity
+    r = min(255, int(ASTROPHAGE_BRIGHT[0] * b))
+    g = min(255, int(ASTROPHAGE_BRIGHT[1] * b))
+    blue = min(255, int(ASTROPHAGE_BRIGHT[2] * b))
     if 0 <= x < WIDTH and 0 <= y < HEIGHT:
-        image.putpixel((x, y), (r, g, b))
-
-    # Glow halo
-    halo = brightness * 0.25
-    hr = int(ASTROPHAGE_BRIGHT[0] * halo)
-    hg = int(ASTROPHAGE_BRIGHT[1] * halo)
-    hb = int(ASTROPHAGE_BRIGHT[2] * halo)
-    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        px, py = x + dx, y + dy
+        image.putpixel((x, y), (r, g, blue))
+    # Subtle halo
+    hb = b * 0.2
+    hr = int(ASTROPHAGE_BRIGHT[0] * hb)
+    hg = int(ASTROPHAGE_BRIGHT[1] * hb)
+    hbl = int(ASTROPHAGE_BRIGHT[2] * hb)
+    for ddx, ddy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        px, py = x + ddx, y + ddy
         if 0 <= px < WIDTH and 0 <= py < HEIGHT:
-            existing = image.getpixel((px, py))
-            image.putpixel((px, py), (min(255, existing[0] + hr),
-                                       min(255, existing[1] + hg),
-                                       min(255, existing[2] + hb)))
+            ex = image.getpixel((px, py))
+            image.putpixel((px, py), (min(255, ex[0] + hr),
+                                       min(255, ex[1] + hg),
+                                       min(255, ex[2] + hbl)))
 
 
-def _draw_waveform(image, y, phase, color, amplitude=2, wavelength=14):
+def _draw_waveform(image, y, phase, color, amplitude=2, wavelength=16):
     """Draw a sine waveform (Rocky's musical communication)."""
     for x in range(WIDTH):
         wy = y + int(amplitude * math.sin(phase + x * 2 * math.pi / wavelength))
@@ -197,38 +173,41 @@ def _draw_waveform(image, y, phase, color, amplitude=2, wavelength=14):
 
 def _draw_stars(image, star_positions):
     """Draw background stars."""
-    for sx, sy, b in star_positions:
+    for sx, sy, brightness in star_positions:
         if 0 <= sx < WIDTH and 0 <= sy < HEIGHT:
-            image.putpixel((sx, sy), (b, b, min(255, b + 15)))
+            image.putpixel((sx, sy), (brightness, brightness,
+                                       min(255, brightness + 12)))
+
+
+def _draw_scan_line(image, y, phase, color, speed=15.0, width=10):
+    """Draw a scanning glow line across the full width."""
+    scan_x = (phase * speed) % WIDTH
+    for x in range(WIDTH):
+        dist = abs(x - scan_x)
+        if dist > WIDTH / 2:
+            dist = WIDTH - dist
+        intensity = max(0.0, 1.0 - dist / width)
+        if intensity > 0:
+            r = int(color[0] * intensity * 0.5)
+            g = int(color[1] * intensity * 0.5)
+            b = int(color[2] * intensity * 0.15)
+            image.putpixel((x, y), (r, g, b))
 
 
 def _earth_to_eridian_units(now):
-    """Convert Earth time-of-day to Eridian time units.
-
-    Eridian day = 40 Earth hours, divided into 10000 (base-6) = 1296 units.
-    We map the current Earth seconds-since-midnight into the Eridian cycle.
-    Returns the Eridian unit count (0-1295).
-    """
+    """Convert Earth time-of-day to Eridian time units (0-1295)."""
     earth_seconds = now.hour * 3600 + now.minute * 60 + now.second + \
         now.microsecond / 1e6
-    # Scale 24h Earth day -> 40h Eridian day proportionally
-    eridian_fraction = earth_seconds / (24.0 * 3600.0)
-    eridian_units = int(eridian_fraction * ERIDIAN_UNITS_PER_DAY)
-    return eridian_units % ERIDIAN_UNITS_PER_DAY
+    fraction = earth_seconds / 86400.0  # fraction of Earth day
+    return int(fraction * ERIDIAN_UNITS_PER_DAY) % ERIDIAN_UNITS_PER_DAY
 
 
-def _draw_label_pixels(image, text, x, y, color):
-    """Draw tiny label text using the shared 3x5 font."""
-    from src.display._utils import _draw_digit, DIGITS
-    # Letters not in DIGITS -- define minimal 3x5 pixel bitmaps
+def _draw_tiny_label(image, text, x, y, color):
+    """Draw tiny 3x5 pixel label text."""
+    from src.display._utils import DIGITS
     LETTERS = {
         'E': [0b111, 0b100, 0b110, 0b100, 0b111],
         'R': [0b110, 0b101, 0b110, 0b101, 0b101],
-        'I': [0b111, 0b010, 0b010, 0b010, 0b111],
-        'D': [0b110, 0b101, 0b101, 0b101, 0b110],
-        'A': [0b010, 0b101, 0b111, 0b101, 0b101],
-        'T': [0b111, 0b010, 0b010, 0b010, 0b010],
-        'H': [0b101, 0b101, 0b111, 0b101, 0b101],
     }
     cx = x
     for ch in text:
@@ -246,14 +225,23 @@ def run(matrix, duration=60):
     """Run the Hail Mary / Eridian clock display."""
     start_time = time.time()
 
-    # Static star positions
+    # Static star positions (placed in safe zones to avoid symbol overlap)
     rng = random.Random(42)
-    stars = [(rng.randint(0, WIDTH - 1), rng.randint(0, HEIGHT - 1),
-              rng.randint(15, 50)) for _ in range(20)]
+    stars = []
+    for _ in range(18):
+        sy = rng.randint(0, HEIGHT - 1)
+        sx = rng.randint(0, WIDTH - 1)
+        # Only place stars in areas that won't be overdrawn
+        if sy > 43 and sy < 56:
+            stars.append((sx, sy, rng.randint(15, 45)))
+        elif rng.random() < 0.5:
+            stars.append((sx, sy, rng.randint(10, 35)))
 
-    # Floating astrophage particles
-    astrophage = [(rng.randint(5, WIDTH - 5), rng.randint(3, HEIGHT - 3),
-                   rng.uniform(0, 6.28)) for _ in range(5)]
+    # Astrophage particles in the energy bar / bottom zone only
+    astrophage_positions = [
+        (rng.randint(3, WIDTH - 3), rng.randint(44, 54))
+        for _ in range(4)
+    ]
 
     try:
         while time.time() - start_time < duration:
@@ -261,155 +249,152 @@ def run(matrix, duration=60):
                 break
             frame_start = time.time()
             now = datetime.now()
-            elapsed = time.time()
-            phase = elapsed * 2.0
+            t = time.time() - start_time  # time since feature start
+            phase = t * 2.5
 
             image = Image.new("RGB", (WIDTH, HEIGHT), SPACE_BG)
 
             # --- Background stars ---
             _draw_stars(image, stars)
 
-            # --- Floating astrophage ---
-            for i, (ax, ay, ap) in enumerate(astrophage):
-                dx = ax + int(2 * math.sin(phase * 0.3 + i * 1.5))
-                dy = ay + int(1.5 * math.cos(phase * 0.2 + i * 2.0))
-                _draw_astrophage(image, dx, dy, phase + i, intensity=0.35)
+            blink_on = math.sin(phase * 1.5) > 0
 
-            # === EARTH TIME in Eridian symbols (base 6) ===
+            # =========================================================
+            # ROW 1: Earth time in Eridian symbols (y=1)
+            # Hours: always 2 base-6 digits (max 23 = 35 in base 6)
+            # Minutes: always 2 base-6 digits (max 59 = 133, show as 2 groups)
+            # We show HH : MM only (seconds on the reference line below)
+            # =========================================================
             h6 = _to_base6(now.hour)
             m6 = _to_base6(now.minute)
-            s6 = _to_base6(now.second)
-
             while len(h6) < 2:
                 h6.insert(0, 0)
             while len(m6) < 2:
                 m6.insert(0, 0)
-            while len(s6) < 2:
-                s6.insert(0, 0)
+            # If minutes need 3 digits (36-59), show all 3
+            # Layout: E | HH : MMM  (max width = 4 + 2*6 + 3 + 3*6 = 37px at x=6)
 
-            # Row 1 label: "E" for Earth
-            _draw_label_pixels(image, "E", 1, 2, LABEL_DIM)
-
-            # Draw Earth time: HH : MM : SS using Eridian symbols
             row1_y = 1
-            pulse_e = 0.85 + 0.15 * math.sin(phase)
-            earth_color = tuple(min(255, int(c * pulse_e))
+            pulse = 0.85 + 0.15 * math.sin(phase * 0.8)
+            earth_color = tuple(min(255, int(c * pulse))
                                 for c in ASTROPHAGE_BRIGHT)
 
-            x_pos = 7
-            _draw_eridian_number(image, h6, x_pos, row1_y, earth_color, gap=0)
-            x_pos += len(h6) * SYMBOL_W + 1
-            _draw_separator_dots(image, x_pos, row1_y, ASTROPHAGE_DIM,
-                                 phase * 2)
-            x_pos += 3
-            _draw_eridian_number(image, m6, x_pos, row1_y, earth_color, gap=0)
-            x_pos += len(m6) * SYMBOL_W + 1
-            _draw_separator_dots(image, x_pos, row1_y, ASTROPHAGE_DIM,
-                                 phase * 2)
-            x_pos += 3
-            _draw_eridian_number(image, s6, x_pos, row1_y, earth_color, gap=0)
+            # "E" label
+            _draw_tiny_label(image, "E", 1, row1_y + 0, LABEL_DIM)
 
-            # === Astrophage glow divider ===
-            div_y = 10
-            for x in range(WIDTH):
-                scan = (elapsed * 18) % WIDTH
-                dist = abs(x - scan)
-                if dist > WIDTH / 2:
-                    dist = WIDTH - dist
-                intensity = max(0, 1.0 - dist / 10.0)
-                base_i = 0.12
-                total = base_i + intensity * 0.5
-                r = int(ASTROPHAGE_BRIGHT[0] * total * 0.4)
-                g = int(ASTROPHAGE_BRIGHT[1] * total * 0.4)
-                b = int(ASTROPHAGE_BRIGHT[2] * total * 0.1)
-                image.putpixel((x, div_y), (r, g, b))
+            x = 6
+            _draw_eridian_group(image, h6, x, row1_y, earth_color)
+            x += len(h6) * (SYMBOL_W + SYMBOL_GAP) + 1
+            _draw_separator(image, x, row1_y, ASTROPHAGE_DIM, blink_on)
+            x += 2
+            _draw_eridian_group(image, m6, x, row1_y, earth_color)
 
-            # === ERIDIAN TIME ===
-            # Convert Earth time to Eridian units (0 to 1295)
+            # =========================================================
+            # Scan line divider (y=8)
+            # =========================================================
+            _draw_scan_line(image, 8, t, ASTROPHAGE_BRIGHT, speed=18, width=10)
+
+            # =========================================================
+            # ROW 2: Eridian time -- 4 base-6 digits (y=10)
+            # Eridian day = 1296 units, displayed as 4 symbols: XX:XX
+            # =========================================================
             eridian_units = _earth_to_eridian_units(now)
-            eridian_digits = _to_base6(eridian_units)
-            while len(eridian_digits) < 4:
-                eridian_digits.insert(0, 0)
+            ed = _to_base6(eridian_units)
+            while len(ed) < 4:
+                ed.insert(0, 0)
 
-            # Row 2 label: "R" for Rocky
-            _draw_label_pixels(image, "R", 1, 14, ERIDIAN_DARK)
+            row2_y = 10
+            pulse_r = 0.85 + 0.15 * math.sin(phase * 0.6 + 1.0)
+            eridian_color = tuple(min(255, int(c * pulse_r))
+                                  for c in ERIDIAN_METAL)
 
-            # Draw Eridian time: 4 symbols
-            row2_y = 12
-            e_color = ERIDIAN_METAL
-            x_pos = 7
-            for i, d in enumerate(eridian_digits):
-                pulse_r = 0.85 + 0.15 * math.sin(phase + i * 0.8)
-                dc = tuple(min(255, int(c * pulse_r)) for c in e_color)
-                _draw_eridian_digit(image, d, x_pos, row2_y, dc)
-                x_pos += SYMBOL_W + 1
+            # "R" label (for Rocky)
+            _draw_tiny_label(image, "R", 1, row2_y + 0, ERIDIAN_DARK)
 
-                # Add separator after first 2 digits (like HH:MM)
-                if i == 1:
-                    _draw_separator_dots(image, x_pos, row2_y,
-                                         ERIDIAN_DARK, phase * 1.5)
-                    x_pos += 3
+            x = 6
+            # First 2 digits
+            _draw_eridian_group(image, ed[:2], x, row2_y, eridian_color)
+            x += 2 * (SYMBOL_W + SYMBOL_GAP) + 1
+            _draw_separator(image, x, row2_y, ERIDIAN_DARK, blink_on)
+            x += 2
+            # Last 2 digits
+            _draw_eridian_group(image, ed[2:], x, row2_y, eridian_color)
 
-            # === Waveform (Rocky's voice) ===
-            wave_y = 23
-            _draw_waveform(image, wave_y, phase * 1.2, ASTROPHAGE_DIM,
-                           amplitude=2, wavelength=16)
-            _draw_waveform(image, wave_y + 1, phase * 0.7 + 2.0,
-                           tuple(c // 2 for c in ERIDIAN_METAL),
-                           amplitude=1, wavelength=11)
+            # =========================================================
+            # Scan line divider (y=17)
+            # =========================================================
+            _draw_scan_line(image, 17, t + 2.0, ASTROPHAGE_DIM,
+                            speed=12, width=8)
 
-            # === Second astrophage divider ===
-            div_y2 = 27
-            for x in range(WIDTH):
-                scan = (elapsed * 12 + WIDTH / 2) % WIDTH
-                dist = abs(x - scan)
-                if dist > WIDTH / 2:
-                    dist = WIDTH - dist
-                intensity = max(0, 1.0 - dist / 8.0)
-                r = int(ASTROPHAGE_DIM[0] * intensity * 0.5)
-                g = int(ASTROPHAGE_DIM[1] * intensity * 0.5)
-                b = int(ASTROPHAGE_DIM[2] * intensity * 0.2)
-                image.putpixel((x, div_y2), (r, g, b))
-
-            # === Eridian symbol legend (bottom section) ===
-            # Show all 6 symbols with their decimal values
-            legend_y = 30
+            # =========================================================
+            # ROW 3: Symbol legend -- all 6 Eridian digits (y=20)
+            # =========================================================
+            legend_y = 20
             legend_color = tuple(c // 2 for c in ASTROPHAGE_MED)
             for d in range(6):
-                lx = 2 + d * 10
+                lx = 2 + d * (SYMBOL_W + 5)  # 10px per symbol cell
                 _draw_eridian_digit(image, d, lx, legend_y, legend_color)
+                # Small decimal label below each symbol
+                from src.display._utils import _draw_digit
+                _draw_digit(image, str(d), lx + 1, legend_y + 6,
+                            tuple(c // 3 for c in legend_color))
 
-            # === Astrophage energy bar ===
-            bar_y = 40
+            # =========================================================
+            # Waveform -- Rocky's voice (y=30)
+            # =========================================================
+            _draw_waveform(image, 30, phase * 1.0, ASTROPHAGE_DIM,
+                           amplitude=2, wavelength=18)
+            _draw_waveform(image, 31, phase * 0.6 + 2.0,
+                           tuple(c // 2 for c in ERIDIAN_METAL),
+                           amplitude=1, wavelength=12)
+
+            # =========================================================
+            # Astrophage energy bar (y=36-37)
+            # Fills based on seconds (0-59 -> 0-100%)
+            # =========================================================
+            bar_y = 36
             energy = (now.second + now.microsecond / 1e6) / 60.0
             bar_len = int(energy * (WIDTH - 4))
-            for x in range(2, 2 + bar_len):
-                glow = 0.3 + 0.7 * (x / WIDTH)
-                pm = 0.9 + 0.1 * math.sin(phase + x * 0.5)
+            for bx in range(2, 2 + bar_len):
+                glow = 0.3 + 0.7 * (bx / WIDTH)
+                pm = 0.9 + 0.1 * math.sin(phase + bx * 0.4)
                 r = min(255, int(ASTROPHAGE_BRIGHT[0] * glow * pm))
                 g = min(255, int(ASTROPHAGE_BRIGHT[1] * glow * pm * 0.7))
                 b = min(255, int(ASTROPHAGE_BRIGHT[2] * glow * pm * 0.2))
-                image.putpixel((x, bar_y), (r, g, b))
+                image.putpixel((bx, bar_y), (r, g, b))
                 if bar_y + 1 < HEIGHT:
-                    image.putpixel((x, bar_y + 1),
-                                   (r // 2, g // 2, b // 2))
+                    image.putpixel((bx, bar_y + 1), (r // 2, g // 2, b // 2))
 
-            # === Bottom: Earth decimal time reference ===
-            from src.display._utils import _draw_digit
+            # =========================================================
+            # Floating astrophage particles (bottom zone, y=44-54)
+            # =========================================================
+            for i, (ax, ay) in enumerate(astrophage_positions):
+                drift_x = ax + int(2 * math.sin(t * 0.3 + i * 1.5))
+                drift_y = ay + int(1 * math.cos(t * 0.25 + i * 2.0))
+                drift_x = max(1, min(WIDTH - 2, drift_x))
+                drift_y = max(40, min(HEIGHT - 8, drift_y))
+                _draw_astrophage(image, drift_x, drift_y,
+                                 phase + i, intensity=0.3)
+
+            # =========================================================
+            # Bottom: Earth decimal time (y=57)
+            # =========================================================
             ref_y = HEIGHT - 7
             ref_str = f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}"
             rx = (WIDTH - len(ref_str) * 4) // 2
             for i, ch in enumerate(ref_str):
                 _draw_digit(image, ch, rx + i * 4, ref_y, BRACKET_COLOR)
 
-            # === Tau Ceti star glow (bottom right) ===
-            sx, sy = WIDTH - 5, HEIGHT - 5
-            sp = 0.5 + 0.5 * math.sin(phase * 0.5)
-            sr, sg, sb = int(200 * sp), int(180 * sp), int(100 * sp)
-            if 0 <= sx < WIDTH and 0 <= sy < HEIGHT:
-                image.putpixel((sx, sy), (sr, sg, sb))
+            # Tau Ceti star glow (bottom right)
+            tcx, tcy = WIDTH - 5, HEIGHT - 5
+            sp = 0.5 + 0.5 * math.sin(t * 1.0)
+            sr = int(180 * sp)
+            sg = int(160 * sp)
+            sb = int(90 * sp)
+            if 0 <= tcx < WIDTH and 0 <= tcy < HEIGHT:
+                image.putpixel((tcx, tcy), (sr, sg, sb))
                 for ddx, ddy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    px, py = sx + ddx, sy + ddy
+                    px, py = tcx + ddx, tcy + ddy
                     if 0 <= px < WIDTH and 0 <= py < HEIGHT:
                         image.putpixel((px, py), (sr // 3, sg // 3, sb // 3))
 
