@@ -259,37 +259,32 @@ def download_video(url, title="Unknown"):
             'best'
         ),
         'outtmpl': cache_path,
-        # Don't silence errors -- we need to see what's failing
         'quiet': False,
         'no_warnings': False,
         'verbose': False,
         'socket_timeout': 30,
         'retries': 3,
         'fragment_retries': 3,
-        # Do NOT set merge_output_format -- avoids ffmpeg dependency
         'postprocessors': [],
-        # Write to a temp file first, rename on success
         'nopart': True,
-        # HTTP headers to reduce bot-detection fingerprinting
-        'http_headers': {
-            'User-Agent': (
-                'Mozilla/5.0 (Linux; Android 11; Pixel 5) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/124.0.0.0 Mobile Safari/537.36'
-            ),
+        # tv_embedded client bypasses YouTube's PO token / bot-detection (HTTP 403)
+        # that blocks the default web/android clients on headless server IPs.
+        # Falls back to web client if tv_embedded is unavailable for a video.
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['tv_embedded', 'web'],
+            }
         },
     }
 
-    # Use cookies file if present (fixes HTTP 403 bot-detection on Pi).
-    # Export from Chrome/Firefox on your desktop:
-    #   yt-dlp --cookies-from-browser chrome --cookies config/yt_cookies.txt ""
-    # or use a browser extension like "Get cookies.txt LOCALLY".
+    # Use cookies file if present (optional enhancement -- not required with tv_embedded).
+    # To generate on a machine logged into YouTube:
+    #   yt-dlp --cookies-from-browser chrome --cookies config/yt_cookies.txt \
+    #          --skip-download "https://www.youtube.com"
     cookies_path = os.path.join(PROJECT_ROOT, "config", "yt_cookies.txt")
-    if os.path.exists(cookies_path):
+    if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 100:
         ydl_opts['cookiefile'] = cookies_path
-        logger.info("Using cookies file for YouTube download: %s", cookies_path)
-    else:
-        logger.debug("No cookies file found at %s -- downloads may 403 on some videos", cookies_path)
+        logger.info("Using cookies file for YouTube download")
 
     logger.info("Downloading '%s'...", title)
     start = time.time()
