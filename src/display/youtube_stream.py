@@ -115,6 +115,64 @@ def _update_ytdlp():
         logger.warning("Could not update yt-dlp: %s", e)
 
 
+def refresh_youtube_cookies():
+    """Extract fresh YouTube cookies from the system browser at boot.
+
+    Uses yt-dlp's --cookies-from-browser to pull cookies from Chromium
+    (or Chrome/Firefox as fallback). This bypasses YouTube's bot-detection
+    (HTTP 403) that blocks headless downloads without a valid session.
+
+    Saves cookies to config/yt_cookies.txt which download_video() picks up.
+    Called once at boot before the precache phase.
+
+    Returns:
+        True if cookies were successfully extracted, False otherwise.
+    """
+    cookies_path = os.path.join(PROJECT_ROOT, "config", "yt_cookies.txt")
+
+    # Try browsers in order of likelihood on a Pi
+    browsers = ["chromium", "chrome", "firefox", "chromium-browser"]
+
+    for browser in browsers:
+        try:
+            logger.info("Extracting YouTube cookies from %s...", browser)
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "yt_dlp",
+                    "--cookies-from-browser", browser,
+                    "--cookies", cookies_path,
+                    "--skip-download",
+                    "--quiet",
+                    "https://www.youtube.com",
+                ],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0 and os.path.exists(cookies_path):
+                size = os.path.getsize(cookies_path)
+                if size > 100:
+                    logger.info("YouTube cookies extracted from %s (%d bytes)", browser, size)
+                    return True
+                else:
+                    logger.warning("Cookie file from %s is too small (%d bytes), trying next", browser, size)
+            else:
+                logger.debug("Browser %s failed (rc=%d): %s", browser, result.returncode,
+                             result.stderr.strip()[:200])
+        except FileNotFoundError:
+            logger.debug("Browser %s not found, trying next", browser)
+        except subprocess.TimeoutExpired:
+            logger.warning("Cookie extraction from %s timed out", browser)
+        except Exception as e:
+            logger.warning("Cookie extraction from %s failed: %s", browser, e)
+
+    logger.warning(
+        "Could not extract YouTube cookies from any browser. "
+        "Downloads may fail with HTTP 403. "
+        "To fix manually: yt-dlp --cookies-from-browser chromium "
+        "--cookies config/yt_cookies.txt --skip-download https://www.youtube.com"
+    )
+    return False
+
+
 def _url_to_cache_path(url):
     """Generate a deterministic cache filename from a URL."""
     url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
@@ -212,7 +270,26 @@ def download_video(url, title="Unknown"):
         'postprocessors': [],
         # Write to a temp file first, rename on success
         'nopart': True,
+        # HTTP headers to reduce bot-detection fingerprinting
+        'http_headers': {
+            'User-Agent': (
+                'Mozilla/5.0 (Linux; Android 11; Pixel 5) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/124.0.0.0 Mobile Safari/537.36'
+            ),
+        },
     }
+
+    # Use cookies file if present (fixes HTTP 403 bot-detection on Pi).
+    # Export from Chrome/Firefox on your desktop:
+    #   yt-dlp --cookies-from-browser chrome --cookies config/yt_cookies.txt ""
+    # or use a browser extension like "Get cookies.txt LOCALLY".
+    cookies_path = os.path.join(PROJECT_ROOT, "config", "yt_cookies.txt")
+    if os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
+        logger.info("Using cookies file for YouTube download: %s", cookies_path)
+    else:
+        logger.debug("No cookies file found at %s -- downloads may 403 on some videos", cookies_path)
 
     logger.info("Downloading '%s'...", title)
     start = time.time()

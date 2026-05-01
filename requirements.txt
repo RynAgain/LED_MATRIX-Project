@@ -17,7 +17,9 @@ Pillow>=10.0.0
 # On Raspberry Pi: if pip install fails, use system package instead:
 #   sudo apt-get install python3-opencv
 opencv-python-headless>=4.8.0
-numpy>=1.24.0
+# NumPy must stay <2: opencv-python-headless 4.x is compiled against NumPy 1.x
+# and will fail with "AttributeError: _ARRAY_API not found" on NumPy 2.x.
+numpy>=1.24.0,<2
 # Install yt-dlp from GitHub source (gets extraction fixes hours before PyPI)
 yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2025.03.31.tar.gz
 
