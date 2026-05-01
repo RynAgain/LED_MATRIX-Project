@@ -250,11 +250,14 @@ def download_video(url, title="Unknown"):
     # The 'b' prefix means "best" pre-merged format at that quality level.
     ydl_opts = {
         'format': (
-            # Pre-merged formats only (no separate audio+video requiring ffmpeg merge):
+            # Accept HLS (m3u8) streams from tv/web_safari clients (format 92 etc.)
+            # as well as pre-merged mp4 formats. HLS works with opencv VideoCapture.
             f'best[height<={MAX_HEIGHT}][ext=mp4][vcodec!=none][acodec!=none]/'
             f'best[height<={MAX_HEIGHT}][vcodec!=none][acodec!=none]/'
-            'worst[vcodec!=none][acodec!=none]/'
+            f'best[height<={MAX_HEIGHT}][protocol=m3u8_native]/'
+            f'best[height<={MAX_HEIGHT}][protocol=m3u8]/'
             f'best[height<={MAX_HEIGHT}]/'
+            'worst[vcodec!=none][acodec!=none]/'
             'worst/'
             'best'
         ),
@@ -267,20 +270,21 @@ def download_video(url, title="Unknown"):
         'fragment_retries': 3,
         'postprocessors': [],
         'nopart': True,
-        # tv_embedded client bypasses YouTube's PO token / bot-detection (HTTP 403)
-        # that blocks the default web/android clients on headless server IPs.
-        # Falls back to web client if tv_embedded is unavailable for a video.
+        # Use tv + web_safari clients -- these use HLS streams (format 92) that
+        # bypass YouTube's PO token / bot-detection without requiring cookies.
+        # Tested working on headless Pi with deno in PATH.
+        # Do NOT use tv_embedded -- YouTube blocks it ("no longer supported").
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv_embedded', 'web'],
+                'player_client': ['tv', 'web_safari'],
             }
         },
     }
 
-    # Use cookies file if present (optional enhancement -- not required with tv_embedded).
+    # Use cookies file if present (optional -- not required with tv/web_safari HLS).
     # To generate on a machine logged into YouTube:
     #   yt-dlp --cookies-from-browser chrome --cookies config/yt_cookies.txt \
-    #          --skip-download "https://www.youtube.com"
+    #          --skip-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     cookies_path = os.path.join(PROJECT_ROOT, "config", "yt_cookies.txt")
     if os.path.exists(cookies_path) and os.path.getsize(cookies_path) > 100:
         ydl_opts['cookiefile'] = cookies_path
