@@ -947,7 +947,9 @@ def main():
                     logger.info("Skipping %s (no internet)", name)
                     continue
 
-            feat_duration = feature.get("duration", duration)  # Per-feature or global
+            # Per-feature duration, capped at 300s to prevent accidental
+            # multi-hour hangs (watchdog fires at 2x duration).
+            feat_duration = min(feature.get("duration", duration), 300)
             clear_stop()
             _current_feature = name
             write_status(name, "running")

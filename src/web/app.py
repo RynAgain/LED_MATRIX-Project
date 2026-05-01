@@ -170,13 +170,30 @@ def load_display_config():
 
 
 def save_display_config(config):
-    """Save the display configuration."""
+    """Save the display configuration atomically.
+
+    Writes to a temp file first, then renames into place so a crash or
+    power-loss mid-write never leaves a truncated / corrupt config.json.
+    """
+    import tempfile
+    tmp_path = None
     try:
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(config, f, indent=2)
+        config_dir = os.path.dirname(CONFIG_PATH)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=config_dir, suffix=".tmp", delete=False
+        ) as tmp:
+            json.dump(config, tmp, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, CONFIG_PATH)
         return True
     except Exception as e:
         logger.error("Failed to save display config: %s", e)
+        # Clean up temp file if it exists
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
         return False
 
 
@@ -730,16 +747,34 @@ def create_app():
                 key = f"feature_{feature['name']}"
                 feature["enabled"] = key in request.form
 
-                # Per-feature duration
+                # Per-feature duration — cap at 300s to prevent accidental
+                # multi-hour hangs (watchdog fires at 2x duration).
                 dur_key = f"duration_{feature['name']}"
                 dur_val = request.form.get(dur_key, "").strip()
                 if dur_val:
                     try:
-                        feature["duration"] = int(dur_val)
+                        dur_int = int(dur_val)
+                        if dur_int < 5:
+                            dur_int = 5
+                        elif dur_int > 300:
+                            dur_int = 300
+                        feature["duration"] = dur_int
                     except ValueError:
                         pass
                 elif "duration" in feature:
                     del feature["duration"]  # Remove if cleared
+
+            # Guard: refuse to save if every feature is disabled.
+            # This prevents a mis-click from leaving the matrix with nothing
+            # to display, which causes a boot-loop or single-feature loop.
+            enabled_count = sum(1 for f in sequence if f.get("enabled", False))
+            if enabled_count == 0:
+                flash(
+                    "Cannot save: at least one feature must be enabled. "
+                    "No changes were made.",
+                    "error"
+                )
+                return redirect(url_for("features"))
 
             # Update display duration
             duration = _safe_int(request.form.get("display_duration", 60), 0)
