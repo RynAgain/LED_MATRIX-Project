@@ -259,8 +259,11 @@ def _command_watcher():
 
 
 def handle_play_video(matrix, url, title="Unknown", duration=300):
-    """Handle a play_video command by streaming a YouTube video.
-    
+    """Handle a play_video command by playing a YouTube video.
+
+    Checks the local cache first (downloaded_videos/<md5hash>.mp4).
+    Falls back to live streaming if not cached.
+
     Args:
         matrix: RGBMatrix instance.
         url: YouTube video URL.
@@ -270,14 +273,22 @@ def handle_play_video(matrix, url, title="Unknown", duration=300):
     logger.info("Playing video: %s (%s)", title, url)
     write_status(f"YouTube: {title}", "running")
     try:
-        from src.display.youtube_stream import stream_video, FRAME_INTERVAL
+        from src.display.youtube_stream import FRAME_INTERVAL, _url_to_cache_path, _is_cached
         import cv2
         from PIL import Image
 
-        video_url = stream_video(url)
+        # Prefer local cache over live streaming (avoids 403 on Pi)
+        if _is_cached(url):
+            video_url = _url_to_cache_path(url)
+            logger.info("Playing from local cache: %s", video_url)
+        else:
+            from src.display.youtube_stream import stream_video
+            video_url = stream_video(url)
+            logger.info("Streaming live: %s", video_url)
+
         cap = cv2.VideoCapture(video_url)
         if not cap.isOpened():
-            logger.error("Failed to open video stream: %s", video_url)
+            logger.error("Failed to open video: %s", video_url)
             return
 
         start = time.time()
