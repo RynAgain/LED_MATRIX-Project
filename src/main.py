@@ -909,15 +909,6 @@ def main():
     # Pre-cache YouTube videos at boot if youtube_stream is enabled.
     # Downloads happen in a background thread while a loading ring
     # animates on the matrix. If no internet, this gracefully skips.
-    yt_enabled = any(f.get("name") == "youtube_stream" for f in enabled_features)
-    if yt_enabled:
-        # Refresh YouTube cookies from the system browser before caching.
-        # This bypasses HTTP 403 bot-detection that blocks headless downloads.
-        try:
-            from src.display.youtube_stream import refresh_youtube_cookies
-            refresh_youtube_cookies()
-        except Exception as e:
-            logger.warning("Cookie refresh failed (non-fatal): %s", e)
     _precache_youtube_videos(matrix, enabled_features)
 
     # Store matrix reference for web panel preview
