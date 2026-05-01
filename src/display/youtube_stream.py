@@ -250,13 +250,13 @@ def download_video(url, title="Unknown"):
     # The 'b' prefix means "best" pre-merged format at that quality level.
     ydl_opts = {
         'format': (
-            # Accept HLS (m3u8) streams from tv/web_safari clients (format 92 etc.)
-            # as well as pre-merged mp4 formats. HLS works with opencv VideoCapture.
-            f'best[height<={MAX_HEIGHT}][ext=mp4][vcodec!=none][acodec!=none]/'
-            f'best[height<={MAX_HEIGHT}][vcodec!=none][acodec!=none]/'
-            f'best[height<={MAX_HEIGHT}][protocol=m3u8_native]/'
-            f'best[height<={MAX_HEIGHT}][protocol=m3u8]/'
-            f'best[height<={MAX_HEIGHT}]/'
+            # Format 18 (360p mp4) is the most commonly available format from
+            # the tv/web_safari clients without PO tokens. Accept up to 480p
+            # to ensure we get a downloadable format. We resize to 64x64 anyway.
+            'best[height<=480][ext=mp4][vcodec!=none][acodec!=none]/'
+            'best[height<=480][vcodec!=none][acodec!=none]/'
+            'best[ext=mp4][vcodec!=none][acodec!=none]/'
+            'best[vcodec!=none][acodec!=none]/'
             'worst[vcodec!=none][acodec!=none]/'
             'worst/'
             'best'
