@@ -62,7 +62,7 @@
       "enabled": false
     },
     {
-      "name": "youtube_stream",
+      "name": "video_player",
       "type": "video",
       "enabled": false
     },

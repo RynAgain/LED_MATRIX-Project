@@ -33,16 +33,6 @@ log "Checking WiFi connectivity..."
     log "WARNING: WiFi connection check failed, attempting update anyway"
 }
 
-# Keep yt-dlp updated from GitHub source (gets fixes hours before PyPI release)
-log "Updating yt-dlp from GitHub..."
-"$VENV_PYTHON" -m pip install --upgrade --quiet "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz" 2>&1 | tee -a "$LOG_FILE" || {
-    # Fallback to PyPI if GitHub source fails
-    log "GitHub install failed, trying PyPI..."
-    "$VENV_PYTHON" -m pip install --upgrade --quiet yt-dlp 2>&1 | tee -a "$LOG_FILE" || {
-        log "WARNING: yt-dlp update failed (non-fatal)"
-    }
-}
-
 # Run the auto-updater
 cd "$PROJECT_ROOT"
 "$VENV_PYTHON" -m src.updater.auto_update update 2>&1 | tee -a "$LOG_FILE"

@@ -73,7 +73,7 @@ cat > "$CONFIG" << 'JSONEOF'
     {"name": "billiards",       "type": "game",    "enabled": false},
     {"name": "time_display",    "type": "utility", "enabled": true},
     {"name": "bitcoin_price",   "type": "utility", "enabled": false},
-    {"name": "youtube_stream",  "type": "video",   "enabled": false},
+    {"name": "video_player",    "type": "video",   "enabled": false},
     {"name": "plasma",          "type": "effect",  "enabled": true},
     {"name": "matrix_rain",     "type": "effect",  "enabled": true},
     {"name": "starfield",       "type": "effect",  "enabled": true},

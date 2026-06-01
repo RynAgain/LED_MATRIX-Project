@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Features that require internet connectivity
 INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
-                     "youtube_stream", "github_stats"}
+                     "video_player", "github_stats"}
 
 
 def _check_internet(timeout=3):
@@ -259,32 +259,31 @@ def _command_watcher():
 
 
 def handle_play_video(matrix, url, title="Unknown", duration=300):
-    """Handle a play_video command by playing a YouTube video.
+    """Handle a play_video command by playing a video from cache.
 
     Checks the local cache first (downloaded_videos/<md5hash>.mp4).
-    Falls back to live streaming if not cached.
+    Only cached videos are supported -- add URLs to config/video_urls.csv
+    and reboot to download them.
 
     Args:
         matrix: RGBMatrix instance.
-        url: YouTube video URL.
+        url: Direct video URL.
         title: Video title for logging.
         duration: Max playback duration in seconds.
     """
     logger.info("Playing video: %s (%s)", title, url)
-    write_status(f"YouTube: {title}", "running")
+    write_status(f"Video: {title}", "running")
     try:
-        from src.display.youtube_stream import FRAME_INTERVAL, _url_to_cache_path, _is_cached
+        from src.display.video_player import FRAME_INTERVAL, _url_to_cache_path, _is_cached
         import cv2
         from PIL import Image
 
-        # Prefer local cache over live streaming (avoids 403 on Pi)
         if _is_cached(url):
             video_url = _url_to_cache_path(url)
             logger.info("Playing from local cache: %s", video_url)
         else:
-            from src.display.youtube_stream import stream_video
-            video_url = stream_video(url)
-            logger.info("Streaming live: %s", video_url)
+            logger.warning("Video not cached: %s -- add to config/video_urls.csv and reboot", url)
+            return
 
         cap = cv2.VideoCapture(video_url)
         if not cap.isOpened():
@@ -697,47 +696,45 @@ def _handle_command(cmd, matrix, duration):
         _show_pixel_art(matrix)
 
 
-# Maximum time (seconds) the YouTube precache can run at boot.
+# Maximum time (seconds) the video precache can run at boot.
 # Prevents the Pi from being saturated by downloads forever.
 _PRECACHE_TIMEOUT = 180
 
 
-def _precache_youtube_videos(matrix, enabled_features):
-    """Pre-download YouTube videos at boot with a loading ring animation.
+def _precache_videos(matrix, enabled_features):
+    """Pre-download videos at boot with a loading ring animation.
 
-    Runs only if youtube_stream is in the enabled features list.
-    Downloads happen in a LOW-PRIORITY background thread with a hard
-    timeout so the Pi stays responsive for the web panel and display.
-    Already-cached videos are detected instantly (no download).
+    Runs only if video_player (or legacy youtube_stream) is in the
+    enabled features list. Downloads happen in a LOW-PRIORITY background
+    thread with a hard timeout so the Pi stays responsive for the web
+    panel and display. Already-cached videos are detected instantly.
     """
-    # Check if youtube_stream is enabled
-    yt_enabled = any(f.get("name") == "youtube_stream" for f in enabled_features)
-    if not yt_enabled:
+    # Check if video_player or legacy youtube_stream is enabled
+    vp_enabled = any(f.get("name") in ("video_player", "youtube_stream")
+                     for f in enabled_features)
+    if not vp_enabled:
         return
 
-    logger.info("YouTube is enabled -- pre-caching videos at boot (timeout: %ds)...",
+    logger.info("Video player enabled -- pre-caching videos at boot (timeout: %ds)...",
                 _PRECACHE_TIMEOUT)
 
     try:
-        from src.display.youtube_stream import (
+        from src.display.video_player import (
             _ensure_dependencies, read_urls_from_csv,
-            download_video, _is_cached
+            download_video, _is_cached, _get_csv_path
         )
     except ImportError as e:
-        logger.warning("Cannot import youtube_stream for precaching: %s", e)
+        logger.warning("Cannot import video_player for precaching: %s", e)
         return
 
     if not _ensure_dependencies():
-        logger.warning("YouTube dependencies missing, skipping precache")
+        logger.warning("Video player dependencies missing, skipping precache")
         return
 
-    # Skip yt-dlp update at boot -- it's CPU-heavy and the updater timer
-    # handles it separately. Videos will download fine with the current version.
-
-    csv_path = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
+    csv_path = _get_csv_path()
     urls = read_urls_from_csv(csv_path)
     if not urls:
-        logger.info("No YouTube URLs to precache")
+        logger.info("No video URLs to precache")
         return
 
     # Check how many are already cached (instant, no downloads)
@@ -815,9 +812,9 @@ def _precache_youtube_videos(matrix, enabled_features):
     t = status["total"]
     remaining = t - d - f
     if remaining > 0:
-        logger.info("YouTube precache: %d cached, %d failed, %d deferred to next boot", d, f, remaining)
+        logger.info("Video precache: %d cached, %d failed, %d deferred to next boot", d, f, remaining)
     else:
-        logger.info("YouTube precache complete: %d/%d cached, %d failed", d, t, f)
+        logger.info("Video precache complete: %d/%d cached, %d failed", d, t, f)
 
 
 def ensure_wifi():
@@ -917,10 +914,10 @@ def main():
 
     logger.info("Enabled features: %s", [f["name"] for f in enabled_features])
 
-    # Pre-cache YouTube videos at boot if youtube_stream is enabled.
+    # Pre-cache videos at boot if video_player is enabled.
     # Downloads happen in a background thread while a loading ring
     # animates on the matrix. If no internet, this gracefully skips.
-    _precache_youtube_videos(matrix, enabled_features)
+    _precache_videos(matrix, enabled_features)
 
     # Store matrix reference for web panel preview
     import src.main as _self_module

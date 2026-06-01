@@ -14,7 +14,8 @@ FEATURE_MODULES = {
     "billiards": "src.display.billiards",
     "time_display": "src.display.time_display",
     "bitcoin_price": "src.display.bitcoin_price",
-    "youtube_stream": "src.display.youtube_stream",
+    "video_player": "src.display.video_player",
+    "youtube_stream": "src.display.youtube_stream",  # legacy alias -> video_player
     "fire": "src.display.fire",
     "plasma": "src.display.plasma",
     "matrix_rain": "src.display.matrix_rain",

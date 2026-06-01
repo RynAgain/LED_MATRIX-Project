@@ -62,7 +62,7 @@ DISPLAY_MODULES = [
     "src.display.billiards",
     "src.display.time_display",
     "src.display.bitcoin_price",
-    "src.display.youtube_stream",
+    "src.display.video_player",
     "src.display.fire",
     "src.display.plasma",
     "src.display.matrix_rain",
@@ -365,26 +365,32 @@ class TestDisplayModuleInterface:
         tracker.stop()
         assert tracker.had_output, "boot_screen produced no visual output"
 
-    def test_youtube_stream_interface(self):
-        """YouTube stream should be importable with correct interface."""
-        mod = importlib.import_module("src.display.youtube_stream")
-        assert hasattr(mod, "run"), "youtube_stream missing run()"
+    def test_video_player_interface(self):
+        """Video player should be importable with correct interface."""
+        mod = importlib.import_module("src.display.video_player")
+        assert hasattr(mod, "run"), "video_player missing run()"
         assert callable(mod.run)
-        assert hasattr(mod, "read_urls_from_csv"), "youtube_stream missing read_urls_from_csv()"
-        assert hasattr(mod, "download_video"), "youtube_stream missing download_video()"
+        assert hasattr(mod, "read_urls_from_csv"), "video_player missing read_urls_from_csv()"
+        assert hasattr(mod, "download_video"), "video_player missing download_video()"
 
-    def test_youtube_stream_runs_briefly(self, matrix):
-        """YouTube stream should run briefly without crashing (no cached videos)."""
+    def test_video_player_runs_briefly(self, matrix):
+        """Video player should run briefly without crashing (no cached videos)."""
         tracker = _PixelTracker(matrix).start()
-        mod = importlib.import_module("src.display.youtube_stream")
+        mod = importlib.import_module("src.display.video_player")
         # Mock _ensure_dependencies to return False so it exits immediately
-        # without requiring cv2/yt-dlp
+        # without requiring cv2
         with patch.object(mod, "_ensure_dependencies", return_value=False):
             mod.run(matrix, duration=2)
         tracker.stop()
-        # youtube_stream exits immediately when deps unavailable; swap count
+        # video_player exits immediately when deps unavailable; swap count
         # is the best signal here (pixels may stay blank)
         # No hard assertion -- the module legitimately does nothing without deps
+
+    def test_youtube_stream_backward_compat(self):
+        """Legacy youtube_stream wrapper should still be importable."""
+        mod = importlib.import_module("src.display.youtube_stream")
+        assert hasattr(mod, "run"), "youtube_stream wrapper missing run()"
+        assert callable(mod.run)
 
 
 class TestMainModule:

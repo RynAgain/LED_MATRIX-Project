@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}YouTube - LED Matrix Control{% endblock %}
+{% block title %}Videos - LED Matrix Control{% endblock %}
 {% block content %}
-<h1>YouTube Player</h1>
+<h1>Video Player</h1>
 
 <div class="card">
     <h2>Play a URL</h2>
     <form id="custom-url-form" onsubmit="playCustomUrl(event)">
         <div class="form-group">
-            <label for="custom_url">YouTube URL</label>
-            <input type="text" id="custom_url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+            <label for="custom_url">Video URL</label>
+            <input type="text" id="custom_url" name="url" placeholder="https://archive.org/download/.../video.mp4" required>
         </div>
         <button type="submit" class="btn btn-primary btn-full">Play Now</button>
     </form>
@@ -16,7 +16,7 @@
 
 <div class="card">
     <h2>Playlist</h2>
-    <p class="card-hint">Tap a video to play it instantly on the LED matrix.</p>
+    <p class="card-hint">Tap a video to play it instantly on the LED matrix. Use direct MP4 links (archive.org, GitHub Releases, S3, etc.).</p>
 
     {% if videos %}
     <div class="video-list">
@@ -31,18 +31,18 @@
         {% endfor %}
     </div>
     {% else %}
-    <p class="empty-state">No videos in playlist. Add URLs to config/youtube_urls.csv</p>
+    <p class="empty-state">No videos in playlist. Add direct video URLs below.</p>
     {% endif %}
 </div>
 
 <div class="card">
     <h2>Manage Playlist</h2>
-    <form method="POST" action="{{ url_for('youtube') }}">
+    <form method="POST" action="{{ url_for('videos_page') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="add">
         <div class="form-group">
-            <label for="new_url">YouTube URL</label>
-            <input type="text" id="new_url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+            <label for="new_url">Video URL</label>
+            <input type="text" id="new_url" name="url" placeholder="https://archive.org/download/.../video.mp4" required>
         </div>
         <div class="form-row">
             <div class="form-group">
@@ -62,7 +62,7 @@
         {% for video in videos %}
         <div class="video-manage-item">
             <span>{{ video.title }}</span>
-            <form method="POST" action="{{ url_for('youtube') }}" class="inline-form">
+            <form method="POST" action="{{ url_for('videos_page') }}" class="inline-form">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="remove">
                 <input type="hidden" name="index" value="{{ loop.index0 }}">
@@ -86,7 +86,7 @@ function playVideo(url, title) {
         .then(d => {
             if (d.success) {
                 document.querySelector('.container').insertAdjacentHTML('afterbegin',
-                    '<div class="alert alert-success">Now playing: ' + title + '</div>');
+                    '<div class="alert alert-success">Now playing: ' + escapeHtml(title) + '</div>');
             } else {
                 alert('Error: ' + d.message);
             }

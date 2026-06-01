@@ -62,3 +62,9 @@ logs/pixel_art.json
 
 # Config backups created by auto-updater
 config/.backup/
+
+# Git repair backup (preserved old broken .git data; never commit)
+.git_broken_backup/
+
+# Agent/editor scratch data (runtime DBs, embeddings, conversation state)
+.agent/

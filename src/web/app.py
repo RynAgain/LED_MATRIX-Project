@@ -115,7 +115,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # Paths
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "config.json")
 WEB_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "web.json")
-CSV_PATH = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
+CSV_PATH = os.path.join(PROJECT_ROOT, "config", "video_urls.csv")
+# Fallback to legacy path if new file doesn't exist yet
+if not os.path.exists(CSV_PATH):
+    _legacy_csv = os.path.join(PROJECT_ROOT, "config", "youtube_urls.csv")
+    if os.path.exists(_legacy_csv):
+        CSV_PATH = _legacy_csv
 COMMAND_PATH = os.path.join(PROJECT_ROOT, "logs", "command.json")
 WIFI_CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "wifi.json")
 MESSAGES_PATH = os.path.join(PROJECT_ROOT, "config", "messages.json")
@@ -362,8 +367,8 @@ def save_wireframe_config(data):
 import csv
 
 
-def load_youtube_playlist():
-    """Load YouTube video playlist from CSV."""
+def load_video_playlist():
+    """Load video playlist from CSV."""
     videos = []
     try:
         with open(CSV_PATH, "r") as f:
@@ -379,8 +384,8 @@ def load_youtube_playlist():
     return videos
 
 
-def save_youtube_playlist(videos):
-    """Save YouTube video playlist to CSV."""
+def save_video_playlist(videos):
+    """Save video playlist to CSV."""
     try:
         with open(CSV_PATH, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["url", "title", "duration"])
@@ -979,11 +984,12 @@ def create_app():
         except Exception as e:
             return jsonify({"success": False, "message": str(e)})
 
-    @app.route("/youtube", methods=["GET", "POST"])
+    @app.route("/videos", methods=["GET", "POST"])
+    @app.route("/youtube", methods=["GET", "POST"])  # legacy URL
     @login_required
-    def youtube():
-        """YouTube playlist management page."""
-        videos = load_youtube_playlist()
+    def videos_page():
+        """Video playlist management page."""
+        videos = load_video_playlist()
 
         if request.method == "POST":
             action = request.form.get("action")
@@ -994,17 +1000,17 @@ def create_app():
                 dur = request.form.get("duration", "x").strip()
                 if url and title:
                     videos.append({"url": url, "title": title, "duration": dur})
-                    save_youtube_playlist(videos)
+                    save_video_playlist(videos)
                     flash(f"Added '{title}' to playlist", "success")
 
             elif action == "remove":
                 idx = _safe_int(request.form.get("index", -1), -1)
                 if 0 <= idx < len(videos):
                     removed = videos.pop(idx)
-                    save_youtube_playlist(videos)
+                    save_video_playlist(videos)
                     flash(f"Removed '{removed.get('title', '')}' from playlist", "success")
 
-            return redirect(url_for("youtube"))
+            return redirect(url_for("videos_page"))
 
         return render_template("youtube.html", videos=videos, user=session.get("user"))
 

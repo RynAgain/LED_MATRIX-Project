@@ -56,7 +56,7 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 ### Video
 | Feature | Description |
 |---------|-------------|
-| YouTube Stream | Pre-cached YouTube playlist playback at 15 FPS |
+| Video Player | Pre-cached video playlist playback at 15 FPS (direct MP4 URLs) |
 
 ### System
 | Feature | Description |
@@ -77,7 +77,7 @@ A password-protected web interface accessible from any device on the same networ
 |-----|-------------|
 | Dashboard | Live status, current feature, uptime, CPU/RAM/disk/temp bars, live matrix preview |
 | Features | Toggle features on/off, set per-feature duration |
-| YouTube | Manage video playlist, trigger playback |
+| Videos | Manage video playlist, trigger playback |
 | Messages | Configure scrolling text messages |
 | Stocks | Set stock symbols for ticker and heatmap |
 | Timer | Configure countdown target |
@@ -106,7 +106,6 @@ sudo bash scripts/install.sh
 The installer sets up:
 - System packages (Python 3, pip, git, NetworkManager, ffmpeg)
 - Python virtual environment + dependencies
-- yt-dlp installed directly from GitHub source (latest extraction fixes, ahead of PyPI)
 - systemd services for display, web panel, and auto-updater
 - Logs directory
 
@@ -149,7 +148,7 @@ sudo reboot
 On boot, the system will:
 1. Show an animated boot screen on the matrix (~4 seconds)
 2. Connect to WiFi
-3. Pre-cache YouTube videos (if youtube_stream is enabled)
+3. Pre-cache videos (if video_player is enabled)
 4. Begin cycling through enabled features
 5. Start the web control panel on port 5000
 6. Check for GitHub updates every 30 minutes
@@ -164,11 +163,11 @@ Power on
   --> systemd starts led-matrix.service (2s delay)
   --> Boot screen animation (ring burst + "LED MATRIX" + loading bar)
   --> WiFi connectivity check
-  --> YouTube video pre-caching (with loading ring, if enabled)
+  --> Video pre-caching (with loading ring, if enabled)
   --> Feature display loop begins
 ```
 
-YouTube videos are downloaded once to `downloaded_videos/` and cached permanently. Subsequent boots play instantly from disk. No internet required for cached content.
+Videos are downloaded once to `downloaded_videos/` and cached permanently. Subsequent boots play instantly from disk. No internet required for cached content.
 
 ---
 
@@ -180,7 +179,7 @@ LED_MATRIX-Project/
     config.json            # Feature sequence, hardware settings, display options
     web.json               # Web panel credentials and settings
     wifi.json              # WiFi network credentials
-    youtube_urls.csv       # YouTube playlist
+    video_urls.csv         # Video playlist (direct MP4 URLs)
     schedule.json          # Night mode / scheduling
     stocks.json            # Stock ticker symbols
     messages.json          # Text scroller messages
@@ -195,7 +194,6 @@ LED_MATRIX-Project/
     update.sh              # Called by systemd timer for auto-updates
     configure_matrix.sh    # Interactive hardware configuration wizard
     troubleshoot.sh        # System diagnostic tool
-    test_youtube.sh        # YouTube download diagnostic
   services/                # systemd unit files
     led-matrix.service     # Main display service (runs as root for GPIO)
     led-matrix-web.service # Web control panel
@@ -214,7 +212,7 @@ LED_MATRIX-Project/
       app.py               # Routes, auth, API endpoints
       templates/           # Jinja2 HTML templates (13 pages + base)
       static/              # CSS styles
-  downloaded_videos/       # YouTube video cache (persists across reboots)
+  downloaded_videos/       # Video cache (persists across reboots)
   rgbmatrix/               # RGB LED matrix Cython bindings (optimized SetImage pipeline)
   tests/                   # Test suite (526 tests, runs without Pi hardware)
   logs/                    # Runtime logs (display.log, updater.log, status.json)
@@ -304,26 +302,28 @@ tail -f logs/updater.log
 # Full system diagnostic
 sudo bash scripts/troubleshoot.sh
 
-# YouTube download diagnostic
-bash scripts/test_youtube.sh
-
 # Hardware configuration
 sudo bash scripts/configure_matrix.sh
 ```
 
-### YouTube Video Management
+### Video Playlist Management
 
-Videos listed in `config/youtube_urls.csv` are downloaded at boot and cached in `downloaded_videos/`. Format:
+Videos listed in `config/video_urls.csv` are downloaded at boot via direct HTTP and cached in `downloaded_videos/`. Format:
 
 ```csv
 url,title,duration
-https://www.youtube.com/watch?v=...,Video Title,1
+https://archive.org/download/example/video.mp4,Video Title,1
 ```
 
+- `url`: any direct HTTP/HTTPS link to a video file (archive.org, S3, GitHub Releases, self-hosted, etc.)
 - `duration`: playback time in minutes (`x` = full video)
 - Videos are downloaded once and cached permanently
 - No internet needed after initial download
-- yt-dlp is auto-updated before each download session
+
+> **Note:** YouTube URL support was removed. YouTube's increasingly aggressive anti-bot measures
+> (PO tokens, cookie expiration, rate limiting) made yt-dlp-based downloads unreliable on headless
+> devices like the Pi. Direct MP4 URLs from stable hosts like archive.org are far more reliable
+> and require no authentication or special tooling.
 
 ---
 
@@ -352,8 +352,7 @@ pytest
 
 1. A systemd timer fires every 30 minutes (and 2 minutes after boot)
 2. Ensures WiFi connectivity
-3. Updates yt-dlp from GitHub source (latest YouTube extraction fixes)
-4. Runs `git fetch` + `git pull --ff-only` from the configured branch
+3. Runs `git fetch` + `git pull --ff-only` from the configured branch
 5. Detects and auto-repairs corrupt Git objects (`prune`, `gc`, `fsck`)
 6. Installs any new Python dependencies
 7. Restarts both the display service and the web panel

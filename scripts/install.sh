@@ -113,8 +113,6 @@ STEP=$((STEP + 1))
 log_info "Step $STEP/$TOTAL_STEPS: Installing Python dependencies..."
 "$VENV_PATH/bin/pip" install --quiet --upgrade pip
 "$VENV_PATH/bin/pip" install --quiet -r "$PROJECT_ROOT/requirements.txt"
-# Install yt-dlp from GitHub source (latest fixes, ahead of PyPI)
-"$VENV_PATH/bin/pip" install --quiet --upgrade "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz" 2>/dev/null || true
 log_info "Python dependencies installed"
 
 # ---------------------------------------------------------------------------

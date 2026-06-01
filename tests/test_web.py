@@ -183,7 +183,12 @@ class TestAPI:
 class TestNewPages:
     """Test new web pages."""
 
-    def test_youtube_page(self, auth_client):
+    def test_videos_page(self, auth_client):
+        response = auth_client.get("/videos")
+        assert response.status_code == 200
+
+    def test_youtube_legacy_redirect(self, auth_client):
+        """Legacy /youtube URL should still work."""
         response = auth_client.get("/youtube")
         assert response.status_code == 200
 
@@ -245,7 +250,7 @@ class TestNewAPIs:
     def test_play_video_api(self, auth_client):
         response = auth_client.post(
             "/api/play",
-            json={"url": "https://youtube.com/watch?v=test", "title": "Test"}
+            json={"url": "https://archive.org/download/test/test.mp4", "title": "Test"}
         )
         assert response.status_code == 200
 
