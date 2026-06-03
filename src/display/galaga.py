@@ -33,18 +33,60 @@ class Ship:
             self.bullets.append([self.x, self.y - 2])
             self.cooldown = 5
 
-    def update(self, aliens):
+    def update(self, aliens, enemy_bullets):
+        """Smart AI: prioritizes dodging enemy bullets, then targets lowest aliens.
+
+        Strategy:
+        (a) Scan for enemy bullets in a danger zone (within ±4 pixels horizontally,
+            within 15 pixels vertically above the ship). If a threat is found,
+            move away from it (dodge).
+        (b) If no immediate threat, position under the lowest (most dangerous)
+            alien to shoot it efficiently.
+        (c) Fire every frame the cooldown allows — maximize damage output.
+        (d) Prioritize survival (dodging) over attacking when threats are close.
+        """
         self.cooldown -= 1
-        # AI: move toward nearest alien column
-        if aliens:
-            nearest = min(aliens, key=lambda a: abs(a.x - self.x))
-            if nearest.x < self.x:
+
+        # --- Phase 1: Threat detection & dodging ---
+        danger_x_range = 4   # Horizontal danger zone (pixels from ship center)
+        danger_y_range = 18  # Vertical danger zone (pixels above ship)
+        nearest_threat = None
+        nearest_threat_dist = float('inf')
+
+        for b in enemy_bullets:
+            bx, by = b[0], b[1]
+            # Is this bullet in our danger column and approaching from above?
+            if abs(bx - self.x) <= danger_x_range and 0 < (self.y - by) <= danger_y_range:
+                dist = self.y - by  # Smaller = more urgent
+                if dist < nearest_threat_dist:
+                    nearest_threat_dist = dist
+                    nearest_threat = b
+
+        if nearest_threat is not None:
+            # Dodge: move away from the threatening bullet
+            bx = nearest_threat[0]
+            if bx <= self.x:
+                # Bullet is to our left or center-left — move right
+                self.x = min(WIDTH - 3, self.x + 2)
+            else:
+                # Bullet is to our right — move left
+                self.x = max(2, self.x - 2)
+        elif aliens:
+            # --- Phase 2: Offensive positioning ---
+            # Target the lowest alien (closest to us = most dangerous)
+            # Among equally low aliens, prefer the one closest horizontally
+            lowest_y = max(a.y for a in aliens)
+            lowest_aliens = [a for a in aliens if a.y >= lowest_y - 3]
+            target = min(lowest_aliens, key=lambda a: abs(a.x - self.x))
+
+            if target.x < self.x:
                 self.x = max(2, self.x - 1)
-            elif nearest.x > self.x:
+            elif target.x > self.x:
                 self.x = min(WIDTH - 3, self.x + 1)
-            # Shoot when roughly aligned
-            if abs(nearest.x - self.x) < 3:
-                self.shoot()
+
+        # --- Phase 3: Fire as often as possible ---
+        # Always shoot when cooldown allows (maximize fire rate)
+        self.shoot()
 
         # Update bullets
         for b in self.bullets[:]:
@@ -86,6 +128,7 @@ def run(matrix, duration=60):
     alien_move_timer = 0
     score = 0
     explosions = []  # [(x, y, timer)]
+    enemy_bullets = []  # [[x, y], ...] — bullets fired by aliens
 
     try:
         while time.time() - start_time < duration:
@@ -121,6 +164,17 @@ def run(matrix, duration=60):
                     for a in live_aliens:
                         a.y += 2
 
+                # Enemy shooting — aliens periodically fire bullets downward
+                if live_aliens and random.random() > 0.5:
+                    shooter = random.choice(live_aliens)
+                    enemy_bullets.append([shooter.x, shooter.y + 2])
+
+            # Update enemy bullets (move downward)
+            for b in enemy_bullets[:]:
+                b[1] += 2
+                if b[1] >= HEIGHT:
+                    enemy_bullets.remove(b)
+
             # Check bullet-alien collisions
             for b in ship.bullets[:]:
                 for a in aliens:
@@ -132,9 +186,9 @@ def run(matrix, duration=60):
                         explosions.append([a.x, a.y, 5])
                         break
 
-            # Update ship AI
+            # Update ship AI (pass enemy_bullets for dodge logic)
             live_aliens = [a for a in aliens if a.alive]
-            ship.update(live_aliens)
+            ship.update(live_aliens, enemy_bullets)
 
             # Reset if all aliens dead
             if not live_aliens:
@@ -147,9 +201,13 @@ def run(matrix, duration=60):
 
             ship.draw(draw)
 
-            # Draw bullets
+            # Draw player bullets
             for b in ship.bullets:
                 draw.rectangle([b[0], b[1], b[0], b[1] + 1], fill=(255, 255, 100))
+
+            # Draw enemy bullets
+            for b in enemy_bullets:
+                draw.rectangle([b[0], b[1], b[0], b[1] + 1], fill=(255, 60, 60))
 
             # Draw explosions
             for exp in explosions[:]:

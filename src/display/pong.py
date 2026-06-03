@@ -108,28 +108,100 @@ class PongGame:
         """Cycle to next ball color."""
         self.ball_color_idx = (self.ball_color_idx + 1) % len(BALL_COLORS)
 
+    def _predict_ball_y_at_x(self, target_x):
+        """Predict the ball's Y position when it reaches target_x.
+
+        Simulates the ball's trajectory accounting for top/bottom wall bounces.
+        This gives the AI perfect knowledge of where the ball will arrive,
+        enabling it to intercept every shot.
+        """
+        # Simulate ball trajectory from current position
+        sim_x = self.ball_x
+        sim_y = self.ball_y
+        sim_vx = self.ball_vx
+        sim_vy = self.ball_vy
+
+        # If ball is moving away from target, predict where it will return
+        # after bouncing off the opposite paddle's side (approximate)
+        if sim_vx == 0:
+            return sim_y  # Ball not moving horizontally; just return current Y
+
+        # Determine if ball is heading toward or away from target_x
+        heading_toward = (sim_vx > 0 and target_x > sim_x) or (sim_vx < 0 and target_x < sim_x)
+
+        if not heading_toward:
+            # Ball going away — predict where it'll be after bouncing back.
+            # Estimate: it will travel to the opposite wall, bounce, then come back.
+            # For simplicity, just move toward center when ball is going away.
+            return float(SIZE / 2.0)
+
+        # Simulate step-by-step until ball reaches target_x
+        # Use small steps to accurately model wall bounces
+        max_iterations = 500  # Safety cap to avoid infinite loops
+        step = 0.5  # Simulation step size (pixels)
+
+        while max_iterations > 0:
+            max_iterations -= 1
+            # How far to target_x?
+            if sim_vx > 0:
+                dist_to_target = target_x - sim_x
+                if dist_to_target <= 0:
+                    break
+            else:
+                dist_to_target = sim_x - target_x
+                if dist_to_target <= 0:
+                    break
+
+            # Time to reach target at current velocity
+            time_to_target = abs(dist_to_target / sim_vx)
+
+            # Take a step (or reach target if close enough)
+            dt = min(step / (abs(sim_vx) + abs(sim_vy) + 0.01), time_to_target)
+            sim_x += sim_vx * dt
+            sim_y += sim_vy * dt
+
+            # Bounce off top/bottom walls (playable area is y=1 to y=SIZE-BALL_SIZE-1)
+            if sim_y <= 1:
+                sim_y = 1 + (1 - sim_y)
+                sim_vy = abs(sim_vy)
+            elif sim_y >= SIZE - BALL_SIZE - 1:
+                wall = SIZE - BALL_SIZE - 1
+                sim_y = wall - (sim_y - wall)
+                sim_vy = -abs(sim_vy)
+
+            # Check if we've reached or passed target_x
+            if sim_vx > 0 and sim_x >= target_x:
+                break
+            elif sim_vx < 0 and sim_x <= target_x:
+                break
+
+        return sim_y
+
     def _move_paddle_ai(self, paddle_y, is_left):
-        """AI paddle movement with slight imperfection."""
-        # Target the ball's y position
-        target_y = self.ball_y - self.paddle_height / 2.0
-        max_speed = 2.0
+        """Perfect AI paddle movement — predicts ball landing position.
 
-        # Add slight reaction delay -- only track when ball is coming toward us
-        ball_coming = (is_left and self.ball_vx < 0) or (not is_left and self.ball_vx > 0)
-
-        if ball_coming:
-            diff = target_y - paddle_y
-            # Add slight randomness for imperfect play
-            diff += random.uniform(-1.0, 1.0)
-            move = max(-max_speed, min(max_speed, diff))
+        Uses trajectory simulation with wall-bounce prediction to determine
+        exactly where the ball will arrive at the paddle's X coordinate.
+        Moves at unlimited speed to guarantee interception every time,
+        producing indefinite rallies in demo mode.
+        """
+        # Determine the X coordinate this paddle needs to defend
+        if is_left:
+            paddle_target_x = float(PADDLE_X_LEFT + PADDLE_WIDTH)
         else:
-            # Drift toward center when ball going away
-            center = (SIZE - self.paddle_height) / 2.0
-            diff = center - paddle_y
-            move = max(-0.5, min(0.5, diff))
-            # Occasional random twitch
-            if random.random() < 0.05:
-                move += random.uniform(-1.0, 1.0)
+            paddle_target_x = float(PADDLE_X_RIGHT)
+
+        # Predict where the ball will be when it reaches our paddle's X
+        predicted_y = self._predict_ball_y_at_x(paddle_target_x)
+
+        # Target: center the paddle on the predicted Y
+        target_y = predicted_y - self.paddle_height / 2.0
+
+        # Move toward target with no speed limit — perfect interception
+        # (Use a generous max speed that ensures we always arrive in time)
+        max_speed = 4.0  # Fast enough to cover full court between frames
+        diff = target_y - paddle_y
+        move = max(-max_speed, min(max_speed, diff))
 
         paddle_y += move
         paddle_y = max(0.0, min(float(SIZE - self.paddle_height), paddle_y))

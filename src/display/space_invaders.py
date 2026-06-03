@@ -81,18 +81,47 @@ def run(matrix, duration=60):
 
             live_invaders = [inv for inv in invaders if inv.alive]
 
-            # AI player movement
-            if live_invaders:
-                target = min(live_invaders, key=lambda i: abs(i.x + 2 - player_x))
+            # --- Smart AI: dodge enemy bullets, target lowest invaders, fire constantly ---
+            # Phase 1: Check for incoming enemy bullets in danger zone
+            danger_x_range = 4   # Horizontal danger zone (pixels from player center)
+            danger_y_threshold = 15  # Only worry about bullets this close vertically
+            nearest_threat = None
+            nearest_threat_dist = float('inf')
+
+            for b in enemy_bullets:
+                bx, by = b[0], b[1]
+                # Is this bullet heading toward us (in our column, above us)?
+                if abs(bx - player_x) <= danger_x_range and 0 < (HEIGHT - 4 - by) <= danger_y_threshold:
+                    dist = HEIGHT - 4 - by  # Smaller = more urgent
+                    if dist < nearest_threat_dist:
+                        nearest_threat_dist = dist
+                        nearest_threat = b
+
+            if nearest_threat is not None:
+                # Phase 1 active: DODGE — move away from the threatening bullet
+                bx = nearest_threat[0]
+                if bx <= player_x:
+                    # Bullet is to our left or center — move right
+                    player_x = min(WIDTH - 3, player_x + 2)
+                else:
+                    # Bullet is to our right — move left
+                    player_x = max(2, player_x - 2)
+            elif live_invaders:
+                # Phase 2: Offensive — target the lowest invader in nearest column
+                # Find the lowest invader (most dangerous / closest to ground)
+                lowest_y = max(inv.y for inv in live_invaders)
+                # Among the lowest row (within 5px), pick the one nearest horizontally
+                lowest_invaders = [inv for inv in live_invaders if inv.y >= lowest_y - 5]
+                target = min(lowest_invaders, key=lambda i: abs(i.x + 2 - player_x))
+
                 if target.x + 2 < player_x:
                     player_x = max(2, player_x - 1)
                 elif target.x + 2 > player_x:
                     player_x = min(WIDTH - 3, player_x + 1)
 
-                # Shoot when aligned
-                if abs(target.x + 2 - player_x) < 2 and random.random() > 0.7:
-                    if not bullets or bullets[-1][1] < HEIGHT - 10:
-                        bullets.append([player_x, HEIGHT - 6])
+            # Phase 3: Fire as fast as cooldown allows (every frame if possible)
+            if not bullets or bullets[-1][1] < HEIGHT - 8:
+                bullets.append([player_x, HEIGHT - 6])
 
             # Move invaders
             move_timer += 1

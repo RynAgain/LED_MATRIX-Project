@@ -5,7 +5,8 @@ matrix.
 Features:
 - Standard 7 tetrominoes (I, O, T, S, Z, J, L) with correct rotations
 - 10-wide playfield centered on the 64px display
-- Autonomous AI that evaluates placements by height + hole count (DEMO)
+- Optimal placement AI using El-Tetris heuristic (aggregate height, holes,
+  bumpiness, line clears) for near-indefinite survival (DEMO)
 - Gamepad control (INTERACTIVE)
 - Line clear animation with flash effect
 - Next piece preview
@@ -138,6 +139,16 @@ PIECES = {
 PIECE_NAMES = list(PIECES.keys())
 
 
+# ---------------------------------------------------------------------------
+# AI Heuristic Weights (from Tetris AI research -- El-Tetris / Pierre Dellacherie)
+# These are tuned to keep the board flat, avoid holes, and clear lines.
+# ---------------------------------------------------------------------------
+_AI_WEIGHT_LINES_CLEARED = 760
+_AI_WEIGHT_AGGREGATE_HEIGHT = -510
+_AI_WEIGHT_HOLES = -356
+_AI_WEIGHT_BUMPINESS = -184
+
+
 class TetrisGame:
     """Self-playing Tetris game engine."""
 
@@ -170,6 +181,9 @@ class TetrisGame:
         self.drop_interval = 0.5  # seconds between gravity drops
         self.last_drop = time.time()
 
+        # AI target state: computed once per piece spawn, executed frame-by-frame
+        self._ai_target = None  # (target_x, target_rot) or None if not yet computed
+
     def _refill_bag(self):
         """Refill the piece bag with one of each tetromino, shuffled."""
         bag = list(PIECE_NAMES)
@@ -191,6 +205,9 @@ class TetrisGame:
         if not self._is_valid(self.current_piece, self.current_rot,
                               self.current_x, self.current_y):
             self.game_over = True
+
+        # Invalidate AI target so it recalculates for the new piece
+        self._ai_target = None
 
     def _get_cells(self, piece, rot, px, py):
         """Get the absolute cell positions for a piece at position (px, py)."""
@@ -253,37 +270,105 @@ class TetrisGame:
             y += 1
         return y
 
-    def _ai_decide(self):
-        """AI: evaluate all possible placements and pick the best one.
+    # ------------------------------------------------------------------
+    # OPTIMAL PLACEMENT AI (demo mode)
+    # ------------------------------------------------------------------
+    # Strategy: When a new piece spawns, evaluate ALL possible placements
+    # (rotation × column) by simulating a hard-drop onto a copy of the
+    # board and scoring the result. The best placement becomes the target.
+    # Then, frame-by-frame, the AI executes moves toward that target
+    # (rotate → shift → hard-drop) creating a visible "thinking" animation.
+    # ------------------------------------------------------------------
 
-        Heuristic: minimize aggregate height + holes, reward line clears.
+    @staticmethod
+    def _ai_evaluate_board(field):
+        """Score a board state using the standard Tetris AI heuristic.
+
+        Evaluates four features:
+        - aggregate_height: sum of each column's height (MINIMIZE)
+        - complete_lines: number of full rows (MAXIMIZE)
+        - holes: empty cells with a filled cell above in same column (MINIMIZE)
+        - bumpiness: sum of |height[i] - height[i+1]| for adjacent cols (MINIMIZE)
+
+        Returns the weighted score (higher = better).
+        """
+        col_heights = [0] * FIELD_W
+        holes = 0
+
+        for c in range(FIELD_W):
+            found_top = False
+            for r in range(FIELD_H):
+                if field[r][c] is not None:
+                    if not found_top:
+                        col_heights[c] = FIELD_H - r
+                        found_top = True
+                elif found_top:
+                    holes += 1
+
+        aggregate_height = sum(col_heights)
+
+        # Count complete lines
+        complete_lines = 0
+        for r in range(FIELD_H):
+            if all(field[r][c] is not None for c in range(FIELD_W)):
+                complete_lines += 1
+
+        # Bumpiness: sum of absolute height differences between adjacent columns
+        bumpiness = sum(abs(col_heights[i] - col_heights[i + 1])
+                        for i in range(FIELD_W - 1))
+
+        # Weighted heuristic (research-proven weights from El-Tetris)
+        return (complete_lines * _AI_WEIGHT_LINES_CLEARED
+                + aggregate_height * _AI_WEIGHT_AGGREGATE_HEIGHT
+                + holes * _AI_WEIGHT_HOLES
+                + bumpiness * _AI_WEIGHT_BUMPINESS)
+
+    def _ai_find_best_placement(self):
+        """Evaluate all possible placements for the current piece and return
+        the best (target_x, target_rot) tuple.
+
+        For each of the 4 rotations (skipping duplicates for O/S/Z/I), for
+        each valid column position, simulate a hard-drop and score the board.
         """
         piece = self.current_piece
-        best_score = -999999
-        best_move = (self.current_x, 0)  # (x, rotation)
+        best_score = None
+        best_move = (self.current_x, self.current_rot)
+
+        # Track seen rotation shapes to skip duplicates (O has 1 unique, S/Z/I have 2)
+        seen_shapes = set()
 
         for rot in range(4):
-            # Determine x range for this rotation
-            offsets = PIECES[piece]['rotations'][rot % 4]
+            # Deduplicate identical rotations (e.g., O-piece)
+            shape_key = tuple(PIECES[piece]['rotations'][rot])
+            if shape_key in seen_shapes:
+                continue
+            seen_shapes.add(shape_key)
+
+            # Determine valid x range for this rotation
+            offsets = PIECES[piece]['rotations'][rot]
             min_c = min(c for _, c in offsets)
             max_c = max(c for _, c in offsets)
 
             for x in range(-min_c, FIELD_W - max_c):
+                # Check if piece can exist at the top (spawn area)
+                # Try y=0 first, then y=1 (some rotations need a row of clearance)
+                start_y = 0
                 if not self._is_valid(piece, rot, x, 0):
-                    # If invalid at top, might still work slightly lower
-                    if not self._is_valid(piece, rot, x, 1):
+                    if self._is_valid(piece, rot, x, 1):
+                        start_y = 1
+                    else:
                         continue
 
-                drop_y = self._drop_position(piece, rot, x, 0)
+                # Find hard-drop landing position
+                drop_y = self._drop_position(piece, rot, x, start_y)
 
-                # Simulate placement
+                # Simulate placement on a copy of the field
                 test_field = [row[:] for row in self.field]
-                color = PIECES[piece]['color']
                 cells = self._get_cells(piece, rot, x, drop_y)
                 valid = True
                 for r, c in cells:
                     if 0 <= r < FIELD_H and 0 <= c < FIELD_W:
-                        test_field[r][c] = color
+                        test_field[r][c] = (1, 1, 1)  # placeholder color
                     else:
                         valid = False
                         break
@@ -291,56 +376,26 @@ class TetrisGame:
                 if not valid:
                     continue
 
-                # Count completed lines
-                lines = sum(1 for r in range(FIELD_H)
-                            if all(test_field[r][c] is not None
-                                   for c in range(FIELD_W)))
+                score = self._ai_evaluate_board(test_field)
 
-                # Calculate aggregate height
-                agg_height = 0
-                for c in range(FIELD_W):
-                    for r in range(FIELD_H):
-                        if test_field[r][c] is not None:
-                            agg_height += FIELD_H - r
-                            break
-
-                # Count holes (empty cells below a filled cell)
-                holes = 0
-                for c in range(FIELD_W):
-                    found_block = False
-                    for r in range(FIELD_H):
-                        if test_field[r][c] is not None:
-                            found_block = True
-                        elif found_block:
-                            holes += 1
-
-                # Bumpiness (height difference between adjacent columns)
-                col_heights = []
-                for c in range(FIELD_W):
-                    h = 0
-                    for r in range(FIELD_H):
-                        if test_field[r][c] is not None:
-                            h = FIELD_H - r
-                            break
-                    col_heights.append(h)
-
-                bumpiness = sum(abs(col_heights[i] - col_heights[i + 1])
-                                for i in range(len(col_heights) - 1))
-
-                # Heuristic score
-                score = (lines * 760
-                         - agg_height * 5.1
-                         - holes * 7.6
-                         - bumpiness * 1.8)
-
-                if score > best_score:
+                if best_score is None or score > best_score:
                     best_score = score
                     best_move = (x, rot)
 
         return best_move
 
     def step(self):
-        """Advance the game by one logical step."""
+        """Advance the game by one AI-controlled step (DEMO mode).
+
+        The AI strategy:
+        1. On first call after a new piece spawns, compute the optimal target
+           placement (rotation + column) by evaluating all possibilities.
+        2. Each frame, execute up to 3 moves toward the target:
+           - First: rotate toward target rotation
+           - Then: shift left/right toward target column
+           - Finally: when aligned, hard-drop to lock instantly
+        This creates a visible animation of the AI "thinking then placing".
+        """
         if self.game_over:
             return
 
@@ -351,35 +406,76 @@ class TetrisGame:
                 self._clear_lines()
             return
 
-        now = time.time()
-        if now - self.last_drop >= self.drop_interval:
-            self.last_drop = now
+        # Compute AI target once per piece (on spawn or if not yet set)
+        if self._ai_target is None:
+            self._ai_target = self._ai_find_best_placement()
 
-            # AI decides target position
-            target_x, target_rot = self._ai_decide()
+        target_x, target_rot = self._ai_target
 
-            # Rotate towards target
+        # Execute up to 3 moves per frame for snappy but visible play
+        moves_this_frame = 0
+        max_moves_per_frame = 3
+
+        while moves_this_frame < max_moves_per_frame:
+            moved = False
+
+            # Priority 1: Rotate toward target rotation
             if self.current_rot != target_rot:
-                new_rot = (self.current_rot + 1) % 4
+                # Choose shortest rotation direction
+                cw_dist = (target_rot - self.current_rot) % 4
+                ccw_dist = (self.current_rot - target_rot) % 4
+                if cw_dist <= ccw_dist:
+                    new_rot = (self.current_rot + 1) % 4
+                else:
+                    new_rot = (self.current_rot - 1) % 4
+
                 if self._is_valid(self.current_piece, new_rot,
                                   self.current_x, self.current_y):
                     self.current_rot = new_rot
+                    moved = True
+                else:
+                    # Wall-kick: try shifting left/right by 1 to allow rotation
+                    for kick in (-1, 1):
+                        if self._is_valid(self.current_piece, new_rot,
+                                          self.current_x + kick, self.current_y):
+                            self.current_x += kick
+                            self.current_rot = new_rot
+                            moved = True
+                            break
 
-            # Move towards target x
-            if self.current_x < target_x:
+            # Priority 2: Shift toward target column
+            elif self.current_x != target_x:
+                dx = 1 if self.current_x < target_x else -1
                 if self._is_valid(self.current_piece, self.current_rot,
-                                  self.current_x + 1, self.current_y):
-                    self.current_x += 1
-            elif self.current_x > target_x:
-                if self._is_valid(self.current_piece, self.current_rot,
-                                  self.current_x - 1, self.current_y):
-                    self.current_x -= 1
+                                  self.current_x + dx, self.current_y):
+                    self.current_x += dx
+                    moved = True
 
-            # Gravity: drop one row
+            # Priority 3: Aligned — hard-drop to lock the piece
+            else:
+                # We're at the target rotation and column — drop it!
+                self.current_y = self._drop_position(
+                    self.current_piece, self.current_rot,
+                    self.current_x, self.current_y)
+                self._lock_piece()
+                self.last_drop = time.time()
+                return  # Piece is locked; done for this frame
+
+            if not moved:
+                # Can't make progress (blocked) — fall back to gravity drop
+                break
+
+            moves_this_frame += 1
+
+        # Apply gravity if we haven't locked yet (piece still in play)
+        now = time.time()
+        if now - self.last_drop >= self.drop_interval:
+            self.last_drop = now
             if self._is_valid(self.current_piece, self.current_rot,
                               self.current_x, self.current_y + 1):
                 self.current_y += 1
             else:
+                # Gravity locked the piece before AI could finish aligning
                 self._lock_piece()
 
     # ----- INTERACTIVE controls (Phase 5) -------------------------------------
