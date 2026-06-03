@@ -24,12 +24,12 @@
     {
       "name": "snake",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "pong",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "fire",
@@ -39,22 +39,22 @@
     {
       "name": "tic_tac_toe",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "breakout",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "billiards",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "time_display",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "bitcoin_price",
@@ -74,12 +74,12 @@
     {
       "name": "matrix_rain",
       "type": "effect",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "starfield",
       "type": "effect",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "game_of_life",
@@ -94,17 +94,17 @@
     {
       "name": "weather",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "text_scroller",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "stock_ticker",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "sp500_heatmap",
@@ -114,7 +114,7 @@
     {
       "name": "binary_clock",
       "type": "utility",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "countdown",
@@ -144,12 +144,12 @@
     {
       "name": "galaga",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "space_invaders",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "logo_wholefoods",
@@ -174,7 +174,7 @@
     {
       "name": "maze_3d",
       "type": "effect",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "terrain_ball",
@@ -194,7 +194,7 @@
     {
       "name": "tetris",
       "type": "game",
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "hail_mary_clock",
