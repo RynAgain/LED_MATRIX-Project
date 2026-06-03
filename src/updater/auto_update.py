@@ -323,6 +323,9 @@ class AutoUpdater:
         if the first attempt fails (e.g., GitHub source for yt-dlp is
         unreachable). After installation, verifies critical imports.
 
+        This method is designed to never crash the updater — all exceptions
+        are caught and logged so the service restart can still proceed.
+
         Returns:
             True if installation succeeded, False otherwise.
         """
@@ -331,7 +334,7 @@ class AutoUpdater:
             logger.warning("requirements.txt not found, skipping dependency install")
             return True
 
-        logger.info("Upgrading dependencies from requirements.txt...")
+        logger.info("Installing/upgrading dependencies from requirements.txt...")
         success = False
         try:
             # First pass: install with --upgrade to catch outdated packages
@@ -365,9 +368,11 @@ class AutoUpdater:
                     logger.error("Dependency install also failed: %s",
                                  result.stderr.strip()[:500])
         except subprocess.TimeoutExpired:
-            logger.error("Dependency installation timed out")
+            logger.error("Dependency installation timed out (300s limit)")
+        except Exception as e:
+            logger.error("Unexpected error during dependency installation: %s", e)
 
-        # Verify critical dependencies are importable
+        # Verify critical dependencies are importable regardless of pip outcome
         self._verify_dependencies()
 
         return success
