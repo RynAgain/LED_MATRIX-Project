@@ -71,7 +71,6 @@ echo ""
 log_step "Step 1/5: Stopping all LED Matrix services..."
 
 systemctl stop led-matrix.service 2>/dev/null || true
-systemctl stop led-matrix-web.service 2>/dev/null || true
 systemctl stop led-matrix-updater.timer 2>/dev/null || true
 systemctl stop led-matrix-updater.service 2>/dev/null || true
 
@@ -81,12 +80,10 @@ log_info "All services stopped"
 log_step "Step 2/5: Removing systemd service files..."
 
 systemctl disable led-matrix.service 2>/dev/null || true
-systemctl disable led-matrix-web.service 2>/dev/null || true
 systemctl disable led-matrix-updater.timer 2>/dev/null || true
 systemctl disable led-matrix-updater.service 2>/dev/null || true
 
 rm -f /etc/systemd/system/led-matrix.service
-rm -f /etc/systemd/system/led-matrix-web.service
 rm -f /etc/systemd/system/led-matrix-updater.service
 rm -f /etc/systemd/system/led-matrix-updater.timer
 
@@ -189,7 +186,7 @@ log_info "UNINSTALL COMPLETE"
 echo "=============================================="
 echo ""
 echo "  What was removed:"
-echo "    - Systemd services (led-matrix, led-matrix-web, led-matrix-updater)"
+echo "    - Systemd services (led-matrix, led-matrix-updater)"
 echo "    - Virtual environment (venv/)"
 echo "    - Log files (logs/)"
 echo "    - Python caches (__pycache__/)"

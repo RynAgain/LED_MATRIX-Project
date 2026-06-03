@@ -304,17 +304,10 @@ sed -i "s|Group=pi|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.
 # Updater timer
 cp "$PROJECT_ROOT/services/led-matrix-updater.timer" /etc/systemd/system/led-matrix-updater.timer
 
-# Web control panel service
-cp "$PROJECT_ROOT/services/led-matrix-web.service" /etc/systemd/system/led-matrix-web.service
-sed -i "s|/home/pi/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix-web.service
-sed -i "s|User=pi|User=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-web.service
-sed -i "s|Group=pi|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-web.service
-
 # Reload and enable
 systemctl daemon-reload
 systemctl enable led-matrix.service
 systemctl enable led-matrix-updater.timer
-systemctl enable led-matrix-web.service
 
 log_info "Systemd services installed and enabled"
 
@@ -359,20 +352,23 @@ fi
 echo "  Next steps:"
 echo "    1. Edit config/wifi.json with your WiFi network details"
 echo "    2. Edit config/config.json to enable/disable features"
+echo "    3. Calibrate your USB gamepad (plug it in first):"
+echo "         python -m src.input.controller calibrate"
 if [ "$IS_PI" = true ]; then
-    echo "    3. Reboot to apply audio/GPIO changes: sudo reboot"
+    echo "    4. Reboot to apply audio/GPIO changes: sudo reboot"
 else
-    echo "    3. Reboot to start: sudo reboot"
+    echo "    4. Reboot to start: sudo reboot"
 fi
 echo ""
 echo "  Or start manually (after reboot if audio was changed):"
 echo "    sudo systemctl start led-matrix.service"
-echo "    sudo systemctl start led-matrix-web.service"
 echo "    sudo systemctl start led-matrix-updater.timer"
 echo ""
 echo "  View logs:"
 echo "    journalctl -u led-matrix.service -f"
-echo "    journalctl -u led-matrix-web.service -f"
+echo ""
+echo "  Control: USB gamepad -- Start opens the on-matrix menu, D-pad"
+echo "  navigates, A selects, B backs out, Start+Select quits a game."
 echo ""
 if [ "$IS_PI" = true ]; then
     echo "  Hardware diagnostics:"

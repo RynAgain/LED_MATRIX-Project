@@ -380,12 +380,11 @@ class AutoUpdater:
         critical packages individually as a last resort.
         """
         critical = {
-            "flask": "Flask",
-            "flask_sock": "flask-sock",
             "requests": "requests",
             "PIL": "Pillow",
             "psutil": "psutil",
             "qrcode": "qrcode",
+            "pygame": "pygame",
         }
         optional = {
             "cv2": "opencv-python-headless",
@@ -424,7 +423,7 @@ class AutoUpdater:
 
     def restart_display_service(self):
         """
-        Restart the LED matrix display and web services via systemd.
+        Restart the LED matrix display service via systemd.
 
         Returns:
             True if restart commands succeeded, False otherwise.
@@ -447,24 +446,6 @@ class AutoUpdater:
                 success = False
         except (FileNotFoundError, subprocess.TimeoutExpired) as e:
             logger.error("Could not restart display service: %s", e)
-            success = False
-
-        # Restart web panel service (picks up new routes/templates)
-        logger.info("Restarting led-matrix-web service...")
-        try:
-            result = subprocess.run(
-                ["sudo", "systemctl", "restart", "led-matrix-web.service"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                logger.info("Web service restarted successfully")
-            else:
-                logger.error("Web service restart failed: %s", result.stderr.strip())
-                success = False
-        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            logger.error("Could not restart web service: %s", e)
             success = False
 
         return success

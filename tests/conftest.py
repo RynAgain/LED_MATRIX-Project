@@ -44,10 +44,10 @@ _register_simulator()
 def preserve_config_files():
     """Backup and restore config files to prevent tests from polluting the repo.
 
-    Every test that triggers create_app() or hits a POST endpoint may write to
-    config/*.json or config/*.csv (e.g. wifi.json, web.json, schedule.json).
-    This fixture snapshots all config data files before the test and restores
-    them afterward so that ``git diff config/`` stays clean.
+    Tests that exercise the settings screen or other config writers may modify
+    config/*.json or config/*.csv (e.g. config.json, controller.json,
+    schedule.json). This fixture snapshots all config data files before the test
+    and restores them afterward so that ``git diff config/`` stays clean.
     """
     config_dir = os.path.join(PROJECT_ROOT, "config")
     backups = {}

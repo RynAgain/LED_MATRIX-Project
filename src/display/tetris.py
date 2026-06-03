@@ -1,15 +1,39 @@
 """
-Tetris -- AI-driven classic falling blocks on 64x64 LED matrix.
+Tetris -- AI-driven (demo) or controller-playable (interactive) on a 64x64 LED
+matrix.
 
 Features:
 - Standard 7 tetrominoes (I, O, T, S, Z, J, L) with correct rotations
 - 10-wide playfield centered on the 64px display
-- Autonomous AI that evaluates placements by height + hole count
+- Autonomous AI that evaluates placements by height + hole count (DEMO)
+- Gamepad control (INTERACTIVE)
 - Line clear animation with flash effect
 - Next piece preview
 - Score and level display
 - Increasing speed with level
-- Game over animation and auto-restart
+- Game over animation; auto-restart in DEMO only
+
+Control scheme (INTERACTIVE mode, ``controller is not None``)
+------------------------------------------------------------
+- **LEFT / RIGHT** move the active piece (honors REPEAT for smooth held shift).
+- **DOWN** soft-drops (honors REPEAT so holding drops faster).
+- **UP** or **A** rotate clockwise (PRESSED edge only -- no accidental spinning).
+- **B** rotates counter-clockwise (PRESSED edge).
+- **SELECT** (tapped alone) hard-drops the piece. (Start+Select is the quit
+  gesture, so we use a *tap* of Select without Start; we also accept it only
+  when Start is not held to avoid clashing with quit.)
+- **Start + Select** held (or hold Start ~1.5s) quits to the menu, via
+  :func:`src.input.controller.wants_quit`.
+- Gravity still applies on a timer; soft-drop just advances it sooner.
+- On **game over** (the stack tops out) the fill animation plays, a brief
+  banner is shown, then ``run()`` returns to the menu (no auto-restart).
+
+Rotate convention: **UP/A = clockwise, B = counter-clockwise**. Hard-drop is a
+Select tap (chosen so the four directions stay free for movement/rotate).
+
+DEMO mode (``controller is None``) is unchanged: the placement-evaluating AI
+plays and rounds auto-restart until ``duration`` elapses. Existing tests calling
+``run(matrix, duration)`` behave exactly as before.
 """
 
 import random
@@ -17,7 +41,12 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop, interruptible_sleep
+from src.display._shared import (
+    should_stop,
+    interruptible_sleep,
+    safe_rumble,
+    show_banner,
+)
 from src.display._utils import _draw_digit, _draw_number
 
 logger = logging.getLogger(__name__)
@@ -353,6 +382,84 @@ class TetrisGame:
             else:
                 self._lock_piece()
 
+    # ----- INTERACTIVE controls (Phase 5) -------------------------------------
+    # These share the same physics primitives (_is_valid / _lock_piece /
+    # _drop_position) the demo AI uses; only the *decision* of what to do each
+    # frame differs (player input vs. _ai_decide). Each returns True if the
+    # action changed state, for optional feedback.
+
+    def move(self, dx):
+        """Shift the active piece horizontally by ``dx`` if valid."""
+        if self.game_over or self.clear_flash_frames > 0:
+            return False
+        if self._is_valid(self.current_piece, self.current_rot,
+                           self.current_x + dx, self.current_y):
+            self.current_x += dx
+            return True
+        return False
+
+    def rotate(self, cw=True):
+        """Rotate the active piece (clockwise by default) if valid."""
+        if self.game_over or self.clear_flash_frames > 0:
+            return False
+        new_rot = (self.current_rot + (1 if cw else -1)) % 4
+        if self._is_valid(self.current_piece, new_rot,
+                          self.current_x, self.current_y):
+            self.current_rot = new_rot
+            return True
+        # Simple wall-kick: try nudging left/right by one cell.
+        for kick in (-1, 1):
+            if self._is_valid(self.current_piece, new_rot,
+                              self.current_x + kick, self.current_y):
+                self.current_x += kick
+                self.current_rot = new_rot
+                return True
+        return False
+
+    def soft_drop(self):
+        """Advance the piece down one row (player-initiated). Locks on landing."""
+        if self.game_over or self.clear_flash_frames > 0:
+            return False
+        if self._is_valid(self.current_piece, self.current_rot,
+                          self.current_x, self.current_y + 1):
+            self.current_y += 1
+            self.last_drop = time.time()  # reset gravity so it doesn't double-step
+            return True
+        self._lock_piece()
+        return True
+
+    def hard_drop(self):
+        """Drop the piece straight down to its landing row and lock it."""
+        if self.game_over or self.clear_flash_frames > 0:
+            return False
+        self.current_y = self._drop_position(self.current_piece, self.current_rot,
+                                              self.current_x, self.current_y)
+        self._lock_piece()
+        self.last_drop = time.time()
+        return True
+
+    def apply_gravity(self):
+        """Apply timed gravity (one row per ``drop_interval``) and the line-clear
+        animation. This is the player-facing analogue of :meth:`step` minus the
+        AI's move/rotate decision -- the player supplies those via the methods
+        above. Safe to call every frame.
+        """
+        if self.game_over:
+            return
+        if self.clear_flash_frames > 0:
+            self.clear_flash_frames -= 1
+            if self.clear_flash_frames == 0:
+                self._clear_lines()
+            return
+        now = time.time()
+        if now - self.last_drop >= self.drop_interval:
+            self.last_drop = now
+            if self._is_valid(self.current_piece, self.current_rot,
+                              self.current_x, self.current_y + 1):
+                self.current_y += 1
+            else:
+                self._lock_piece()
+
     def draw(self, image):
         """Render the game state onto a PIL Image."""
         # Draw playfield border
@@ -479,46 +586,117 @@ class TetrisGame:
         interruptible_sleep(1.0)
 
 
-def run(matrix, duration=60):
-    """Run the Tetris display feature for the specified duration.
+_FPS = 20
+_FRAME_DUR = 1.0 / _FPS
+# Generous safety cap (seconds) for INTERACTIVE play; the player normally exits
+# via game-over (top-out) or the quit gesture.
+_INTERACTIVE_MAX_SECONDS = 3600
+
+
+def _run_demo(matrix, duration, start_time):
+    """Autonomous DEMO loop (unchanged behavior)."""
+    while time.time() - start_time < duration:
+        if should_stop():
+            break
+
+        game = TetrisGame()
+
+        while not game.game_over and time.time() - start_time < duration:
+            if should_stop():
+                break
+            frame_start = time.time()
+
+            game.step()
+
+            image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
+            game.draw(image)
+            matrix.SetImage(image)
+
+            elapsed = time.time() - frame_start
+            sleep_time = _FRAME_DUR - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        # Game over animation
+        if game.game_over and time.time() - start_time < duration:
+            game.draw_game_over(matrix)
+
+        interruptible_sleep(0.5)
+
+
+def _run_interactive(matrix, controller, start_time):
+    """INTERACTIVE loop: the player drops one game; see module docstring."""
+    from src.input.controller import wants_quit, Button, EventType
+
+    show_banner(matrix, ["TETRIS", "READY"], hold=0.8)
+
+    game = TetrisGame()
+
+    while not game.game_over and time.time() - start_time < _INTERACTIVE_MAX_SECONDS:
+        if should_stop():
+            return
+        frame_start = time.time()
+
+        events = controller.poll_events()
+        if wants_quit(controller):
+            return
+
+        for ev in events:
+            b = ev.button
+            # Movement + soft-drop honor PRESSED *and* REPEAT (held auto-shift).
+            if ev.type in (EventType.PRESSED, EventType.REPEAT):
+                if b is Button.LEFT:
+                    game.move(-1)
+                elif b is Button.RIGHT:
+                    game.move(1)
+                elif b is Button.DOWN:
+                    game.soft_drop()
+            # Rotate + hard-drop are edge-only (PRESSED) to avoid spamming.
+            if ev.type is EventType.PRESSED:
+                if b is Button.UP or b is Button.A:
+                    game.rotate(cw=True)
+                elif b is Button.B:
+                    game.rotate(cw=False)
+                elif b is Button.SELECT and not controller.is_pressed(Button.START):
+                    # Select tapped alone = hard-drop (Start+Select = quit).
+                    game.hard_drop()
+
+        game.apply_gravity()
+
+        image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
+        game.draw(image)
+        matrix.SetImage(image)
+
+        elapsed = time.time() - frame_start
+        sleep_time = _FRAME_DUR - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+    # Game over: animation + feedback, then return to the menu (no auto-restart).
+    if game.game_over:
+        game.draw_game_over(matrix)
+        safe_rumble(controller, 0.8, 300)
+        show_banner(matrix, ["GAME OVER", f"SCORE {game.score}"],
+                    color=(255, 80, 80), hold=1.5)
+
+
+def run(matrix, duration=60, controller=None):
+    """Run the Tetris feature.
 
     Args:
         matrix: RGBMatrix instance (or simulator mock).
-        duration: How long to run in seconds.
+        duration: How long to run in seconds (DEMO mode only; INTERACTIVE play
+            is bounded by top-out / the quit gesture, with a generous safety cap
+            of :data:`_INTERACTIVE_MAX_SECONDS`).
+        controller: optional :class:`src.input.Controller`. ``None`` -> DEMO
+            (autonomous AI, unchanged). Not-None -> INTERACTIVE (player control).
     """
     start_time = time.time()
-    fps = 20
-    frame_dur = 1.0 / fps
-
     try:
-        while time.time() - start_time < duration:
-            if should_stop():
-                break
-
-            game = TetrisGame()
-
-            while not game.game_over and time.time() - start_time < duration:
-                if should_stop():
-                    break
-                frame_start = time.time()
-
-                game.step()
-
-                image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
-                game.draw(image)
-                matrix.SetImage(image)
-
-                elapsed = time.time() - frame_start
-                sleep_time = frame_dur - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            # Game over animation
-            if game.game_over and time.time() - start_time < duration:
-                game.draw_game_over(matrix)
-
-            interruptible_sleep(0.5)
-
+        if controller is None:
+            _run_demo(matrix, duration, start_time)
+        else:
+            _run_interactive(matrix, controller, start_time)
     except Exception as e:
         logger.error("Error in tetris: %s", e, exc_info=True)
     finally:

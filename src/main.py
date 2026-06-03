@@ -4,6 +4,12 @@ LED Matrix Project - Main Entry Point
 
 Reads config/config.json and cycles through enabled display features
 on a 64x64 RGB LED matrix. Designed for Raspberry Pi with rpi-rgb-led-matrix.
+
+Control is via a USB gamepad (with keyboard fallback in the simulator) through
+:class:`src.input.Controller` and :class:`src.app_state.AppStateMachine`. The
+former Flask web control panel was removed in Phase 6 (CONTROLLER_OVERHAUL.md
+§7); there is no longer any command.json / status.json / preview.png / PID
+plumbing.
 """
 
 import json
@@ -15,7 +21,7 @@ import time
 import signal
 import threading
 
-from src.display._shared import request_stop, clear_stop, should_stop
+from src.display._shared import request_stop, should_stop
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +77,6 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
         return False
     return True
 
-# Global reference for web panel preview access
-_matrix_ref = None
-
-# Track the currently-running feature name for status updates
-_current_feature = None
 
 # Project root is one level up from this file
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,54 +84,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Add project root to path for imports
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-
-def write_status(feature_name=None, status="running"):
-    """Write current display status to logs/status.json for the web panel."""
-    status_path = os.path.join(PROJECT_ROOT, "logs", "status.json")
-    try:
-        data = {
-            "status": status,
-            "current_feature": feature_name,
-            "timestamp": time.time(),
-            "uptime": "N/A"
-        }
-        if hasattr(write_status, '_start_time'):
-            elapsed = time.time() - write_status._start_time
-            hours = int(elapsed // 3600)
-            minutes = int((elapsed % 3600) // 60)
-            data["uptime"] = f"{hours}h {minutes}m"
-        with open(status_path, "w") as f:
-            json.dump(data, f)
-    except Exception as e:
-        logger.debug("write_status failed: %s", e)
-
-
-def _save_preview(matrix):
-    """Save current matrix frame as PNG for web preview.
-
-    Called periodically by the command watcher thread so the web panel
-    (running in a separate process) can serve it without shared memory.
-    """
-    try:
-        preview_path = os.path.join(PROJECT_ROOT, "logs", "preview.png")
-        if matrix is not None and hasattr(matrix, 'get_frame_base64'):
-            import base64
-            b64 = matrix.get_frame_base64()
-            if b64:
-                with open(preview_path, 'wb') as f:
-                    f.write(base64.b64decode(b64))
-    except Exception:
-        pass
-
-
-def write_pid():
-    """Write the current PID for web panel communication."""
-    pid_path = os.path.join(PROJECT_ROOT, "logs", "display.pid")
-    try:
-        with open(pid_path, "w") as f:
-            f.write(str(os.getpid()))
-    except Exception:
-        pass
 
 
 # Flag for graceful shutdown (thread-safe Event instead of bare bool)
@@ -148,122 +101,16 @@ def sighup_handler(signum, frame):
     logger.info("Received SIGHUP, config will reload on next cycle")
 
 
-COMMAND_PATH = os.path.join(PROJECT_ROOT, "logs", "command.json")
-
-# Pending command detected by the background watcher thread
-_pending_command = None
-_pending_lock = threading.Lock()
-
-
-def check_command():
-    """Check for and consume a command from the web panel.
-    
-    First checks the pending command buffer (set by the background watcher),
-    then falls back to reading the command file directly.
-    
-    Returns:
-        dict with 'command' and 'data' keys, or None if no command.
-    """
-    global _pending_command
-
-    # Check pending command from background watcher first
-    with _pending_lock:
-        if _pending_command is not None:
-            cmd = _pending_command
-            _pending_command = None
-            logger.info("Command consumed from pending buffer: %s", cmd.get("command"))
-            return cmd
-
-    # Fallback: direct file check (for commands arriving between watcher polls)
-    # Lock prevents TOCTOU race with the background _command_watcher thread.
-    with _pending_lock:
-        try:
-            if os.path.exists(COMMAND_PATH):
-                mtime = os.path.getmtime(COMMAND_PATH)
-                # Only process commands less than 30 seconds old
-                if time.time() - mtime < 30:
-                    with open(COMMAND_PATH, "r") as f:
-                        cmd = json.load(f)
-                    # Delete the command file so it's not processed again
-                    os.remove(COMMAND_PATH)
-                    logger.info("Command received: %s", cmd.get("command"))
-                    return cmd
-                else:
-                    # Stale command, remove it
-                    os.remove(COMMAND_PATH)
-        except (FileNotFoundError, OSError):
-            # File was already consumed by the watcher thread — not an error
-            pass
-        except (json.JSONDecodeError, KeyError):
-            pass
-    return None
-
-
-def _command_watcher():
-    """Background thread that polls command.json every 0.5s.
-
-    When a new command arrives, it stores the command in the pending buffer
-    and calls request_stop() so the currently-running display module breaks
-    out of its render loop immediately (within one frame / ~55ms).
-
-    Also periodically refreshes status.json (every 5s) and preview.png
-    (every ~2s) so the web panel always has fresh data.
-    """
-    global _pending_command
-    logger.info("Command watcher thread started")
-    _last_status_write = 0.0
-    _last_preview_save = 0.0
-    _STATUS_INTERVAL = 5.0   # seconds between status file refreshes
-    _PREVIEW_INTERVAL = 2.0  # seconds between preview frame saves
-    while not _shutdown.is_set():
-        # Lock prevents TOCTOU race with the main thread's check_command().
-        with _pending_lock:
-            try:
-                if os.path.exists(COMMAND_PATH):
-                    mtime = os.path.getmtime(COMMAND_PATH)
-                    if time.time() - mtime < 30:
-                        with open(COMMAND_PATH, "r") as f:
-                            cmd = json.load(f)
-                        os.remove(COMMAND_PATH)
-                        _pending_command = cmd
-                        # Signal the running display module to stop NOW
-                        request_stop()
-                        logger.info("Command watcher: detected '%s', requested stop",
-                                    cmd.get("command"))
-                    else:
-                        # Stale command, remove it
-                        os.remove(COMMAND_PATH)
-            except (FileNotFoundError, OSError):
-                # File was already consumed by check_command() — not an error
-                pass
-            except (json.JSONDecodeError, KeyError):
-                pass
-
-        now = time.time()
-
-        # Periodic status refresh so the web dashboard stays current
-        if now - _last_status_write >= _STATUS_INTERVAL:
-            _last_status_write = now
-            feat = _current_feature
-            if feat is not None:
-                write_status(feat, "running")
-
-        # Periodic preview snapshot for the web live-preview panel
-        if now - _last_preview_save >= _PREVIEW_INTERVAL:
-            _last_preview_save = now
-            _save_preview(_matrix_ref)
-
-        # Poll interval: 0.5 seconds for responsive UI
-        time.sleep(0.5)
-    logger.info("Command watcher thread stopped")
-
-
 def handle_play_video(matrix, url, title="Unknown", duration=300):
-    """Handle a play_video command by playing a video from cache.
+    """Handle a play_video request by playing a video from cache.
 
     Checks the local cache first (downloaded_videos/<md5hash>.mp4).
     Only cached videos are supported -- add URLs to config/video_urls.csv
     and reboot to download them.
+
+    Playback breaks out within one frame when ``should_stop()`` is set (the
+    state machine's input thread sets this on a START press), so video remains a
+    carousel demo that the user can interrupt to open the menu.
 
     Args:
         matrix: RGBMatrix instance.
@@ -272,7 +119,6 @@ def handle_play_video(matrix, url, title="Unknown", duration=300):
         duration: Max playback duration in seconds.
     """
     logger.info("Playing video: %s (%s)", title, url)
-    write_status(f"Video: {title}", "running")
     try:
         from src.display.video_player import FRAME_INTERVAL, _url_to_cache_path, _is_cached
         import cv2
@@ -294,15 +140,10 @@ def handle_play_video(matrix, url, title="Unknown", duration=300):
         while cap.isOpened() and not _shutdown.is_set():
             frame_start = time.time()
 
-            # Check for new commands (allows interrupting)
-            new_cmd = check_command()
-            if new_cmd:
-                # Re-write the command for the main loop to pick up
-                try:
-                    with open(COMMAND_PATH, "w") as f:
-                        json.dump(new_cmd, f)
-                except Exception:
-                    pass
+            # Video interruption honors the shared stop flag (should_stop()),
+            # which the state machine's input thread sets on a START press --
+            # this breaks out within one frame when the user opens the menu.
+            if should_stop():
                 break
 
             if time.time() - start >= duration:
@@ -533,7 +374,7 @@ def _register_simulator_modules():
 from src.feature_registry import FEATURE_MODULES
 
 
-def run_feature(feature_name, matrix, duration):
+def run_feature(feature_name, matrix, duration, controller=None):
     """
     Run a single display feature.
 
@@ -541,6 +382,12 @@ def run_feature(feature_name, matrix, duration):
         feature_name: Name of the feature to run (must be in FEATURE_MODULES).
         matrix: RGBMatrix instance.
         duration: How long to run the feature in seconds.
+        controller: Optional src.input.Controller. When provided AND the target
+            module's run() accepts a ``controller`` parameter, the feature is
+            launched in INTERACTIVE mode (playable game, CONTROLLER_OVERHAUL.md
+            §5.1). Demos always call with controller=None and behave exactly as
+            before. Modules not yet converted simply never receive a controller
+            because the idle carousel never passes one.
 
     Returns:
         True if feature completed successfully, False on error.
@@ -554,9 +401,26 @@ def run_feature(feature_name, matrix, duration):
         logger.info("Starting feature: %s (duration: %ds)", feature_name, duration)
         module = importlib.import_module(module_path)
 
+        # Forward the controller only when one was supplied AND the module's
+        # run() advertises a 'controller' parameter (introspected to stay
+        # backward compatible with the run(matrix, duration) contract).
+        pass_controller = False
+        if controller is not None and hasattr(module, "run"):
+            try:
+                import inspect
+                params = inspect.signature(module.run).parameters
+                pass_controller = "controller" in params
+            except (TypeError, ValueError):
+                pass_controller = False
+
         # Each display module should have a run(matrix, duration) function
         if hasattr(module, "run"):
-            feature_callable = lambda: module.run(matrix, duration)
+            if pass_controller:
+                feature_callable = lambda: module.run(
+                    matrix, duration, controller=controller
+                )
+            else:
+                feature_callable = lambda: module.run(matrix, duration)
         elif hasattr(module, "main"):
             # Fallback to main() for legacy modules
             feature_callable = lambda: module.main(matrix, duration)
@@ -573,7 +437,7 @@ def run_feature(feature_name, matrix, duration):
         raise
     except Exception as e:
         logger.error("Feature '%s' crashed: %s", feature_name, e, exc_info=True)
-        # Track last error for dashboard display
+        # Track last error for diagnostics
         try:
             error_path = os.path.join(PROJECT_ROOT, "logs", "feature_error.json")
             with open(error_path, "w") as ef:
@@ -594,7 +458,7 @@ def run_feature(feature_name, matrix, duration):
 
 def _check_schedule():
     """Check if night mode or scheduling should override current settings.
-    
+
     Returns:
         dict with 'brightness' and 'allowed_features' keys, or None for normal mode.
     """
@@ -604,10 +468,10 @@ def _check_schedule():
             sched = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-    
+
     if not sched.get("enabled", False):
         return None
-    
+
     from datetime import datetime
     hour = datetime.now().hour
 
@@ -615,20 +479,20 @@ def _check_schedule():
     if night.get("enabled", False):
         start = night.get("start_hour", 22)
         end = night.get("end_hour", 7)
-        
+
         # Check if current hour is in night range
         is_night = False
         if start > end:  # Crosses midnight (e.g., 22-7)
             is_night = hour >= start or hour < end
         else:  # Same day (e.g., 1-5)
             is_night = start <= hour < end
-        
+
         if is_night:
             return {
                 "brightness": night.get("brightness", 20),
                 "allowed_features": night.get("allowed_features", [])
             }
-    
+
     # --- Feature schedules (first matching wins) ---
     for entry in sched.get("schedules", []):
         s = entry.get("start_hour", 0)
@@ -648,54 +512,6 @@ def _check_schedule():
     return None
 
 
-def _show_pixel_art(matrix):
-    """Display pixel art from the web editor."""
-    pixel_path = os.path.join(PROJECT_ROOT, "logs", "pixel_art.json")
-    try:
-        with open(pixel_path, "r") as f:
-            data = json.load(f)
-        from PIL import Image as PILImage
-        img = PILImage.new("RGB", (64, 64))
-        pixels = img.load()
-        for y in range(64):
-            for x in range(64):
-                if y < len(data["pixels"]) and x < len(data["pixels"][y]):
-                    c = data["pixels"][y][x]
-                    pixels[x, y] = (c[0], c[1], c[2])
-        matrix.SetImage(img)
-        time.sleep(30)  # Show for 30 seconds
-    except Exception as e:
-        logger.error("Failed to show pixel art: %s", e)
-
-
-def _handle_command(cmd, matrix, duration):
-    """Handle a web panel command."""
-    cmd_type = cmd.get("command")
-    cmd_data = cmd.get("data", {})
-
-    if cmd_type == "play_video":
-        url = cmd_data.get("url")
-        title = cmd_data.get("title", "Unknown")
-        if url:
-            handle_play_video(matrix, url, title, duration=duration)
-    elif cmd_type == "play_feature":
-        feat_name = cmd_data.get("feature")
-        if feat_name:
-            logger.info("Command: switch to %s", feat_name)
-            clear_stop()
-            write_status(feat_name, "running")
-            run_feature(feat_name, matrix, duration)
-    elif cmd_type == "set_brightness":
-        brightness = cmd_data.get("brightness", 100)
-        try:
-            matrix.brightness = brightness
-            logger.info("Brightness set to %d", brightness)
-        except Exception:
-            pass
-    elif cmd_type == "show_pixel_art":
-        _show_pixel_art(matrix)
-
-
 # Maximum time (seconds) the video precache can run at boot.
 # Prevents the Pi from being saturated by downloads forever.
 _PRECACHE_TIMEOUT = 180
@@ -706,8 +522,8 @@ def _precache_videos(matrix, enabled_features):
 
     Runs only if video_player (or legacy youtube_stream) is in the
     enabled features list. Downloads happen in a LOW-PRIORITY background
-    thread with a hard timeout so the Pi stays responsive for the web
-    panel and display. Already-cached videos are detected instantly.
+    thread with a hard timeout so the Pi stays responsive for the
+    display. Already-cached videos are detected instantly.
     """
     # Check if video_player or legacy youtube_stream is enabled
     vp_enabled = any(f.get("name") in ("video_player", "youtube_stream")
@@ -786,7 +602,7 @@ def _precache_videos(matrix, enabled_features):
                                title, status["failed"])
 
             # Brief pause between downloads to let the Pi breathe
-            # (prevents CPU/network saturation that kills the web panel)
+            # (prevents CPU/network saturation)
             time.sleep(1)
 
         status["current"] = ""
@@ -837,7 +653,7 @@ def ensure_wifi():
 
 
 def main():
-    """Main entry point: initialize matrix and run feature loop."""
+    """Main entry point: initialize matrix and run the controller state machine."""
     # Setup logging
     log_dir = os.path.join(PROJECT_ROOT, "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -876,10 +692,6 @@ def main():
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-
-    # Web panel integration: write PID, start uptime timer, register SIGHUP
-    write_pid()
-    write_status._start_time = time.time()
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, sighup_handler)
 
@@ -902,7 +714,6 @@ def main():
 
     # Load configuration
     config = load_config()
-    duration = config.get("display_duration", 60)
     sequence = config.get("sequence", [])
 
     # Filter to enabled features only
@@ -919,94 +730,50 @@ def main():
     # animates on the matrix. If no internet, this gracefully skips.
     _precache_videos(matrix, enabled_features)
 
-    # Store matrix reference for web panel preview
-    import src.main as _self_module
-    _self_module._matrix_ref = matrix
+    # --- Controller + state machine ------------------------------------------
+    # Construct ONE shared Controller (pygame has a single global event queue,
+    # so there must be exactly one owner; see src/input/controller.py). The
+    # constructor degrades gracefully when no gamepad / no display is present
+    # (keyboard fallback in the simulator, no-op on a truly headless Pi), so
+    # this never crashes the boot path.
+    from src.input import Controller
+    from src.app_state import AppStateMachine
 
-    # Start background command watcher thread
-    # This thread polls command.json every 0.5s and calls request_stop()
-    # so the currently running display module breaks out immediately.
-    watcher = threading.Thread(target=_command_watcher, daemon=True)
-    watcher.start()
+    try:
+        controller = Controller()
+        if controller.is_connected():
+            logger.info("Gamepad connected")
+        else:
+            logger.info(
+                "No gamepad connected; running with keyboard fallback / "
+                "demo-only idle until one is plugged in"
+            )
+    except Exception as e:  # noqa: BLE001 - never let input init break boot
+        logger.warning("Controller init failed (%s); continuing without input", e)
+        controller = None
 
-    # Main display loop
-    logger.info("Entering display loop...")
-    while not _shutdown.is_set():
-        # Cache internet connectivity once per cycle (not per feature)
-        _internet_available = _check_internet()
-        if not _internet_available:
-            logger.info("Internet unavailable this cycle -- internet features will be skipped")
-
-        for feature in enabled_features:
-            if _shutdown.is_set():
-                break
-
-            # Check for commands before each feature
-            cmd = check_command()
-            if cmd:
-                _handle_command(cmd, matrix, duration)
-                continue
-
-            name = feature.get("name", "unknown")
-
-            # Skip internet-dependent features when connectivity is down
-            if name in INTERNET_FEATURES:
-                if not _internet_available:
-                    logger.info("Skipping %s (no internet)", name)
-                    continue
-
-            # Per-feature duration, capped at 300s to prevent accidental
-            # multi-hour hangs (watchdog fires at 2x duration).
-            feat_duration = min(feature.get("duration", duration), 300)
-            clear_stop()
-            _current_feature = name
-            write_status(name, "running")
-            run_feature(name, matrix, feat_duration)
-
-            # After a feature returns (naturally or via should_stop()),
-            # check if the watcher detected a command that caused the stop.
-            cmd = check_command()
-            if cmd:
-                _handle_command(cmd, matrix, duration)
-                continue
-
-            # Brief pause + command check between features
-            if not _shutdown.is_set():
-                time.sleep(0.5)
-                cmd = check_command()
-                if cmd:
-                    _handle_command(cmd, matrix, duration)
-
-        # Reload config between full cycles to pick up changes
-        if not _shutdown.is_set():
-            config = load_config()
-            duration = config.get("display_duration", 60)
-            sequence = config.get("sequence", [])
-            enabled_features = [f for f in sequence if f.get("enabled", False)]
-
-            # Check night mode / scheduling
-            schedule_override = _check_schedule()
-            if schedule_override:
-                # Apply brightness (only if schedule specifies one)
-                if "brightness" in schedule_override:
-                    try:
-                        matrix.brightness = schedule_override["brightness"]
-                    except Exception:
-                        pass
-                # Filter features if night mode specifies allowed list
-                allowed = schedule_override.get("allowed_features", [])
-                if allowed:
-                    enabled_features = [f for f in enabled_features if f.get("name") in allowed]
-                    if not enabled_features:
-                        # Fallback to time display
-                        enabled_features = [{"name": "time_display", "type": "utility", "enabled": True}]
-
-            if not enabled_features:
-                logger.warning("No features enabled after config reload, waiting 30s...")
-                time.sleep(30)
-
-    _current_feature = None
-    write_status(None, "stopped")
+    if controller is not None:
+        # Delegate the whole run loop to the state machine. It owns the matrix,
+        # cycles demos in IDLE, opens the menu on START, launches games, and
+        # observes window-close via controller.is_quitting().
+        state = AppStateMachine(matrix, controller, config,
+                                shutdown_event=_shutdown)
+        logger.info("Entering state machine loop...")
+        try:
+            state.run()
+        finally:
+            try:
+                controller.close()
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        # Degraded fallback: no controller at all (e.g. pygame totally absent).
+        # Run the demo carousel directly so the matrix still cycles features.
+        from src.app_state import DemoCarousel
+        logger.info("Entering demo-only loop (no controller available)...")
+        carousel = DemoCarousel(matrix, config, _shutdown)
+        while not _shutdown.is_set():
+            carousel.run_cycle()
 
     # Cleanup
     logger.info("Shutting down, clearing matrix...")

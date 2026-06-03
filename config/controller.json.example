@@ -1,0 +1,13 @@
+{
+  "buttons": {
+    "0": "A",
+    "1": "B",
+    "9": "START",
+    "8": "SELECT"
+  },
+  "hat_index": 0,
+  "axis_x": 0,
+  "axis_y": 1,
+  "invert_y": false,
+  "deadzone": 0.5
+}

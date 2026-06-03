@@ -33,12 +33,6 @@ else
     echo "       Run: sudo bash scripts/install.sh"
 fi
 
-if [ -f /etc/systemd/system/led-matrix-web.service ]; then
-    pass "led-matrix-web.service is installed"
-else
-    warn "led-matrix-web.service is NOT installed (optional)"
-fi
-
 echo ""
 
 # --- 2. Check if services are enabled ---
@@ -49,13 +43,6 @@ if systemctl is-enabled led-matrix.service &>/dev/null; then
 else
     fail "led-matrix.service is NOT enabled"
     echo "       Run: sudo systemctl enable led-matrix.service"
-fi
-
-if systemctl is-enabled led-matrix-web.service &>/dev/null; then
-    pass "led-matrix-web.service is enabled"
-else
-    warn "led-matrix-web.service is NOT enabled"
-    echo "       Run: sudo systemctl enable led-matrix-web.service"
 fi
 
 echo ""
@@ -69,13 +56,6 @@ if [ "$DISPLAY_STATUS" = "active" ]; then
 else
     fail "led-matrix.service is $DISPLAY_STATUS"
     echo "       Start it: sudo systemctl start led-matrix.service"
-fi
-
-WEB_STATUS=$(systemctl is-active led-matrix-web.service 2>/dev/null)
-if [ "$WEB_STATUS" = "active" ]; then
-    pass "led-matrix-web.service is running"
-else
-    warn "led-matrix-web.service is $WEB_STATUS"
 fi
 
 echo ""

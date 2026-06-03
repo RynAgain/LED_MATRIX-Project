@@ -1,6 +1,6 @@
 # LED Matrix Project
 
-A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 36 display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot with a web control panel.
+A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles through 36 display features -- games, visualizations, info displays, and video playback. Auto-updates from GitHub, connects to WiFi, and runs unattended from boot. Control is via a USB gamepad and an on-matrix menu.
 
 ---
 
@@ -63,32 +63,67 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 |---------|-------------|
 | Boot Screen | Animated startup sequence (ring burst + loading bar) |
 | System Stats | CPU/RAM/temp bar graphs + hostname/IP on the matrix |
-| Web Control Panel | Mobile-friendly dashboard with live resource monitoring |
+| Gamepad Control | On-matrix menu, playable games, and settings via a USB gamepad |
 | Auto-Updater | Git-based updates every 30 min with auto-repair for corrupt repos |
 | Night Mode | Scheduled brightness + feature restrictions |
 
 ---
 
-## Web Control Panel
+## Controls
 
-A password-protected web interface accessible from any device on the same network at `http://<pi-ip>:5000`.
+The matrix is controlled with a generic USB gamepad (GameCube-style). There is
+**no web UI** -- the former Flask control panel has been removed entirely.
 
-| Tab | Description |
-|-----|-------------|
-| Dashboard | Live status, current feature, uptime, CPU/RAM/disk/temp bars, live matrix preview |
-| Features | Toggle features on/off, set per-feature duration |
-| Videos | Manage video playlist, trigger playback |
-| Messages | Configure scrolling text messages |
-| Stocks | Set stock symbols for ticker and heatmap |
-| Timer | Configure countdown target |
-| Draw | Pixel art editor (64x64) |
-| 3D | Configure wireframe objects |
-| World | Living World controls and event log |
-| WiFi | Add/remove WiFi networks |
-| Logs | Live log viewer with filtering, color-coded errors, auto-refresh |
-| Settings | GitHub branch, log level, system configuration |
+| Input | Action |
+|-------|--------|
+| **Start** | Open the on-matrix menu (from the idle demo carousel) |
+| **D-pad / analog stick** | Navigate menus; move in games |
+| **A** | Select / confirm (and primary game action) |
+| **B** | Back / cancel (and secondary game action) |
+| **Start + Select** (or hold **Start** ~1.5s) | Quit the current game/menu back to the idle demo |
 
-Default credentials: `admin` / `ledmatrix` (change via Settings or `config/web.json`)
+### Behavior by mode
+
+The app runs as a small state machine with three top-level modes:
+
+- **IDLE** -- the default demo carousel cycles through the enabled features
+  exactly as before. Pressing **Start** breaks out of the demo and opens the
+  menu.
+- **MENU** -- the on-matrix menu. **D-pad** moves the highlight, **A** selects,
+  **B** backs out one level (and resumes the demo at the root). From here you
+  can open the **Games** submenu to launch a playable game, open **Settings**
+  (live brightness + demo duration), or **Resume** the idle demo carousel.
+- **IN_GAME** -- a playable game (Snake, Tetris, Pong) runs interactively with
+  the controller forwarded to it. On game-over, or when you press the quit
+  gesture (**Start + Select**, or hold **Start**), control returns to the menu.
+
+Closing the simulator window (or a controller window-close event) cleanly shuts
+the whole application down.
+
+### Calibrating the gamepad
+
+Because unbranded pads expose different raw button/axis indices, run the
+calibration utility once (with the pad plugged in) to write
+`config/controller.json`:
+
+```bash
+python -m src.input.controller calibrate
+```
+
+`config/controller.json` is the saved button/axis mapping produced by
+calibration: it records which physical gamepad button or analog-axis index maps
+to each logical action (A, B, Start, Select, the four D-pad directions). If the
+file is missing, the input layer falls back to a **sensible default mapping**
+for common no-brand USB pads, so the system still boots and is usable without
+calibration -- calibration just guarantees the buttons line up with *your*
+specific pad.
+
+### Simulator (keyboard fallback)
+
+On a dev machine with no gamepad, the simulator window accepts a keyboard
+fallback so you can test the full menu/game flow without any hardware:
+arrow keys / WASD move, `Z` = A, `X` = B, `Enter` = Start, `Tab` = Select.
+The same Start + Select quit gesture works from the keyboard.
 
 ---
 
@@ -106,7 +141,7 @@ sudo bash scripts/install.sh
 The installer sets up:
 - System packages (Python 3, pip, git, NetworkManager, ffmpeg)
 - Python virtual environment + dependencies
-- systemd services for display, web panel, and auto-updater
+- systemd services for the display and auto-updater
 - Logs directory
 
 ### 2. Configure hardware
@@ -149,9 +184,8 @@ On boot, the system will:
 1. Show an animated boot screen on the matrix (~4 seconds)
 2. Connect to WiFi
 3. Pre-cache videos (if video_player is enabled)
-4. Begin cycling through enabled features
-5. Start the web control panel on port 5000
-6. Check for GitHub updates every 30 minutes
+4. Begin cycling through enabled features (press **Start** on the gamepad to open the menu)
+5. Check for GitHub updates every 30 minutes
 
 ---
 
@@ -177,7 +211,7 @@ Videos are downloaded once to `downloaded_videos/` and cached permanently. Subse
 LED_MATRIX-Project/
   config/                  # All configuration files
     config.json            # Feature sequence, hardware settings, display options
-    web.json               # Web panel credentials and settings
+    controller.json        # USB gamepad button/axis mapping (from calibration)
     wifi.json              # WiFi network credentials
     video_urls.csv         # Video playlist (direct MP4 URLs)
     schedule.json          # Night mode / scheduling
@@ -196,11 +230,13 @@ LED_MATRIX-Project/
     troubleshoot.sh        # System diagnostic tool
   services/                # systemd unit files
     led-matrix.service     # Main display service (runs as root for GPIO)
-    led-matrix-web.service # Web control panel
     led-matrix-updater.*   # Auto-update service + timer
   src/                     # Application code
-    main.py                # Entry point: boot screen, config, feature loop
+    main.py                # Entry point: boot screen, config, state machine
     config_validator.py    # JSON schema validation
+    app_state.py           # Top-level state machine (IDLE/MENU/IN_GAME)
+    input/                 # USB gamepad controller + keyboard fallback
+    menu/                  # On-matrix menu + settings screen
     display/               # 36 display feature modules
       boot_screen.py       # Boot animation + loading ring + pixel font
       _shared.py           # Shared stop signaling for features
@@ -208,15 +244,32 @@ LED_MATRIX-Project/
     simulator/             # Pygame LED matrix emulator (dev only)
     wifi/                  # WiFi connection manager (nmcli)
     updater/               # Git-based auto-updater
-    web/                   # Flask web control panel
-      app.py               # Routes, auth, API endpoints
-      templates/           # Jinja2 HTML templates (13 pages + base)
-      static/              # CSS styles
   downloaded_videos/       # Video cache (persists across reboots)
   rgbmatrix/               # RGB LED matrix Cython bindings (optimized SetImage pipeline)
-  tests/                   # Test suite (526 tests, runs without Pi hardware)
-  logs/                    # Runtime logs (display.log, updater.log, status.json)
+  tests/                   # Test suite (runs without Pi hardware)
+  logs/                    # Runtime logs (display.log, updater.log)
 ```
+
+### Application modes
+
+`src/main.py` boots the matrix, shows the boot screen, loads config, then hands
+off to the top-level state machine in [`src/app_state.py`](src/app_state.py),
+which drives three modes:
+
+```
+IDLE  --(press Start)-->  MENU  --(select a game)-->  IN_GAME
+  ^                         |                            |
+  +------(Resume / B)-------+<-----(game over / quit)----+
+```
+
+- **IDLE** runs the demo carousel (the classic feature-cycling loop).
+- **MENU** is the data-driven on-matrix menu in [`src/menu/`](src/menu/menu_system.py)
+  (Games submenu, inline Settings, Resume).
+- **IN_GAME** runs a playable game with the controller forwarded to it.
+
+Input comes from a USB gamepad via [`src/input/`](src/input/controller.py)
+(with a simulator keyboard fallback). There is **no web server** -- control is
+entirely on-device through the gamepad and the on-matrix menu.
 
 ---
 
@@ -275,18 +328,12 @@ These changes together yield significantly higher frame rates compared to the up
 sudo systemctl status led-matrix.service
 sudo systemctl restart led-matrix.service
 
-# Web panel
-sudo systemctl status led-matrix-web.service
-
 # Force an update check
 sudo systemctl start led-matrix-updater.service
 ```
 
 ### Viewing Logs
 
-**From the web panel**: navigate to the Logs tab for a live, filterable log viewer.
-
-**From the command line**:
 ```bash
 # Live display logs
 journalctl -u led-matrix.service -f
@@ -344,7 +391,7 @@ A window opens showing a virtual 64x64 LED matrix with per-pixel rendering.
 pytest
 ```
 
-526 tests across 6 files covering simulator API, config validation, display modules, integration, web endpoints, and the living world simulation.
+Tests cover the simulator API, config validation, display modules, the input/controller layer, the menu and app state machine, the playable games, integration, and the living world simulation.
 
 ---
 
@@ -355,7 +402,7 @@ pytest
 3. Runs `git fetch` + `git pull --ff-only` from the configured branch
 5. Detects and auto-repairs corrupt Git objects (`prune`, `gc`, `fsck`)
 6. Installs any new Python dependencies
-7. Restarts both the display service and the web panel
+7. Restarts the display service
 8. All activity logged to `logs/updater.log`
 
 Code-only changes (new features, bug fixes) are picked up automatically. Changes to systemd service files require re-running `sudo bash scripts/install.sh`.

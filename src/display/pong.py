@@ -1,5 +1,5 @@
 """
-Pong -- AI vs AI with visual effects on 64x64 LED matrix.
+Pong -- AI vs AI (demo) or player-vs-AI (interactive) on a 64x64 LED matrix.
 
 Features:
 - Ball trail effect (last 5 positions drawn with fading brightness)
@@ -9,7 +9,23 @@ Features:
 - Center line drawn as dashed line
 - Ball speed indicator (color intensity = speed)
 - Court boundary drawn in dim blue
-- AI vs AI gameplay
+- AI vs AI gameplay (DEMO) or player vs AI (INTERACTIVE)
+
+Control scheme (INTERACTIVE mode, ``controller is not None``)
+------------------------------------------------------------
+- **UP / DOWN** (D-pad or analog Y) move the **left** paddle; level-polled via
+  ``get_direction`` so holding moves continuously. The **right** paddle stays
+  AI-controlled.
+- **Start + Select** (or hold Start ~1.5s) quits to the menu at any time, via
+  :func:`src.input.controller.wants_quit`.
+- **Win / lose condition**: first player to :data:`WIN_SCORE` points. When
+  either side reaches it, a brief result banner ("YOU WIN" / "YOU LOSE") is
+  shown and ``run()`` returns to the menu. A scored point pauses briefly and the
+  round resets (scores persist), matching demo pacing.
+
+DEMO mode (``controller is None``) is unchanged: both paddles are AI, rounds
+auto-restart, and the match resets after someone reaches 5. Existing tests
+calling ``run(matrix, duration)`` behave exactly as before.
 """
 
 import random
@@ -17,7 +33,12 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop, interruptible_sleep
+from src.display._shared import (
+    should_stop,
+    interruptible_sleep,
+    safe_rumble,
+    show_banner,
+)
 from src.display._utils import _draw_digit, _draw_number, _lerp_color, _scale_color
 
 logger = logging.getLogger(__name__)
@@ -114,8 +135,24 @@ class PongGame:
         paddle_y = max(0.0, min(float(SIZE - self.paddle_height), paddle_y))
         return paddle_y
 
-    def step(self):
-        """Advance one game frame."""
+    def _move_paddle_player(self, paddle_y, dy):
+        """Move the left (player) paddle by ``dy`` (in {-1,0,1}) at paddle speed.
+
+        Shares the same clamping as the AI mover so physics/rendering are
+        identical; only the *decision* differs (input vs. _move_paddle_ai).
+        """
+        max_speed = 2.0
+        paddle_y += dy * max_speed
+        paddle_y = max(0.0, min(float(SIZE - self.paddle_height), paddle_y))
+        return paddle_y
+
+    def step(self, player_dy=None):
+        """Advance one game frame.
+
+        :param player_dy: when ``None`` (DEMO) both paddles use the AI mover.
+            When provided (INTERACTIVE) it drives the **left** paddle (a value in
+            ``{-1, 0, 1}``: -1 = up, +1 = down) while the right paddle stays AI.
+        """
         if self.round_over:
             return
 
@@ -180,8 +217,11 @@ class PongGame:
             self.p1_score += 1
             self.round_over = True
 
-        # Move paddles
-        self.p1_y = self._move_paddle_ai(self.p1_y, True)
+        # Move paddles. Left paddle is player-driven in interactive mode.
+        if player_dy is None:
+            self.p1_y = self._move_paddle_ai(self.p1_y, True)
+        else:
+            self.p1_y = self._move_paddle_player(self.p1_y, player_dy)
         self.p2_y = self._move_paddle_ai(self.p2_y, False)
 
     def draw(self, matrix):
@@ -245,57 +285,130 @@ class PongGame:
         matrix.SetImage(image)
 
 
-def run(matrix, duration=60):
-    """Run the Pong display feature for the specified duration.
+# First player to this many points wins (used by both modes for match reset /
+# interactive win-lose).
+WIN_SCORE = 5
+# Generous safety cap (seconds) for INTERACTIVE play; the player normally exits
+# when the match is decided or via the quit gesture.
+_INTERACTIVE_MAX_SECONDS = 3600
+
+
+def _carry_round_reset(game):
+    """Reset the ball/round but preserve scores + paddle state (shared helper)."""
+    old_p1 = game.p1_score
+    old_p2 = game.p2_score
+    old_ph = game.paddle_height
+    old_pc = game.pass_count
+    game._reset_round()
+    game.p1_score = old_p1
+    game.p2_score = old_p2
+    game.paddle_height = old_ph
+    game.pass_count = old_pc
+
+
+def _run_demo(matrix, duration, start_time):
+    """Autonomous DEMO loop (unchanged behavior)."""
+    while time.time() - start_time < duration:
+        if should_stop():
+            break
+        game = PongGame()
+
+        while not game.round_over and time.time() - start_time < duration:
+            if should_stop():
+                break
+            frame_start = time.time()
+            game.step()
+            game.draw(matrix)
+
+            elapsed = time.time() - frame_start
+            sleep_time = FRAME_DUR - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        if game.round_over and time.time() - start_time < duration:
+            # Flash the score briefly
+            game.draw(matrix)
+            if not interruptible_sleep(0.8):
+                break
+
+            _carry_round_reset(game)
+
+            # Reset game after someone reaches WIN_SCORE
+            if game.p1_score >= WIN_SCORE or game.p2_score >= WIN_SCORE:
+                # Show final score for a moment
+                game.draw(matrix)
+                if not interruptible_sleep(1.5):
+                    break
+                game.reset()
+
+
+def _run_interactive(matrix, controller, start_time):
+    """INTERACTIVE loop: player (left paddle) vs AI; first to WIN_SCORE."""
+    from src.input.controller import wants_quit
+
+    show_banner(matrix, ["PONG", "READY"], hold=0.8)
+
+    game = PongGame()
+
+    while time.time() - start_time < _INTERACTIVE_MAX_SECONDS:
+        if should_stop():
+            return
+        # Play a round until a point is scored.
+        while not game.round_over:
+            if should_stop():
+                return
+            controller.poll_events()
+            if wants_quit(controller):
+                return
+            frame_start = time.time()
+
+            # Level-poll the player's vertical direction; UP = -1, DOWN = +1.
+            d = controller.get_direction()
+            player_dy = 0
+            if d is not None:
+                player_dy = d[1]  # screen coords: up is -1
+            game.step(player_dy=player_dy)
+            game.draw(matrix)
+
+            elapsed = time.time() - frame_start
+            sleep_time = FRAME_DUR - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        # A point was scored: brief pause, then check for match end.
+        game.draw(matrix)
+        if not interruptible_sleep(0.8):
+            return
+
+        if game.p1_score >= WIN_SCORE or game.p2_score >= WIN_SCORE:
+            player_won = game.p1_score >= WIN_SCORE
+            safe_rumble(controller, 1.0 if player_won else 0.6, 300)
+            msg = "YOU WIN" if player_won else "YOU LOSE"
+            color = (80, 255, 120) if player_won else (255, 80, 80)
+            show_banner(matrix, [msg, f"{game.p1_score}-{game.p2_score}"],
+                        color=color, hold=1.8)
+            return
+
+        _carry_round_reset(game)
+
+
+def run(matrix, duration=60, controller=None):
+    """Run the Pong feature.
 
     Args:
         matrix: RGBMatrix instance (or mock).
-        duration: How long to run in seconds.
+        duration: How long to run in seconds (DEMO mode only; INTERACTIVE play
+            runs until the match is decided or the quit gesture, with a generous
+            safety cap of :data:`_INTERACTIVE_MAX_SECONDS`).
+        controller: optional :class:`src.input.Controller`. ``None`` -> DEMO
+            (AI vs AI, unchanged). Not-None -> INTERACTIVE (player vs AI).
     """
     start_time = time.time()
     try:
-        while time.time() - start_time < duration:
-            if should_stop():
-                break
-            game = PongGame()
-
-            while not game.round_over and time.time() - start_time < duration:
-                if should_stop():
-                    break
-                frame_start = time.time()
-                game.step()
-                game.draw(matrix)
-
-                elapsed = time.time() - frame_start
-                sleep_time = FRAME_DUR - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            if game.round_over and time.time() - start_time < duration:
-                # Flash the score briefly
-                game.draw(matrix)
-                if not interruptible_sleep(0.8):
-                    break
-
-                # Reset round but keep scores
-                old_p1 = game.p1_score
-                old_p2 = game.p2_score
-                old_ph = game.paddle_height
-                old_pc = game.pass_count
-                game._reset_round()
-                game.p1_score = old_p1
-                game.p2_score = old_p2
-                game.paddle_height = old_ph
-                game.pass_count = old_pc
-
-                # Reset game after someone reaches 5
-                if game.p1_score >= 5 or game.p2_score >= 5:
-                    # Show final score for a moment
-                    game.draw(matrix)
-                    if not interruptible_sleep(1.5):
-                        break
-                    game.reset()
-
+        if controller is None:
+            _run_demo(matrix, duration, start_time)
+        else:
+            _run_interactive(matrix, controller, start_time)
     except Exception as e:
         logger.error("Error in pong: %s", e, exc_info=True)
     finally:

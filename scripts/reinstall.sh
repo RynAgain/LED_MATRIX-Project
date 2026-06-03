@@ -65,18 +65,15 @@ echo ""
 # --- Step 1: Stop services ---
 log_info "Step 1/5: Stopping LED Matrix services..."
 systemctl stop led-matrix.service 2>/dev/null || true
-systemctl stop led-matrix-web.service 2>/dev/null || true
 systemctl stop led-matrix-updater.timer 2>/dev/null || true
 systemctl stop led-matrix-updater.service 2>/dev/null || true
 systemctl disable led-matrix.service 2>/dev/null || true
-systemctl disable led-matrix-web.service 2>/dev/null || true
 systemctl disable led-matrix-updater.timer 2>/dev/null || true
 log_info "Services stopped and disabled"
 
 # --- Step 2: Remove old systemd units ---
 log_info "Step 2/5: Removing old systemd unit files..."
 rm -f /etc/systemd/system/led-matrix.service
-rm -f /etc/systemd/system/led-matrix-web.service
 rm -f /etc/systemd/system/led-matrix-updater.service
 rm -f /etc/systemd/system/led-matrix-updater.timer
 systemctl daemon-reload
@@ -117,7 +114,6 @@ echo ""
 # --- Step 5: Start services and verify ---
 log_info "Step 5/5: Starting services..."
 systemctl start led-matrix.service
-systemctl start led-matrix-web.service
 systemctl start led-matrix-updater.timer
 
 # Brief pause for services to initialize
@@ -131,13 +127,9 @@ echo ""
 echo "  led-matrix.service (display):"
 systemctl is-active led-matrix.service && echo "    --> RUNNING" || echo "    --> NOT RUNNING (check: journalctl -u led-matrix -e)"
 echo ""
-echo "  led-matrix-web.service (web panel):"
-systemctl is-active led-matrix-web.service && echo "    --> RUNNING" || echo "    --> NOT RUNNING (check: journalctl -u led-matrix-web -e)"
-echo ""
 echo "  led-matrix-updater.timer (auto-update):"
 systemctl is-active led-matrix-updater.timer && echo "    --> RUNNING" || echo "    --> NOT RUNNING"
 echo ""
 echo "  Troubleshoot:"
 echo "    journalctl -u led-matrix.service -f"
-echo "    journalctl -u led-matrix-web.service -f"
 echo ""

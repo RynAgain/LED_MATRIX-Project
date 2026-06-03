@@ -828,3 +828,77 @@ flowchart LR
 | Modify | `src/display/snake.py`, `tetris.py`, `pong.py` (interactive `run`) |
 | Modify | `requirements.txt`, `scripts/start.sh`, `install.sh`, `reinstall.sh`, `uninstall.sh`, `troubleshoot.sh`, `README.md`, `src/updater/auto_update.py`, `src/simulator/matrix.py` (event ownership) |
 | Delete | `src/web/` (all), `services/led-matrix-web.service`, `tests/test_web.py`, `config/web.json` |
+
+---
+
+## Implementation Status / Completion
+
+This section records what was **actually built** across the implementation
+phases, so this spec reflects reality. Unless noted as a deviation, the system
+matches the design above.
+
+### Delivered
+
+- **Input layer** (`src/input/`): `Controller`, `Button`, `EventType`,
+  `InputEvent`, `ButtonMapping`, `wants_quit`, `default_mapping` /
+  `load_mapping` / `save_mapping`. The `Controller` is the single owner of the
+  pygame event queue (coexisting with the simulator's window-close). A
+  calibration CLI (`python -m src.input.controller calibrate`) writes
+  `config/controller.json`; a **keyboard fallback** (`keyboard_fallback.py`)
+  lets the simulator be driven with the keyboard (arrows/WASD, Z=A, X=B,
+  Enter=Start, Tab=Select).
+- **State machine** (`src/app_state.py`): `AppMode` (IDLE / MENU / IN_GAME),
+  `AppStateMachine`, `DemoCarousel` (the legacy demo loop extracted by
+  delegation), and the `MenuController` / `MenuResult` seam. A background input
+  thread watches for START during IDLE and `request_stop()`s the demo (the
+  in-process replacement for the deleted web command-watcher).
+- **Menu + Settings** (`src/menu/`): a data-driven menu engine
+  (`menu_system.py` + `menu_data.py`) with a scrolling viewport, plus an inline
+  `SettingsScreen` that adjusts **brightness** and **demo duration**, applies
+  brightness live to the matrix, and persists changes atomically (deep-merge)
+  to `config/config.json`.
+- **Playable games**: `snake`, `tetris`, `pong` each expose
+  `run(matrix, duration=60, controller=None)` — autonomous **demo** when
+  `controller is None`, **interactive** when a controller is supplied.
+  `PLAYABLE_GAMES = {"snake", "tetris", "pong"}` is the single source of truth
+  the Games submenu is generated from.
+- **Web server FULLY REMOVED**: `src/web/`, `services/led-matrix-web.service`,
+  `tests/test_web.py`, and `config/web.json` are deleted; Flask / flask-sock are
+  gone from `requirements.txt`; scripts, the README, and the updater are
+  de-webbed. Control is entirely on-device via the gamepad + on-matrix menu.
+- **Tests**: `tests/test_input.py`, `tests/test_app_state.py`,
+  `tests/test_menu.py`, `tests/test_playable_games.py`, and an end-to-end
+  controller-flow suite in `tests/test_integration.py`
+  (IDLE → MENU → IN_GAME → MENU → Settings → IDLE → shutdown) driving the **real**
+  state machine, **real** `MenuSystem`, and a **real** game `run()` with a
+  scripted, headless fake controller.
+
+### Deviations from the original design
+
+1. **Settings is handled *inline*, not as a separate top-level mode.** The
+   design contemplated a `SETTINGS` app mode; in practice the `MenuSystem` runs
+   `SettingsScreen` as a *pushed screen* and pops straight back to the menu, so
+   `AppMode` has only IDLE / MENU / IN_GAME. The state machine still treats a
+   `MenuResult.OPEN_SETTINGS` as "stay in MENU", so the seam exists, but the
+   real menu never needs to return it (it only returns `launch_game` / `resume`
+   / `quit`). This is the cleaner UX and keeps the top-level mode set minimal.
+2. **`pygame` is now a runtime dependency.** Previously simulator-only, pygame
+   was promoted to a runtime dep because the controller/input layer uses
+   `pygame.joystick` + the event queue on the device as well.
+3. **`PlaceholderMenu` is kept as a fallback.** The real `MenuSystem` is the
+   default, but `AppStateMachine._default_menu()` falls back to the
+   dependency-light `PlaceholderMenu` if `src.menu` cannot be imported (e.g. a
+   partial install), so the app is never left without a menu.
+4. **Calibration CLI lives in the input module.** Rather than a separate
+   `scripts/calibrate_controller.py`, calibration is invoked as
+   `python -m src.input.controller calibrate`.
+5. **Test file naming.** Controller tests live in `tests/test_input.py` (the
+   spec sketched `tests/test_controller.py`); functionality is equivalent.
+
+### Known unrelated test failure
+
+`tests/test_living_world.py::TestBowCrafting::test_bow_crafted_on_hunt` fails on
+this branch (`AssertionError: 'walking' == 'hunting'`). This is a **pre-existing
+bug in the villager-AI / living-world simulation** that this overhaul never
+touched (no `src/display/living_world/` source was modified by any phase). It is
+out of scope for the controller-UI work and is left as-is.

@@ -1,10 +1,9 @@
 #!/bin/bash
 # LED Matrix Project - Service Startup Wrapper
-# Called by led-matrix.service (and optionally led-matrix-web.service).
+# Called by led-matrix.service.
 # Ensures the virtual environment and dependencies exist before launching.
 #
-# Usage (display):  sudo bash scripts/start.sh display
-# Usage (web):      bash scripts/start.sh web
+# Usage:  sudo bash scripts/start.sh
 
 set -e
 
@@ -29,8 +28,9 @@ if [ ! -f "$VENV_PYTHON" ]; then
 fi
 
 # --- Check / install dependencies ---
-# Quick check: try importing flask (a key dependency). If it fails, install.
-if ! "$VENV_PYTHON" -c "import flask" 2>/dev/null; then
+# Quick check: try importing Pillow (a key always-present dependency). If it
+# fails, install everything from requirements.txt.
+if ! "$VENV_PYTHON" -c "import PIL" 2>/dev/null; then
     log "Dependencies missing -- installing from requirements.txt..."
     "$VENV_PYTHON" -m pip install --quiet --upgrade pip
     "$VENV_PYTHON" -m pip install --quiet -r "$PROJECT_ROOT/requirements.txt"
@@ -39,20 +39,6 @@ else
     log "Dependencies OK"
 fi
 
-# --- Launch the requested service ---
-MODE="${1:-display}"
-
-case "$MODE" in
-    display)
-        log "Starting LED matrix display service..."
-        exec "$VENV_PYTHON" "$PROJECT_ROOT/src/main.py"
-        ;;
-    web)
-        log "Starting LED matrix web panel..."
-        exec "$VENV_PYTHON" -m src.web.app
-        ;;
-    *)
-        log "Unknown mode: $MODE (expected 'display' or 'web')"
-        exit 1
-        ;;
-esac
+# --- Launch the display service ---
+log "Starting LED matrix display service..."
+exec "$VENV_PYTHON" "$PROJECT_ROOT/src/main.py"

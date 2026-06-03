@@ -24,13 +24,12 @@ numpy>=1.24.0,<2
 # HTTP requests (for Bitcoin price, connectivity checks)
 requests>=2.31.0
 
-# Development: LED matrix simulator (not needed on Raspberry Pi)
-# Install on dev machines: pip install pygame
-pygame>=2.5.0; sys_platform == "win32" or sys_platform == "darwin" or sys_platform == "linux"
-
-# Web control panel
-Flask>=3.0.0
-flask-sock>=0.7.0
+# Controller input + LED matrix simulator.
+# pygame is now a RUNTIME dependency on ALL platforms (including the Raspberry
+# Pi): the USB gamepad control layer (src/input/controller.py) uses pygame's
+# joystick API, and the simulator uses pygame for its window. The previous
+# platform marker that excluded the Pi has been removed (Phase 6).
+pygame>=2.5.0
 
 # QR code generation
 qrcode>=7.4

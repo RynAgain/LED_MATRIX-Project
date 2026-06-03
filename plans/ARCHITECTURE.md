@@ -3,6 +3,17 @@
 > This document defines the target architecture for the LED Matrix Project revamp.
 > It covers project structure, subsystem design, configuration schemas, and system integration.
 
+> **⚠️ Superseded in part — control is now gamepad-driven, not web-based.**
+> The original revamp included a **Web Control Panel** (Section 9, Flask on port
+> 5000). That web UI has since been **removed entirely** and replaced by a USB
+> **gamepad + on-matrix menu** controlled by a small state machine
+> (`IDLE → MENU → IN_GAME`). See [`plans/CONTROLLER_OVERHAUL.md`](CONTROLLER_OVERHAUL.md)
+> for the current control architecture (input layer in `src/input/`, state
+> machine in `src/app_state.py`, menu/settings in `src/menu/`). Section 9 below
+> and any web/Flask references are **historical only** and no longer reflect the
+> shipped system. The rest of this document (project structure, WiFi,
+> auto-update, startup/services, config schema, logging) remains accurate.
+
 ---
 
 ## 1. Project Structure
@@ -514,7 +525,14 @@ To move from the current flat structure to the revamped architecture:
 
 ---
 
-## 9. Web Control Panel
+## 9. Web Control Panel  *(REMOVED — historical only)*
+
+> **This subsystem was removed.** The web control panel below was never the
+> final control surface: it has been replaced by the gamepad + on-matrix menu
+> described in [`plans/CONTROLLER_OVERHAUL.md`](CONTROLLER_OVERHAUL.md). There is
+> no `src/web/`, no `config/web.json`, no `led-matrix-web` service, and no Flask
+> dependency in the shipped system. The content below is retained only for
+> historical context.
 
 ### Technology Stack
 - **Backend**: Flask 3.x (Python)

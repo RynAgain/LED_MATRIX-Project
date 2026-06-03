@@ -1,5 +1,6 @@
 """
-Snake -- AI-driven with visual effects on 64x64 LED matrix.
+Snake -- AI-driven (demo) or controller-playable (interactive) on a 64x64 LED
+matrix.
 
 Features:
 - Uniform 1x1 pixel segments for classic snake look
@@ -9,7 +10,26 @@ Features:
 - Death animation (body turns red one segment at a time)
 - Score/length display in corner using small pixel font
 - Faster frame rate for smoother movement
-- Autonomous AI gameplay
+- Autonomous AI gameplay (DEMO) or gamepad control (INTERACTIVE)
+
+Control scheme (INTERACTIVE mode, ``controller is not None``)
+------------------------------------------------------------
+- **D-pad / analog stick** steers the snake (UP / DOWN / LEFT / RIGHT). A
+  180-degree reversal into the snake's own neck is rejected (the input is
+  ignored and the snake keeps its current heading), reusing ``_opposite``.
+- **A / B** are unused this phase (directions are the core mechanic); reserved
+  so future tweaks (e.g. a speed boost) don't break the contract.
+- **Start + Select** (or hold Start ~1.5s) quits to the menu at any time, via
+  :func:`src.input.controller.wants_quit`.
+- On **game over** (wall / self collision) the death animation plays once, a
+  brief "GAME OVER" banner is shown, then ``run()`` returns -- handing control
+  back to the state machine. A single round is played per interactive launch
+  (no auto-restart), unlike demo mode which loops rounds.
+
+DEMO mode (``controller is None``) is unchanged: the autonomous pathfinding AI
+plays, rounds auto-restart, and the feature ends only when ``duration`` elapses
+or ``should_stop()`` fires. Existing tests calling ``run(matrix, duration)``
+behave exactly as before.
 """
 
 import random
@@ -17,7 +37,13 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop, interruptible_sleep
+from src.display._shared import (
+    should_stop,
+    interruptible_sleep,
+    read_direction,
+    safe_rumble,
+    show_banner,
+)
 from src.display._utils import _draw_digit, _draw_number, _lerp_color
 
 logger = logging.getLogger(__name__)
@@ -129,12 +155,23 @@ class SnakeGame:
 
         self.direction = best_dir
 
-    def step(self):
-        """Advance the game by one frame."""
+    def step(self, direction=None):
+        """Advance the game by one frame.
+
+        :param direction: when ``None`` (DEMO) the autonomous AI chooses the next
+            heading via :meth:`_ai_decide`. When a ``(dx, dy)`` tuple is supplied
+            (INTERACTIVE) it becomes the requested heading, except a 180-degree
+            reversal into the neck is rejected (the current heading is kept).
+        """
         if not self.alive:
             return
 
-        self._ai_decide()
+        if direction is None:
+            self._ai_decide()
+        else:
+            # Reject reversals; ignore unknown vectors and keep current heading.
+            if direction in DIRECTIONS and direction != _opposite(self.direction):
+                self.direction = direction
         self.frame_count += 1
 
         hx, hy = self.snake[0]
@@ -235,41 +272,100 @@ class SnakeGame:
         interruptible_sleep(0.5)
 
 
-def run(matrix, duration=60):
-    """Run the Snake display feature for the specified duration.
+# Generous safety cap (seconds) for INTERACTIVE play so a forgotten game can't
+# run forever; the player normally exits via game-over or the quit gesture.
+_INTERACTIVE_MAX_SECONDS = 3600
+
+
+def _run_demo(matrix, duration, start_time):
+    """Autonomous DEMO loop (unchanged behavior)."""
+    while time.time() - start_time < duration:
+        if should_stop():
+            break
+        game = SnakeGame()
+        pulse_phase = 0.0
+
+        while game.alive and time.time() - start_time < duration:
+            if should_stop():
+                break
+            frame_start = time.time()
+            game.step()
+            game.draw(matrix, pulse_phase)
+            pulse_phase += 0.4  # pulse speed
+
+            elapsed = time.time() - frame_start
+            sleep_time = FRAME_DUR - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        # Death animation
+        if not game.alive and time.time() - start_time < duration:
+            game.draw_death(matrix)
+
+        # Brief pause between games
+        interruptible_sleep(0.5)
+
+
+def _run_interactive(matrix, controller, start_time):
+    """INTERACTIVE loop: the player steers one round; see module docstring."""
+    from src.input.controller import wants_quit
+
+    show_banner(matrix, ["SNAKE", "READY"], hold=0.8)
+
+    game = SnakeGame()
+    pulse_phase = 0.0
+    requested = game.direction
+
+    while game.alive and time.time() - start_time < _INTERACTIVE_MAX_SECONDS:
+        if should_stop():
+            return
+        # Pump input every frame, then check the quit gesture.
+        controller.poll_events()
+        if wants_quit(controller):
+            return
+
+        frame_start = time.time()
+
+        # Latest held direction wins; falls back to current heading when centered
+        # so the snake never stalls. read_direction collapses diagonals to a
+        # cardinal axis for the four-direction snake.
+        d = read_direction(controller, cardinal_only=True)
+        if d is not None:
+            requested = d
+        game.step(direction=requested)
+        game.draw(matrix, pulse_phase)
+        pulse_phase += 0.4
+
+        elapsed = time.time() - frame_start
+        sleep_time = FRAME_DUR - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+    # Game over: animation + feedback, then return to the menu (no auto-restart).
+    if not game.alive:
+        game.draw_death(matrix)
+        safe_rumble(controller, 0.8, 300)
+        show_banner(matrix, ["GAME OVER", f"SCORE {game.score}"],
+                    color=(255, 80, 80), hold=1.5)
+
+
+def run(matrix, duration=60, controller=None):
+    """Run the Snake feature.
 
     Args:
         matrix: RGBMatrix instance (or mock).
-        duration: How long to run in seconds.
+        duration: How long to run in seconds (DEMO mode only; INTERACTIVE play
+            is bounded by game-over / the quit gesture, with a generous safety
+            cap of :data:`_INTERACTIVE_MAX_SECONDS`).
+        controller: optional :class:`src.input.Controller`. ``None`` -> DEMO
+            (autonomous AI, unchanged). Not-None -> INTERACTIVE (player control).
     """
     start_time = time.time()
     try:
-        while time.time() - start_time < duration:
-            if should_stop():
-                break
-            game = SnakeGame()
-            pulse_phase = 0.0
-
-            while game.alive and time.time() - start_time < duration:
-                if should_stop():
-                    break
-                frame_start = time.time()
-                game.step()
-                game.draw(matrix, pulse_phase)
-                pulse_phase += 0.4  # pulse speed
-
-                elapsed = time.time() - frame_start
-                sleep_time = FRAME_DUR - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            # Death animation
-            if not game.alive and time.time() - start_time < duration:
-                game.draw_death(matrix)
-
-            # Brief pause between games
-            interruptible_sleep(0.5)
-
+        if controller is None:
+            _run_demo(matrix, duration, start_time)
+        else:
+            _run_interactive(matrix, controller, start_time)
     except Exception as e:
         logger.error("Error in snake: %s", e, exc_info=True)
     finally:
