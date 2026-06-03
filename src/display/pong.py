@@ -87,6 +87,7 @@ class PongGame:
         self.p2_score = 0
         self.paddle_height = INITIAL_PADDLE_HEIGHT
         self.pass_count = 0
+        self._frame_count = 0  # Global frame counter for AI offset oscillation
         self._reset_round()
 
     def _reset_round(self):
@@ -178,12 +179,13 @@ class PongGame:
         return sim_y
 
     def _move_paddle_ai(self, paddle_y, is_left):
-        """Perfect AI paddle movement — predicts ball landing position.
+        """AI paddle movement — predicts ball landing position with intentional
+        offset to create varied bounce angles.
 
         Uses trajectory simulation with wall-bounce prediction to determine
-        exactly where the ball will arrive at the paddle's X coordinate.
-        Moves at unlimited speed to guarantee interception every time,
-        producing indefinite rallies in demo mode.
+        where the ball will arrive, then aims slightly off-center using a slow
+        oscillation. This ensures the ball hits different parts of the paddle,
+        creating interesting angle variation while still never missing.
         """
         # Determine the X coordinate this paddle needs to defend
         if is_left:
@@ -194,8 +196,14 @@ class PongGame:
         # Predict where the ball will be when it reaches our paddle's X
         predicted_y = self._predict_ball_y_at_x(paddle_target_x)
 
-        # Target: center the paddle on the predicted Y
-        target_y = predicted_y - self.paddle_height / 2.0
+        # Add intentional offset so the ball hits different parts of the paddle,
+        # creating varied bounce angles. Each paddle uses a different oscillation
+        # phase so they don't mirror each other perfectly.
+        phase = 0.0 if is_left else math.pi * 0.7
+        offset = math.sin(self._frame_count * 0.08 + phase) * 3.0
+
+        # Target: center the paddle on the predicted Y, plus the offset
+        target_y = predicted_y - self.paddle_height / 2.0 + offset
 
         # Move toward target with no speed limit — perfect interception
         # (Use a generous max speed that ensures we always arrive in time)
@@ -227,6 +235,8 @@ class PongGame:
         """
         if self.round_over:
             return
+
+        self._frame_count += 1
 
         # Store trail position
         self.trail.append((self.ball_x, self.ball_y))

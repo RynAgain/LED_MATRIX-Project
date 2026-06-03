@@ -183,6 +183,8 @@ class TetrisGame:
 
         # AI target state: computed once per piece spawn, executed frame-by-frame
         self._ai_target = None  # (target_x, target_rot) or None if not yet computed
+        # AI move delay: wait this many frames between each action for visual pacing
+        self._ai_move_cooldown = 0
 
     def _refill_bag(self):
         """Refill the piece bag with one of each tetromino, shuffled."""
@@ -390,11 +392,12 @@ class TetrisGame:
         The AI strategy:
         1. On first call after a new piece spawns, compute the optimal target
            placement (rotation + column) by evaluating all possibilities.
-        2. Each frame, execute up to 3 moves toward the target:
+        2. Each frame, execute at most 1 move toward the target with a 2-frame
+           cooldown between actions, creating a deliberate "thinking" pace:
            - First: rotate toward target rotation
            - Then: shift left/right toward target column
-           - Finally: when aligned, hard-drop to lock instantly
-        This creates a visible animation of the AI "thinking then placing".
+           - Finally: when aligned, hard-drop to lock
+        This creates a visible animation of the AI placing pieces methodically.
         """
         if self.game_over:
             return
@@ -409,14 +412,15 @@ class TetrisGame:
         # Compute AI target once per piece (on spawn or if not yet set)
         if self._ai_target is None:
             self._ai_target = self._ai_find_best_placement()
+            self._ai_move_cooldown = 3  # Brief "thinking" pause on new piece
 
         target_x, target_rot = self._ai_target
 
-        # Execute up to 3 moves per frame for snappy but visible play
-        moves_this_frame = 0
-        max_moves_per_frame = 3
-
-        while moves_this_frame < max_moves_per_frame:
+        # Deliberate pacing: wait between AI actions (1 move per frame, with
+        # a 2-frame cooldown between moves so the piece visibly travels)
+        if self._ai_move_cooldown > 0:
+            self._ai_move_cooldown -= 1
+        else:
             moved = False
 
             # Priority 1: Rotate toward target rotation
@@ -461,11 +465,8 @@ class TetrisGame:
                 self.last_drop = time.time()
                 return  # Piece is locked; done for this frame
 
-            if not moved:
-                # Can't make progress (blocked) — fall back to gravity drop
-                break
-
-            moves_this_frame += 1
+            if moved:
+                self._ai_move_cooldown = 2  # Wait 2 frames before next action
 
         # Apply gravity if we haven't locked yet (piece still in play)
         now = time.time()

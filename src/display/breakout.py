@@ -69,6 +69,7 @@ class BreakoutGame:
     def __init__(self):
         self.score = 0
         self.lives = 3
+        self._frame_count = 0  # Global frame counter for AI offset oscillation
         self._init_bricks()
         self._reset_ball()
 
@@ -214,17 +215,24 @@ class BreakoutGame:
         return sim_x
 
     def _move_paddle_ai(self):
-        """Perfect AI paddle — predicts ball landing X via trajectory simulation.
+        """AI paddle — predicts ball landing X with intentional offset for
+        varied bounce angles.
 
-        Uses wall-bounce prediction to determine exactly where the ball will
-        arrive at paddle height. Moves at high speed to guarantee interception,
-        ensuring the demo never loses a life and clears levels indefinitely.
+        Uses wall-bounce prediction to determine where the ball will arrive,
+        then aims slightly off-center using a slow oscillation. This makes the
+        ball bounce at different angles, hitting bricks from varied directions
+        and creating more interesting visual patterns while still never missing.
         """
         # Predict where ball will arrive at paddle level
         predicted_x = self._predict_ball_x_at_paddle()
 
-        # Target: center paddle on predicted X
-        target_x = predicted_x - PADDLE_WIDTH / 2.0
+        # Add intentional offset so the ball hits different parts of the paddle,
+        # creating varied bounce angles that send the ball into different brick
+        # columns. Uses a slow oscillation for smooth, deliberate-looking movement.
+        offset = math.sin(self._frame_count * 0.06) * 3.5
+
+        # Target: center paddle on predicted X, plus the offset
+        target_x = predicted_x - PADDLE_WIDTH / 2.0 + offset
 
         # Move toward target with generous speed — perfect interception
         max_speed = 4.0  # Fast enough to cover full width between frames
@@ -239,6 +247,8 @@ class BreakoutGame:
 
     def step(self):
         """Advance one game frame. Returns 'playing', 'lost_life', or 'cleared'."""
+        self._frame_count += 1
+
         # Store trail
         self.trail.append((self.ball_x, self.ball_y))
         if len(self.trail) > TRAIL_LENGTH:
