@@ -456,3 +456,34 @@ class TestDemoCarousel:
         carousel = DemoCarousel(matrix, cfg, threading.Event())
         carousel.run_cycle()
         assert matrix.brightness == 15
+
+    def test_brightness_restored_when_night_mode_ends(self, monkeypatch):
+        """Brightness returns to configured default when schedule override ends."""
+        cfg = {
+            "display_duration": 10,
+            "sequence": [{"name": "fire", "enabled": True}],
+            "matrix_hardware": {"brightness": 75},
+        }
+        monkeypatch.setattr(main_module, "run_feature", lambda *a, **k: True)
+        monkeypatch.setattr(main_module, "_check_internet", lambda *a, **k: True)
+        monkeypatch.setattr(main_module, "load_config", lambda: cfg)
+
+        # First cycle: night mode active -> brightness set to 20
+        schedule_returns = [{"brightness": 20, "allowed_features": []}]
+        monkeypatch.setattr(
+            main_module, "_check_schedule",
+            lambda: schedule_returns[0],
+        )
+
+        matrix = FakeMatrix()
+        carousel = DemoCarousel(matrix, cfg, threading.Event())
+        carousel.run_cycle()
+        assert matrix.brightness == 20, "Night mode should set brightness to 20"
+
+        # Second cycle: night mode ends (no override) -> brightness restored
+        schedule_returns[0] = None
+        carousel.run_cycle()
+        assert matrix.brightness == 75, (
+            "Brightness should be restored to configured default (75) "
+            "when night mode ends"
+        )

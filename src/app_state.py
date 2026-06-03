@@ -361,6 +361,13 @@ class DemoCarousel:
                             {"name": "time_display", "type": "utility",
                              "enabled": True}
                         ]
+            else:
+                # Restore normal brightness when no schedule override is active
+                default_brightness = self.config.get("matrix_hardware", {}).get("brightness", 80)
+                try:
+                    self.matrix.brightness = default_brightness
+                except Exception:  # noqa: BLE001
+                    pass
 
             if not self.enabled_features:
                 logger.warning(
