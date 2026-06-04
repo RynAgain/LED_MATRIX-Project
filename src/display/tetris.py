@@ -19,8 +19,8 @@ Control scheme (INTERACTIVE mode, ``controller is not None``)
 - **LEFT / RIGHT** move the active piece (honors REPEAT for smooth held shift).
 - **DOWN** soft-drops (honors REPEAT so holding drops faster).
 - **UP** or **A** rotate clockwise (PRESSED edge only -- no accidental spinning).
-- **B** rotates counter-clockwise (PRESSED edge).
-- **SELECT** (tapped alone) hard-drops the piece. (Start+Select is the quit
+- **B** hard-drops (instant slam) the piece (PRESSED edge).
+- **SELECT** (tapped alone) rotates counter-clockwise. (Start+Select is the quit
   gesture, so we use a *tap* of Select without Start; we also accept it only
   when Start is not held to avoid clashing with quit.)
 - **Start + Select** held (or hold Start ~1.5s) quits to the menu, via
@@ -29,8 +29,8 @@ Control scheme (INTERACTIVE mode, ``controller is not None``)
 - On **game over** (the stack tops out) the fill animation plays, a brief
   banner is shown, then ``run()`` returns to the menu (no auto-restart).
 
-Rotate convention: **UP/A = clockwise, B = counter-clockwise**. Hard-drop is a
-Select tap (chosen so the four directions stay free for movement/rotate).
+Rotate convention: **UP/A = clockwise, SELECT = counter-clockwise**. Hard-drop
+is B (instant slam for quick play).
 
 DEMO mode (``controller is None``) is unchanged: the placement-evaluating AI
 plays and rounds auto-restart until ``duration`` elapses. Existing tests calling
@@ -753,10 +753,10 @@ def _run_interactive(matrix, controller, start_time):
                 if b is Button.UP or b is Button.A:
                     game.rotate(cw=True)
                 elif b is Button.B:
-                    game.rotate(cw=False)
-                elif b is Button.SELECT and not controller.is_pressed(Button.START):
-                    # Select tapped alone = hard-drop (Start+Select = quit).
                     game.hard_drop()
+                elif b is Button.SELECT and not controller.is_pressed(Button.START):
+                    # Select tapped alone = rotate CCW (Start+Select = quit).
+                    game.rotate(cw=False)
 
         game.apply_gravity()
 
