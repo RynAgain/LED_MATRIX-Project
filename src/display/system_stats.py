@@ -2,7 +2,7 @@
 """System stats display for 64x64 LED matrix.
 
 Shows CPU usage, RAM usage, CPU temperature as animated bar graphs,
-plus hostname and IP address at the bottom. Refreshes every 2 seconds.
+plus software version at the bottom. Refreshes every 2 seconds.
 
 Uses psutil for cross-platform stats. Falls back to reading
 /sys/class/thermal/thermal_zone0/temp for CPU temp on Raspberry Pi
@@ -11,10 +11,10 @@ when psutil doesn't report it.
 
 import time
 import socket
-import platform
 import logging
 from PIL import Image, ImageDraw
 from src.display._shared import should_stop
+from src.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -171,15 +171,13 @@ def _get_cpu_temp():
     return None
 
 
-def _get_hostname():
-    """Get the system hostname (truncated to fit display)."""
+def _get_version_string():
+    """Get the software version (git hash) formatted for display."""
     try:
-        name = platform.node()
-        if not name:
-            name = socket.gethostname()
-        return name[:10].upper()
+        ver = get_version()
+        return "V:{}".format(ver[:7].upper())
     except Exception:
-        return "UNKNOWN"
+        return "V:UNKNOWN"
 
 
 def _get_ip_address():
@@ -249,7 +247,7 @@ def _draw_bar(draw, x, y, width, height, percent, bar_color, animated_pct=None):
     draw.rectangle([x, y, x + width - 1, y + height - 1], outline=(50, 50, 70))
 
 
-def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, hostname,
+def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, version_str,
                 anim_cpu, anim_ram):
     """Render one frame of the system stats display.
 
@@ -262,7 +260,7 @@ def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, hostname,
       Row 36-40:  RAM bar
       Row 44-50:  TEMP label + value (color-coded)
       Row 52-54:  TEMP bar
-      Row 57-63:  Hostname / IP
+      Row 57-63:  Version string
     """
     # Title
     title = "SYSTEM"
@@ -306,10 +304,10 @@ def _draw_frame(draw, cpu_pct, ram_pct, cpu_temp, hostname,
         temp_pct = min(100, max(0, cpu_temp))
         _draw_bar(draw, 2, 52, 60, 3, temp_pct, tc)
 
-    # --- Hostname ---
-    hw = _text_width(hostname, scale=1, spacing=1)
+    # --- Version ---
+    hw = _text_width(version_str, scale=1, spacing=1)
     host_x = max(0, (WIDTH - hw) // 2)
-    _draw_text(draw, hostname, host_x, 57, HOSTNAME_COLOR,
+    _draw_text(draw, version_str, host_x, 57, HOSTNAME_COLOR,
                scale=1, spacing=1)
 
 
@@ -326,8 +324,8 @@ def run(matrix, duration=60):
     anim_cpu = 0.0
     anim_ram = 0.0
 
-    # Cache hostname (don't re-query every frame)
-    hostname = _get_hostname()
+    # Cache version string (don't re-query every frame)
+    version_str = _get_version_string()
 
     # Initial psutil CPU reading (first call always returns 0)
     try:
@@ -368,7 +366,7 @@ def run(matrix, duration=60):
             draw = ImageDraw.Draw(image)
 
             _draw_frame(draw, target_cpu, target_ram, cpu_temp,
-                        hostname, anim_cpu, anim_ram)
+                        version_str, anim_cpu, anim_ram)
 
             matrix.SetImage(image)
 
