@@ -63,6 +63,8 @@ from src.menu.menu_data import (
 from src.menu.carousel_screen import CarouselScreen
 from src.menu.controller_screen import ControllerScreen
 from src.menu.settings_screen import DEFAULT_CONFIG_PATH, SettingsScreen
+from src.menu.update_screen import run_force_update
+from src.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,10 @@ TEXT_SELECTED = (255, 255, 255)
 TEXT_NORMAL = (150, 150, 160)
 TEXT_DISABLED = (70, 70, 75)
 ARROW_COLOR = (160, 160, 90)
+VERSION_COLOR = (50, 50, 60)
+ABOUT_TITLE_COLOR = (120, 200, 255)
+ABOUT_TEXT_COLOR = (180, 180, 190)
+ABOUT_DIM_COLOR = (100, 100, 110)
 
 
 class MenuSystem:
@@ -109,6 +115,9 @@ class MenuSystem:
         # Navigation stack of (Menu, selected_index). The bottom is always the
         # freshly-built Main Menu.
         self._stack: List[list] = []
+
+        # Cache version string once (avoid calling git every frame).
+        self._version = get_version()
 
     # ----- state-machine integration ----------------------------------------
     def set_config(self, config: dict) -> None:
@@ -279,6 +288,14 @@ class MenuSystem:
             # After controls, re-render the menu we returned to.
             self._render(matrix)
             return None
+        if action is ItemAction.OPEN_ABOUT:
+            self._open_about(matrix, controller)
+            self._render(matrix)
+            return None
+        if action is ItemAction.FORCE_UPDATE:
+            run_force_update(matrix)
+            self._render(matrix)
+            return None
         return None
 
     def _open_settings(self, matrix, controller) -> None:
@@ -327,6 +344,58 @@ class MenuSystem:
         )
         screen.run()
 
+    def _open_about(self, matrix, controller) -> None:
+        """Run the inline About screen showing project info.
+
+        Displays: LED MATRIX title, version hash, controller status.
+        Press B to return to the menu.
+        """
+        while True:
+            if should_stop():
+                return
+
+            # Render the about screen.
+            img = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
+            draw = ImageDraw.Draw(img)
+
+            # Title: "LED MATRIX" centered.
+            title = "LED MATRIX"
+            tw = _fonts._text_width(title, scale=1)
+            _fonts._draw_text(draw, title, max(0, (SIZE - tw) // 2), 8,
+                              ABOUT_TITLE_COLOR)
+
+            # Version line.
+            ver_line = f"v: {self._version}"
+            vw = _fonts._text_width(ver_line, scale=1)
+            _fonts._draw_text(draw, ver_line, max(0, (SIZE - vw) // 2), 22,
+                              ABOUT_TEXT_COLOR)
+
+            # Controller status.
+            connected = controller.is_connected() if hasattr(controller, 'is_connected') else False
+            ctrl_text = "CONNECTED" if connected else "NO CTRL"
+            cw = _fonts._text_width(ctrl_text, scale=1)
+            ctrl_color = (80, 200, 80) if connected else (200, 80, 80)
+            _fonts._draw_text(draw, ctrl_text, max(0, (SIZE - cw) // 2), 36,
+                              ctrl_color)
+
+            # "B: BACK" hint.
+            hint = "B: BACK"
+            hw = _fonts._text_width(hint, scale=1)
+            _fonts._draw_text(draw, hint, max(0, (SIZE - hw) // 2), 52,
+                              ABOUT_DIM_COLOR)
+
+            matrix.SetImage(img)
+
+            # Poll for B to exit.
+            for event in controller.poll_events():
+                if event.type is EventType.PRESSED and event.button is Button.B:
+                    return
+                if event.type is EventType.PRESSED and event.button is Button.START:
+                    return
+
+            if self._frame_dt:
+                time.sleep(self._frame_dt)
+
     # ----- rendering (§4.3) ---------------------------------------------------
     def _render(self, matrix) -> None:
         """Draw the current menu (title + scrolling item list) and SetImage it."""
@@ -363,6 +432,12 @@ class MenuSystem:
             _draw_up_arrow(draw, SIZE - 6, LIST_TOP - 1, ARROW_COLOR)
         if last < len(items):
             _draw_down_arrow(draw, SIZE - 6, SIZE - 6, ARROW_COLOR)
+
+        # Version string at the bottom of the main menu (always visible, dim).
+        ver_text = f"v:{self._version}"
+        vw = _fonts._text_width(ver_text, scale=1)
+        _fonts._draw_text(draw, ver_text, max(0, (SIZE - vw) // 2), SIZE - 7,
+                          VERSION_COLOR)
 
         matrix.SetImage(img)
 

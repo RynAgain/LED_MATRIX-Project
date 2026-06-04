@@ -63,6 +63,8 @@ class ItemAction(Enum):
     * ``OPEN_SETTINGS``-> push the inline Settings screen.
     * ``OPEN_CAROUSEL``-> push the inline Carousel config screen.
     * ``OPEN_CONTROLS``-> push the inline Controller mapping screen.
+    * ``OPEN_ABOUT``   -> push the inline About screen.
+    * ``FORCE_UPDATE`` -> trigger the led-matrix-updater service.
     * ``RESUME_IDLE``  -> return ``MenuResult.resume()`` (back to demo carousel).
     * ``BACK``         -> pop one level (or resume at the root).
     """
@@ -73,6 +75,8 @@ class ItemAction(Enum):
     OPEN_SETTINGS = "OPEN_SETTINGS"
     OPEN_CAROUSEL = "OPEN_CAROUSEL"
     OPEN_CONTROLS = "OPEN_CONTROLS"
+    OPEN_ABOUT = "OPEN_ABOUT"
+    FORCE_UPDATE = "FORCE_UPDATE"
     RESUME_IDLE = "RESUME_IDLE"
     BACK = "BACK"
 
@@ -173,7 +177,10 @@ def build_demos_menu() -> Menu:
 
 
 def build_main_menu() -> Menu:
-    """Build the top-level **Main Menu** (Games / Demos / Carousel / Controls / Settings / Resume)."""
+    """Build the top-level **Main Menu**.
+
+    Order: GAMES / DEMOS / CAROUSEL / CONTROLS / SETTINGS / UPDATE / ABOUT / RESUME.
+    """
     return Menu(
         MENU_MAIN,
         "MAIN MENU",
@@ -183,6 +190,8 @@ def build_main_menu() -> Menu:
             MenuItem("CAROUSEL", ItemAction.OPEN_CAROUSEL),
             MenuItem("CONTROLS", ItemAction.OPEN_CONTROLS),
             MenuItem("SETTINGS", ItemAction.OPEN_SETTINGS),
+            MenuItem("UPDATE", ItemAction.FORCE_UPDATE),
+            MenuItem("ABOUT", ItemAction.OPEN_ABOUT),
             MenuItem("RESUME", ItemAction.RESUME_IDLE),
         ],
     )

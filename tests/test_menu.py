@@ -140,7 +140,8 @@ class TestMenuData:
     def test_main_menu_structure(self):
         menu = build_main_menu()
         labels = [i.label for i in menu.items]
-        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "CONTROLS", "SETTINGS", "RESUME"]
+        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "CONTROLS", "SETTINGS",
+                          "UPDATE", "ABOUT", "RESUME"]
         actions = [i.action for i in menu.items]
         assert actions == [
             ItemAction.OPEN_SUBMENU,
@@ -148,6 +149,8 @@ class TestMenuData:
             ItemAction.OPEN_CAROUSEL,
             ItemAction.OPEN_CONTROLS,
             ItemAction.OPEN_SETTINGS,
+            ItemAction.FORCE_UPDATE,
+            ItemAction.OPEN_ABOUT,
             ItemAction.RESUME_IDLE,
         ]
 
@@ -200,9 +203,11 @@ class TestNavigation:
     def test_repeat_autoscroll_moves_selection(self, config):
         """A REPEAT DOWN event also advances the cursor (held auto-scroll)."""
         menu = _make_menu(config)
-        # REPEAT DOWN x5 lands on RESUME (idx 5); A activates it.
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5)
+        # REPEAT DOWN x7 lands on RESUME (idx 7); A activates it.
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #            UPDATE(5), ABOUT(6), RESUME(7)
         ctrl = FakeController(event_script=[
+            _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN),
@@ -275,12 +280,15 @@ class TestNavigation:
     def test_resume_item_returns_resume(self, config):
         """Selecting the RESUME item returns MenuResult.resume()."""
         menu = _make_menu(config)
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5)
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #            UPDATE(5), ABOUT(6), RESUME(7)
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),  # DEMOS
             _press(Button.DOWN),  # CAROUSEL
             _press(Button.DOWN),  # CONTROLS
             _press(Button.DOWN),  # SETTINGS
+            _press(Button.DOWN),  # UPDATE
+            _press(Button.DOWN),  # ABOUT
             _press(Button.DOWN),  # RESUME
             _press(Button.A),
         ])
@@ -505,7 +513,8 @@ class TestSettingsInline:
         matrix = FakeMatrix()
         matrix.brightness = baseline
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #       UPDATE(5), ABOUT(6), RESUME(7).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
             _press(Button.DOWN),   # -> CAROUSEL
@@ -696,7 +705,8 @@ class TestCarouselScreen:
                           config_path=str(cfg_path), fps=0)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #       UPDATE(5), ABOUT(6), RESUME(7).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
             _press(Button.DOWN),   # -> CAROUSEL
@@ -843,7 +853,8 @@ class TestControllerScreen:
                           config_path=str(cfg_path), fps=0)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #       UPDATE(5), ABOUT(6), RESUME(7).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
             _press(Button.DOWN),   # -> CAROUSEL
@@ -851,6 +862,114 @@ class TestControllerScreen:
             _press(Button.A),      # open controller screen
             _press(Button.B),      # back out of controls -> returns to menu
             _press(Button.START),  # resume to idle from the menu
+        ])
+        result = menu.run(matrix, ctrl)
+        assert result.kind is MenuResultKind.RESUME
+
+
+# ---------------------------------------------------------------------------
+# Version module
+# ---------------------------------------------------------------------------
+class TestVersion:
+    def test_get_version_returns_string(self):
+        """get_version() returns a non-empty string (hash or 'unknown')."""
+        from src.version import get_version
+
+        ver = get_version()
+        assert isinstance(ver, str)
+        assert len(ver) > 0
+
+    def test_get_version_looks_like_hash_or_unknown(self):
+        """In a git repo, get_version() returns a hex-ish short hash."""
+        from src.version import get_version
+
+        ver = get_version()
+        # Either a hex hash (7+ chars) or 'unknown'.
+        assert ver == "unknown" or all(c in "0123456789abcdef" for c in ver)
+
+    def test_version_cached_in_menu_system(self, config):
+        """MenuSystem caches the version string at init time."""
+        menu = _make_menu(config)
+        assert hasattr(menu, "_version")
+        assert isinstance(menu._version, str)
+        assert len(menu._version) > 0
+
+
+# ---------------------------------------------------------------------------
+# ABOUT screen
+# ---------------------------------------------------------------------------
+class TestAboutScreen:
+    def test_about_opens_and_b_returns(self, config):
+        """A on ABOUT (idx 6) opens the about screen; B returns to menu."""
+        menu = _make_menu(config)
+        matrix = FakeMatrix()
+
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #       UPDATE(5), ABOUT(6), RESUME(7).
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.DOWN),   # -> CONTROLS
+            _press(Button.DOWN),   # -> SETTINGS
+            _press(Button.DOWN),   # -> UPDATE
+            _press(Button.DOWN),   # -> ABOUT
+            _press(Button.A),      # open about screen
+            _press(Button.B),      # back out of about -> returns to menu
+            _press(Button.START),  # resume to idle from the menu
+        ])
+        result = menu.run(matrix, ctrl)
+        assert result.kind is MenuResultKind.RESUME
+        # About screen rendered at least one frame.
+        assert len(matrix.images) >= 3
+
+
+# ---------------------------------------------------------------------------
+# FORCE UPDATE screen
+# ---------------------------------------------------------------------------
+class TestForceUpdate:
+    def test_update_opens_and_returns_to_menu(self, config, monkeypatch):
+        """A on UPDATE (idx 5) triggers the update screen and returns."""
+        # Patch time.sleep to avoid real delays and run_force_update to be fast.
+        import src.menu.update_screen as update_mod
+        sleeps = []
+        monkeypatch.setattr(update_mod.time, "sleep", lambda s: sleeps.append(s))
+
+        menu = _make_menu(config)
+        matrix = FakeMatrix()
+
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
+        #       UPDATE(5), ABOUT(6), RESUME(7).
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.DOWN),   # -> CONTROLS
+            _press(Button.DOWN),   # -> SETTINGS
+            _press(Button.DOWN),   # -> UPDATE
+            _press(Button.A),      # trigger force update
+            _press(Button.START),  # resume to idle from the menu
+        ])
+        result = menu.run(matrix, ctrl)
+        assert result.kind is MenuResultKind.RESUME
+        # The update screen called sleep (showing messages).
+        assert len(sleeps) >= 1
+
+    def test_update_graceful_on_windows(self, config, monkeypatch):
+        """On non-Linux, update shows PI ONLY message (no crash)."""
+        import src.menu.update_screen as update_mod
+        monkeypatch.setattr(update_mod.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(update_mod.time, "sleep", lambda s: None)
+
+        menu = _make_menu(config)
+        matrix = FakeMatrix()
+
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.DOWN),   # -> CONTROLS
+            _press(Button.DOWN),   # -> SETTINGS
+            _press(Button.DOWN),   # -> UPDATE
+            _press(Button.A),      # trigger force update
+            _press(Button.START),  # resume
         ])
         result = menu.run(matrix, ctrl)
         assert result.kind is MenuResultKind.RESUME
