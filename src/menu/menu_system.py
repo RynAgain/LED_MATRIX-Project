@@ -61,6 +61,7 @@ from src.menu.menu_data import (
     build_menu_registry,
 )
 from src.menu.carousel_screen import CarouselScreen
+from src.menu.controller_screen import ControllerScreen
 from src.menu.settings_screen import DEFAULT_CONFIG_PATH, SettingsScreen
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,11 @@ class MenuSystem:
             # After carousel, re-render the menu we returned to.
             self._render(matrix)
             return None
+        if action is ItemAction.OPEN_CONTROLS:
+            self._open_controls(matrix, controller)
+            # After controls, re-render the menu we returned to.
+            self._render(matrix)
+            return None
         return None
 
     def _open_settings(self, matrix, controller) -> None:
@@ -305,6 +311,21 @@ class MenuSystem:
         screen.run()
         # Adopt any changes the screen wrote into the shared config dict.
         self._config = screen.config
+
+    def _open_controls(self, matrix, controller) -> None:
+        """Run the inline Controller mapping screen, then return here.
+
+        The screen persists button remapping and Y-axis inversion to
+        ``config/controller.json`` atomically and reloads the mapping into
+        the live controller so changes take effect immediately.
+        """
+        from src.input.controller import CONTROLLER_CONFIG_PATH as ctrl_path
+
+        screen = ControllerScreen(
+            matrix, controller=controller, config_path=ctrl_path,
+            fps=self._fps,
+        )
+        screen.run()
 
     # ----- rendering (§4.3) ---------------------------------------------------
     def _render(self, matrix) -> None:

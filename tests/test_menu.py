@@ -140,12 +140,13 @@ class TestMenuData:
     def test_main_menu_structure(self):
         menu = build_main_menu()
         labels = [i.label for i in menu.items]
-        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "SETTINGS", "RESUME"]
+        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "CONTROLS", "SETTINGS", "RESUME"]
         actions = [i.action for i in menu.items]
         assert actions == [
             ItemAction.OPEN_SUBMENU,
             ItemAction.OPEN_SUBMENU,
             ItemAction.OPEN_CAROUSEL,
+            ItemAction.OPEN_CONTROLS,
             ItemAction.OPEN_SETTINGS,
             ItemAction.RESUME_IDLE,
         ]
@@ -199,11 +200,12 @@ class TestNavigation:
     def test_repeat_autoscroll_moves_selection(self, config):
         """A REPEAT DOWN event also advances the cursor (held auto-scroll)."""
         menu = _make_menu(config)
-        # REPEAT DOWN x4 lands on RESUME (idx 4); A activates it.
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4)
+        # REPEAT DOWN x5 lands on RESUME (idx 5); A activates it.
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5)
         ctrl = FakeController(event_script=[
             _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN), _repeat(Button.DOWN),
+            _repeat(Button.DOWN),
             _press(Button.A),
         ])
         result = menu.run(FakeMatrix(), ctrl)
@@ -273,10 +275,11 @@ class TestNavigation:
     def test_resume_item_returns_resume(self, config):
         """Selecting the RESUME item returns MenuResult.resume()."""
         menu = _make_menu(config)
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4)
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5)
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),  # DEMOS
             _press(Button.DOWN),  # CAROUSEL
+            _press(Button.DOWN),  # CONTROLS
             _press(Button.DOWN),  # SETTINGS
             _press(Button.DOWN),  # RESUME
             _press(Button.A),
@@ -502,10 +505,11 @@ class TestSettingsInline:
         matrix = FakeMatrix()
         matrix.brightness = baseline
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
             _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.DOWN),   # -> CONTROLS
             _press(Button.DOWN),   # -> SETTINGS
             _press(Button.A),      # open inline settings (screen.run starts)
             _press(Button.RIGHT),  # brightness +5 (consumed by settings screen)
@@ -692,12 +696,160 @@ class TestCarouselScreen:
                           config_path=str(cfg_path), fps=0)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.A),      # open carousel screen
             _press(Button.B),      # back out of carousel -> returns to menu
+            _press(Button.START),  # resume to idle from the menu
+        ])
+        result = menu.run(matrix, ctrl)
+        assert result.kind is MenuResultKind.RESUME
+
+
+# ---------------------------------------------------------------------------
+# Controller mapping screen: toggle invert_y + persist
+# ---------------------------------------------------------------------------
+class TestControllerScreen:
+    def test_toggle_invert_y_and_persist(self, tmp_path):
+        """A on INVERT Y toggles the value; B saves to controller.json."""
+        ctrl_cfg = {
+            "buttons": {"2": "A", "3": "B", "9": "START", "6": "SELECT"},
+            "hat_index": 0,
+            "axis_x": 0,
+            "axis_y": 1,
+            "invert_y": False,
+            "deadzone": 0.5,
+        }
+        cfg_path = tmp_path / "controller.json"
+        cfg_path.write_text(json.dumps(ctrl_cfg))
+
+        from src.menu.controller_screen import ControllerScreen
+
+        matrix = FakeMatrix()
+        # Navigate: DOWN x4 to reach INVERT Y (idx 4), A to toggle, B to save.
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # REMAP B
+            _press(Button.DOWN),  # REMAP START
+            _press(Button.DOWN),  # REMAP SELECT
+            _press(Button.DOWN),  # INVERT Y
+            _press(Button.A),     # toggle -> True
+            _press(Button.B),     # save and exit
+        ])
+        screen = ControllerScreen(matrix, controller=ctrl,
+                                  config_path=str(cfg_path), fps=0)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        assert data["invert_y"] is True
+
+    def test_toggle_invert_y_twice(self, tmp_path):
+        """Toggling invert_y twice returns to original value."""
+        ctrl_cfg = {
+            "buttons": {"2": "A", "3": "B", "9": "START", "6": "SELECT"},
+            "hat_index": 0,
+            "axis_x": 0,
+            "axis_y": 1,
+            "invert_y": True,
+            "deadzone": 0.5,
+        }
+        cfg_path = tmp_path / "controller.json"
+        cfg_path.write_text(json.dumps(ctrl_cfg))
+
+        from src.menu.controller_screen import ControllerScreen
+
+        matrix = FakeMatrix()
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # REMAP B
+            _press(Button.DOWN),  # REMAP START
+            _press(Button.DOWN),  # REMAP SELECT
+            _press(Button.DOWN),  # INVERT Y
+            _press(Button.A),     # toggle -> False
+            _press(Button.A),     # toggle -> True again
+            _press(Button.B),     # save and exit
+        ])
+        screen = ControllerScreen(matrix, controller=ctrl,
+                                  config_path=str(cfg_path), fps=0)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        assert data["invert_y"] is True
+
+    def test_save_and_back_item(self, tmp_path):
+        """Selecting SAVE+BACK persists and exits."""
+        ctrl_cfg = {
+            "buttons": {"2": "A", "3": "B", "9": "START", "6": "SELECT"},
+            "hat_index": 0,
+            "axis_x": 0,
+            "axis_y": 1,
+            "invert_y": False,
+            "deadzone": 0.5,
+        }
+        cfg_path = tmp_path / "controller.json"
+        cfg_path.write_text(json.dumps(ctrl_cfg))
+
+        from src.menu.controller_screen import ControllerScreen
+
+        matrix = FakeMatrix()
+        # Navigate to INVERT Y, toggle, then DOWN to SAVE+BACK, A to activate.
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # REMAP B
+            _press(Button.DOWN),  # REMAP START
+            _press(Button.DOWN),  # REMAP SELECT
+            _press(Button.DOWN),  # INVERT Y
+            _press(Button.A),     # toggle -> True
+            _press(Button.DOWN),  # SAVE+BACK
+            _press(Button.A),     # activate save+back
+        ])
+        screen = ControllerScreen(matrix, controller=ctrl,
+                                  config_path=str(cfg_path), fps=0)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        assert data["invert_y"] is True
+
+    def test_no_change_no_write(self, tmp_path):
+        """If nothing is changed, B exits without rewriting the file."""
+        ctrl_cfg = {
+            "buttons": {"2": "A", "3": "B", "9": "START", "6": "SELECT"},
+            "hat_index": 0,
+            "axis_x": 0,
+            "axis_y": 1,
+            "invert_y": False,
+            "deadzone": 0.5,
+        }
+        original = json.dumps(ctrl_cfg)
+        cfg_path = tmp_path / "controller.json"
+        cfg_path.write_text(original)
+
+        from src.menu.controller_screen import ControllerScreen
+
+        matrix = FakeMatrix()
+        ctrl = FakeController(event_script=[_press(Button.B)])
+        screen = ControllerScreen(matrix, controller=ctrl,
+                                  config_path=str(cfg_path), fps=0)
+        screen.run()
+
+        # File content unchanged (no write when not dirty).
+        assert json.loads(cfg_path.read_text()) == ctrl_cfg
+
+    def test_controls_inline_from_menu(self, config, tmp_path):
+        """A on CONTROLS (idx 3) opens the inline controller screen."""
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps(config))
+
+        menu = MenuSystem(json.loads(json.dumps(config)),
+                          config_path=str(cfg_path), fps=0)
+        matrix = FakeMatrix()
+
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4), RESUME(5).
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.DOWN),   # -> CONTROLS
+            _press(Button.A),      # open controller screen
+            _press(Button.B),      # back out of controls -> returns to menu
             _press(Button.START),  # resume to idle from the menu
         ])
         result = menu.run(matrix, ctrl)

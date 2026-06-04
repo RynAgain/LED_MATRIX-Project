@@ -62,6 +62,7 @@ class ItemAction(Enum):
     * ``OPEN_SUBMENU`` -> push the submenu identified by ``payload``.
     * ``OPEN_SETTINGS``-> push the inline Settings screen.
     * ``OPEN_CAROUSEL``-> push the inline Carousel config screen.
+    * ``OPEN_CONTROLS``-> push the inline Controller mapping screen.
     * ``RESUME_IDLE``  -> return ``MenuResult.resume()`` (back to demo carousel).
     * ``BACK``         -> pop one level (or resume at the root).
     """
@@ -71,6 +72,7 @@ class ItemAction(Enum):
     OPEN_SUBMENU = "OPEN_SUBMENU"
     OPEN_SETTINGS = "OPEN_SETTINGS"
     OPEN_CAROUSEL = "OPEN_CAROUSEL"
+    OPEN_CONTROLS = "OPEN_CONTROLS"
     RESUME_IDLE = "RESUME_IDLE"
     BACK = "BACK"
 
@@ -171,7 +173,7 @@ def build_demos_menu() -> Menu:
 
 
 def build_main_menu() -> Menu:
-    """Build the top-level **Main Menu** (Games / Demos / Carousel / Settings / Resume)."""
+    """Build the top-level **Main Menu** (Games / Demos / Carousel / Controls / Settings / Resume)."""
     return Menu(
         MENU_MAIN,
         "MAIN MENU",
@@ -179,6 +181,7 @@ def build_main_menu() -> Menu:
             MenuItem("GAMES", ItemAction.OPEN_SUBMENU, payload=MENU_GAMES),
             MenuItem("DEMOS", ItemAction.OPEN_SUBMENU, payload=MENU_DEMOS),
             MenuItem("CAROUSEL", ItemAction.OPEN_CAROUSEL),
+            MenuItem("CONTROLS", ItemAction.OPEN_CONTROLS),
             MenuItem("SETTINGS", ItemAction.OPEN_SETTINGS),
             MenuItem("RESUME", ItemAction.RESUME_IDLE),
         ],

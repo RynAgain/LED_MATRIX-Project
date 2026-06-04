@@ -680,6 +680,61 @@ class Controller:
             return 0.0
         return max(0.0, self._clock() - self._start_held_since)
 
+    def capture_raw_button(self, timeout: float = 10.0) -> "int | None":
+        """Wait for a raw JOYBUTTONDOWN and return its physical button index.
+
+        Bypasses the logical mapping so the caller can discover which physical
+        button the user pressed. Used by the controller-mapping screen.
+
+        :param timeout: max seconds to wait; returns ``None`` on timeout.
+        :returns: the raw pygame button index, or ``None`` if timed out.
+        """
+        if self._pygame is None:
+            return None
+        deadline = self._clock() + timeout
+        while self._clock() < deadline:
+            try:
+                raw_events = self._drain_simulator_events()
+            except Exception:  # noqa: BLE001
+                raw_events = []
+            pg = self._pygame
+            for ev in raw_events:
+                etype = getattr(ev, "type", None)
+                if etype == getattr(pg, "JOYBUTTONDOWN", None):
+                    return getattr(ev, "button", None)
+                # Also accept keyboard number keys 0-9 as raw button indices
+                # (for simulator/dev use where no joystick is attached).
+                if etype == getattr(pg, "KEYDOWN", None):
+                    key = getattr(ev, "key", None)
+                    # pygame K_0..K_9 are sequential (48..57)
+                    if key is not None and 48 <= key <= 57:
+                        return key - 48  # 0..9
+                if etype == getattr(pg, "QUIT", None):
+                    self.wants_quit_flag = True
+                    return None
+            time.sleep(0.02)
+        return None
+
+    def reload_mapping(self, mapping: "ButtonMapping | None" = None) -> None:
+        """Reload the button mapping (from disk or an explicit object).
+
+        After saving a new ``config/controller.json``, call this so the
+        controller immediately uses the updated mapping without restart.
+
+        :param mapping: if provided, use this mapping directly; otherwise
+            reload from :data:`CONTROLLER_CONFIG_PATH`.
+        """
+        if mapping is not None:
+            self._mapping = mapping
+        else:
+            self._mapping = load_mapping()
+        self._deadzone = self._mapping.deadzone
+
+    @property
+    def mapping(self) -> ButtonMapping:
+        """The current active :class:`ButtonMapping` (read-only access)."""
+        return self._mapping
+
     def close(self) -> None:
         """Release pygame joystick resources (idempotent)."""
         try:

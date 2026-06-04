@@ -14,6 +14,7 @@ for the Phase-2 ``PlaceholderMenu``. The menu hierarchy itself is data-driven
 """
 
 from .carousel_screen import CarouselScreen
+from .controller_screen import ControllerScreen
 from .menu_data import (
     ItemAction,
     Menu,
@@ -29,6 +30,7 @@ from .settings_screen import SettingsScreen, load_settings, save_settings
 __all__ = [
     "MenuSystem",
     "CarouselScreen",
+    "ControllerScreen",
     "SettingsScreen",
     "load_settings",
     "save_settings",
