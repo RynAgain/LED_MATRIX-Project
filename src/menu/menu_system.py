@@ -60,6 +60,7 @@ from src.menu.menu_data import (
     build_main_menu,
     build_menu_registry,
 )
+from src.menu.carousel_screen import CarouselScreen
 from src.menu.settings_screen import DEFAULT_CONFIG_PATH, SettingsScreen
 
 logger = logging.getLogger(__name__)
@@ -235,9 +236,9 @@ class MenuSystem:
     def _activate(self, matrix, controller) -> Optional[MenuResult]:
         """Activate the currently-selected item.
 
-        Returns a terminal :class:`MenuResult` (launch/resume) when applicable,
-        otherwise ``None`` after mutating the navigation stack (push/pop) or
-        running the inline settings screen.
+        Returns a terminal :class:`MenuResult` (launch/resume/launch_demo) when
+        applicable, otherwise ``None`` after mutating the navigation stack
+        (push/pop) or running an inline screen.
         """
         items = self._current.items
         if not items:
@@ -249,6 +250,8 @@ class MenuSystem:
         action = item.action
         if action is ItemAction.LAUNCH_GAME:
             return MenuResult.launch_game(item.payload)
+        if action is ItemAction.LAUNCH_DEMO:
+            return MenuResult.launch_demo(item.payload)
         if action is ItemAction.RESUME_IDLE:
             return MenuResult.resume()
         if action is ItemAction.BACK:
@@ -265,6 +268,11 @@ class MenuSystem:
             # After settings, re-render the menu we returned to.
             self._render(matrix)
             return None
+        if action is ItemAction.OPEN_CAROUSEL:
+            self._open_carousel(matrix, controller)
+            # After carousel, re-render the menu we returned to.
+            self._render(matrix)
+            return None
         return None
 
     def _open_settings(self, matrix, controller) -> None:
@@ -275,6 +283,21 @@ class MenuSystem:
         re-entry shows the updated values.
         """
         screen = SettingsScreen(
+            matrix, config=self._config, config_path=self._config_path,
+            fps=self._fps,
+        )
+        screen.attach_controller(controller)
+        screen.run()
+        # Adopt any changes the screen wrote into the shared config dict.
+        self._config = screen.config
+
+    def _open_carousel(self, matrix, controller) -> None:
+        """Run the inline Carousel config screen, then return here.
+
+        The screen persists toggled enabled states to ``config.json`` atomically;
+        we refresh our in-memory config from it so the carousel picks up changes.
+        """
+        screen = CarouselScreen(
             matrix, config=self._config, config_path=self._config_path,
             fps=self._fps,
         )

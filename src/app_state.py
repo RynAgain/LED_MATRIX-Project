@@ -96,6 +96,7 @@ class MenuResultKind(Enum):
 
     RESUME = "RESUME"              # back to the demo carousel (IDLE)
     LAUNCH_GAME = "LAUNCH_GAME"    # enter IN_GAME with payload = feature name
+    LAUNCH_DEMO = "LAUNCH_DEMO"    # run a feature as demo (no controller) then return to MENU
     OPEN_SETTINGS = "OPEN_SETTINGS"  # deferred to Phase 3/4; stay in MENU for now
     QUIT = "QUIT"                  # request a clean application shutdown
 
@@ -120,6 +121,10 @@ class MenuResult:
     @staticmethod
     def launch_game(name: str) -> "MenuResult":
         return MenuResult(MenuResultKind.LAUNCH_GAME, name)
+
+    @staticmethod
+    def launch_demo(name: str) -> "MenuResult":
+        return MenuResult(MenuResultKind.LAUNCH_DEMO, name)
 
     @staticmethod
     def open_settings() -> "MenuResult":
@@ -534,6 +539,10 @@ class AppStateMachine:
         if kind is MenuResultKind.LAUNCH_GAME:
             self._pending_game = result.payload
             self.mode = AppMode.IN_GAME
+        elif kind is MenuResultKind.LAUNCH_DEMO:
+            self._run_demo(result.payload)
+            # After the demo finishes, return to MENU (stay in MENU mode).
+            self.mode = AppMode.MENU
         elif kind is MenuResultKind.QUIT:
             self._shutdown.set()
         elif kind is MenuResultKind.OPEN_SETTINGS:
@@ -542,6 +551,28 @@ class AppStateMachine:
             self.mode = AppMode.MENU
         else:  # RESUME (or anything unexpected) -> back to the demo carousel.
             self.mode = AppMode.IDLE
+
+    def _run_demo(self, name: str) -> None:
+        """Run a feature in demo mode (no controller) for its configured duration.
+
+        Called when the user selects a demo from the Demos submenu. The feature
+        runs with ``controller=None`` (non-interactive) for up to 30 seconds (or
+        the configured ``display_duration``), then returns so the state machine
+        can re-enter the menu.
+        """
+        if not name:
+            return
+        clear_stop()
+        from src.main import run_feature
+        try:
+            duration = self.config.get("display_duration", 30)
+            # Cap demo viewing at the configured duration (default 30s).
+            duration = min(duration, 300)
+            run_feature(name, self.matrix, duration, controller=None)
+        except Exception:  # noqa: BLE001 - a crashing demo must not crash the app
+            logger.error("Demo '%s' crashed; returning to menu", name, exc_info=True)
+        finally:
+            clear_stop()
 
     def _run_game(self) -> None:
         """IN_GAME: launch the chosen playable game with the controller.

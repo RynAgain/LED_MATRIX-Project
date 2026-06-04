@@ -17,6 +17,8 @@ Menu hierarchy (§4.2)::
 
     Main Menu
       ├── Games      -> Games submenu
+      ├── Demos      -> Demos submenu (watch any feature as a demo)
+      ├── Carousel   -> Carousel config screen (toggle demos on/off)
       ├── Settings   -> Settings screen (handled inline by the engine)
       └── Resume     -> back to the demo carousel (IDLE)
 
@@ -24,6 +26,12 @@ Menu hierarchy (§4.2)::
       ├── Snake      -> launch_game("snake")
       ├── Tetris     -> launch_game("tetris")
       ├── Pong       -> launch_game("pong")
+      └── Back       -> pop to Main Menu
+
+    Demos submenu
+      ├── Fire       -> launch_demo("fire")
+      ├── Plasma     -> launch_demo("plasma")
+      ├── ...        -> (all features from the registry)
       └── Back       -> pop to Main Menu
 """
 
@@ -40,6 +48,7 @@ from typing import List, Optional
 # ---------------------------------------------------------------------------
 MENU_MAIN = "main"
 MENU_GAMES = "games"
+MENU_DEMOS = "demos"
 MENU_SETTINGS = "settings"
 
 
@@ -49,15 +58,19 @@ class ItemAction(Enum):
     The engine maps each action to a concrete behavior:
 
     * ``LAUNCH_GAME``  -> return ``MenuResult.launch_game(payload)`` (enter game).
+    * ``LAUNCH_DEMO``  -> return ``MenuResult.launch_demo(payload)`` (watch demo).
     * ``OPEN_SUBMENU`` -> push the submenu identified by ``payload``.
     * ``OPEN_SETTINGS``-> push the inline Settings screen.
+    * ``OPEN_CAROUSEL``-> push the inline Carousel config screen.
     * ``RESUME_IDLE``  -> return ``MenuResult.resume()`` (back to demo carousel).
     * ``BACK``         -> pop one level (or resume at the root).
     """
 
     LAUNCH_GAME = "LAUNCH_GAME"
+    LAUNCH_DEMO = "LAUNCH_DEMO"
     OPEN_SUBMENU = "OPEN_SUBMENU"
     OPEN_SETTINGS = "OPEN_SETTINGS"
+    OPEN_CAROUSEL = "OPEN_CAROUSEL"
     RESUME_IDLE = "RESUME_IDLE"
     BACK = "BACK"
 
@@ -139,13 +152,33 @@ def build_games_menu(playable=None) -> Menu:
     return Menu(MENU_GAMES, "GAMES", items)
 
 
+def build_demos_menu() -> Menu:
+    """Build the **Demos** submenu from the feature registry.
+
+    Lists ALL known features (sorted alphabetically) as ``LAUNCH_DEMO`` items.
+    Selecting one runs it in demo mode (no controller) for the configured
+    duration, then returns to the menu.
+    """
+    from src.feature_registry import FEATURE_MODULES
+
+    items: List[MenuItem] = []
+    for name in sorted(FEATURE_MODULES.keys()):
+        # Truncate long names to fit the 64px display (~10 chars at 6px each).
+        label = name.upper()[:10]
+        items.append(MenuItem(label, ItemAction.LAUNCH_DEMO, payload=name))
+    items.append(MenuItem("BACK", ItemAction.BACK))
+    return Menu(MENU_DEMOS, "DEMOS", items)
+
+
 def build_main_menu() -> Menu:
-    """Build the top-level **Main Menu** (Games / Settings / Resume)."""
+    """Build the top-level **Main Menu** (Games / Demos / Carousel / Settings / Resume)."""
     return Menu(
         MENU_MAIN,
         "MAIN MENU",
         [
             MenuItem("GAMES", ItemAction.OPEN_SUBMENU, payload=MENU_GAMES),
+            MenuItem("DEMOS", ItemAction.OPEN_SUBMENU, payload=MENU_DEMOS),
+            MenuItem("CAROUSEL", ItemAction.OPEN_CAROUSEL),
             MenuItem("SETTINGS", ItemAction.OPEN_SETTINGS),
             MenuItem("RESUME", ItemAction.RESUME_IDLE),
         ],
@@ -156,10 +189,11 @@ def build_menu_registry(playable=None) -> dict:
     """Return ``{menu_id: Menu}`` for every navigable submenu.
 
     The engine uses this to resolve ``OPEN_SUBMENU`` payloads into the actual
-    :class:`Menu` to push. Settings is intentionally *not* in the registry --
-    it is a special inline screen pushed via ``OPEN_SETTINGS`` rather than a
-    plain data menu.
+    :class:`Menu` to push. Settings and Carousel are intentionally *not* in the
+    registry -- they are special inline screens pushed via their own actions
+    rather than plain data menus.
     """
     return {
         MENU_GAMES: build_games_menu(playable),
+        MENU_DEMOS: build_demos_menu(),
     }

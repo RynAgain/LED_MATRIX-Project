@@ -30,10 +30,14 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 from src.app_state import MenuResultKind, PLAYABLE_GAMES
 from src.display import _shared
+from src.feature_registry import FEATURE_MODULES
 from src.input import Button, EventType, InputEvent
 from src.menu import MenuSystem
+from src.menu.carousel_screen import CarouselScreen
 from src.menu.menu_data import (
+    MENU_DEMOS,
     ItemAction,
+    build_demos_menu,
     build_games_menu,
     build_main_menu,
     build_menu_registry,
@@ -136,10 +140,12 @@ class TestMenuData:
     def test_main_menu_structure(self):
         menu = build_main_menu()
         labels = [i.label for i in menu.items]
-        assert labels == ["GAMES", "SETTINGS", "RESUME"]
+        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "SETTINGS", "RESUME"]
         actions = [i.action for i in menu.items]
         assert actions == [
             ItemAction.OPEN_SUBMENU,
+            ItemAction.OPEN_SUBMENU,
+            ItemAction.OPEN_CAROUSEL,
             ItemAction.OPEN_SETTINGS,
             ItemAction.RESUME_IDLE,
         ]
@@ -193,9 +199,12 @@ class TestNavigation:
     def test_repeat_autoscroll_moves_selection(self, config):
         """A REPEAT DOWN event also advances the cursor (held auto-scroll)."""
         menu = _make_menu(config)
-        # REPEAT DOWN x2 lands on RESUME (idx 2); A activates it.
+        # REPEAT DOWN x4 lands on RESUME (idx 4); A activates it.
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4)
         ctrl = FakeController(event_script=[
-            _repeat(Button.DOWN), _repeat(Button.DOWN), _press(Button.A),
+            _repeat(Button.DOWN), _repeat(Button.DOWN),
+            _repeat(Button.DOWN), _repeat(Button.DOWN),
+            _press(Button.A),
         ])
         result = menu.run(FakeMatrix(), ctrl)
         assert result.kind is MenuResultKind.RESUME
@@ -264,7 +273,10 @@ class TestNavigation:
     def test_resume_item_returns_resume(self, config):
         """Selecting the RESUME item returns MenuResult.resume()."""
         menu = _make_menu(config)
+        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4)
         ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # DEMOS
+            _press(Button.DOWN),  # CAROUSEL
             _press(Button.DOWN),  # SETTINGS
             _press(Button.DOWN),  # RESUME
             _press(Button.A),
@@ -490,8 +502,10 @@ class TestSettingsInline:
         matrix = FakeMatrix()
         matrix.brightness = baseline
 
-        # Main: GAMES(0), SETTINGS(1), RESUME(2).
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4).
         ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> SETTINGS
             _press(Button.A),      # open inline settings (screen.run starts)
             _press(Button.RIGHT),  # brightness +5 (consumed by settings screen)
@@ -505,3 +519,186 @@ class TestSettingsInline:
         assert matrix.brightness == baseline + 5
         data = json.loads(cfg_path.read_text())
         assert data["matrix_hardware"]["brightness"] == baseline + 5
+
+
+# ---------------------------------------------------------------------------
+# Demos submenu
+# ---------------------------------------------------------------------------
+class TestDemosSubmenu:
+    def test_demos_menu_lists_all_features(self):
+        """build_demos_menu() includes every feature from the registry."""
+        menu = build_demos_menu()
+        demo_items = [i for i in menu.items if i.action is ItemAction.LAUNCH_DEMO]
+        payloads = {i.payload for i in demo_items}
+        # Every feature in the registry should appear.
+        assert payloads == set(FEATURE_MODULES.keys())
+        # A BACK item is appended.
+        assert menu.items[-1].action is ItemAction.BACK
+
+    def test_demos_menu_in_registry(self):
+        """The demos submenu is in the menu registry."""
+        reg = build_menu_registry()
+        assert MENU_DEMOS in reg
+        assert reg[MENU_DEMOS].id == MENU_DEMOS
+
+    def test_navigate_into_demos_submenu(self, config):
+        """A on DEMOS (idx 1) pushes the demos submenu."""
+        menu = _make_menu(config)
+        # Main: GAMES(0), DEMOS(1) -> A enters demos submenu.
+        # Then B pops back, START resumes.
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # -> DEMOS
+            _press(Button.A),     # enter Demos submenu
+            _press(Button.B),     # pop back to Main
+            _press(Button.START), # resume
+        ])
+        result = menu.run(FakeMatrix(), ctrl)
+        assert result.kind is MenuResultKind.RESUME
+
+    def test_select_demo_returns_launch_demo(self, config):
+        """Selecting a demo in the Demos submenu returns LAUNCH_DEMO."""
+        menu = _make_menu(config)
+        # Main: GAMES(0), DEMOS(1) -> A enters demos submenu.
+        # First item in demos submenu is the first feature alphabetically.
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),  # -> DEMOS
+            _press(Button.A),     # enter Demos submenu
+            _press(Button.A),     # select first demo
+        ])
+        result = menu.run(FakeMatrix(), ctrl)
+        assert result.kind is MenuResultKind.LAUNCH_DEMO
+        # Payload is a valid feature name.
+        assert result.payload in FEATURE_MODULES
+
+
+# ---------------------------------------------------------------------------
+# Carousel screen: toggle + persist
+# ---------------------------------------------------------------------------
+class TestCarouselScreen:
+    def test_carousel_toggle_and_persist(self, tmp_path):
+        """A toggles a feature's enabled state; B saves to config.json."""
+        cfg = {
+            "display_duration": 30,
+            "matrix_hardware": {"brightness": 50},
+            "sequence": [
+                {"name": "fire", "type": "effect", "enabled": True},
+                {"name": "plasma", "type": "effect", "enabled": False},
+                {"name": "snake", "type": "game", "enabled": True},
+            ],
+        }
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps(cfg))
+
+        matrix = FakeMatrix()
+        screen = CarouselScreen(matrix, config=json.loads(json.dumps(cfg)),
+                                config_path=str(cfg_path), fps=0)
+        # First item is "fire" (enabled=True). A toggles it OFF.
+        ctrl = FakeController(event_script=[
+            _press(Button.A),  # toggle fire -> OFF
+            _press(Button.B),  # save and exit
+        ])
+        screen.attach_controller(ctrl)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        assert data["sequence"][0]["enabled"] is False  # fire toggled OFF
+        assert data["sequence"][1]["enabled"] is False  # plasma unchanged
+        assert data["sequence"][2]["enabled"] is True   # snake unchanged
+
+    def test_carousel_toggle_multiple(self, tmp_path):
+        """Multiple toggles work correctly."""
+        cfg = {
+            "sequence": [
+                {"name": "fire", "type": "effect", "enabled": True},
+                {"name": "plasma", "type": "effect", "enabled": False},
+            ],
+        }
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps(cfg))
+
+        screen = CarouselScreen(FakeMatrix(), config=json.loads(json.dumps(cfg)),
+                                config_path=str(cfg_path), fps=0)
+        # Toggle fire OFF, move down, toggle plasma ON, then save.
+        ctrl = FakeController(event_script=[
+            _press(Button.A),     # toggle fire -> OFF
+            _press(Button.DOWN),  # -> plasma
+            _press(Button.A),     # toggle plasma -> ON
+            _press(Button.B),     # save and exit
+        ])
+        screen.attach_controller(ctrl)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        assert data["sequence"][0]["enabled"] is False  # fire toggled OFF
+        assert data["sequence"][1]["enabled"] is True   # plasma toggled ON
+
+    def test_carousel_no_change_no_write(self, tmp_path):
+        """If nothing is toggled, B exits without rewriting the file."""
+        cfg = {
+            "sequence": [
+                {"name": "fire", "type": "effect", "enabled": True},
+            ],
+        }
+        original = json.dumps(cfg)
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(original)
+
+        screen = CarouselScreen(FakeMatrix(), config=json.loads(original),
+                                config_path=str(cfg_path), fps=0)
+        ctrl = FakeController(event_script=[_press(Button.B)])
+        screen.attach_controller(ctrl)
+        screen.run()
+        # File content unchanged.
+        assert cfg_path.read_text() == original
+
+    def test_carousel_preserves_other_config_keys(self, tmp_path):
+        """Persisting carousel changes does not clobber other config keys."""
+        cfg = {
+            "display_duration": 99,
+            "log_level": "DEBUG",
+            "matrix_hardware": {"brightness": 75},
+            "sequence": [
+                {"name": "fire", "type": "effect", "enabled": True, "duration": 45},
+            ],
+        }
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps(cfg))
+
+        screen = CarouselScreen(FakeMatrix(), config=json.loads(json.dumps(cfg)),
+                                config_path=str(cfg_path), fps=0)
+        ctrl = FakeController(event_script=[
+            _press(Button.A),  # toggle fire -> OFF
+            _press(Button.B),  # save
+        ])
+        screen.attach_controller(ctrl)
+        screen.run()
+
+        data = json.loads(cfg_path.read_text())
+        # Toggled field changed.
+        assert data["sequence"][0]["enabled"] is False
+        # Other fields preserved.
+        assert data["display_duration"] == 99
+        assert data["log_level"] == "DEBUG"
+        assert data["matrix_hardware"]["brightness"] == 75
+        assert data["sequence"][0]["duration"] == 45
+        assert data["sequence"][0]["type"] == "effect"
+
+    def test_carousel_inline_from_menu(self, config, tmp_path):
+        """A on CAROUSEL (idx 2) opens the inline carousel screen."""
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps(config))
+
+        menu = MenuSystem(json.loads(json.dumps(config)),
+                          config_path=str(cfg_path), fps=0)
+        matrix = FakeMatrix()
+
+        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), SETTINGS(3), RESUME(4).
+        ctrl = FakeController(event_script=[
+            _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> CAROUSEL
+            _press(Button.A),      # open carousel screen
+            _press(Button.B),      # back out of carousel -> returns to menu
+            _press(Button.START),  # resume to idle from the menu
+        ])
+        result = menu.run(matrix, ctrl)
+        assert result.kind is MenuResultKind.RESUME

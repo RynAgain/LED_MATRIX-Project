@@ -140,6 +140,8 @@ class TestMenuSeam:
     def test_menuresult_constructors(self):
         assert MenuResult.resume().kind is MenuResultKind.RESUME
         assert MenuResult.launch_game("snake").payload == "snake"
+        assert MenuResult.launch_demo("fire").kind is MenuResultKind.LAUNCH_DEMO
+        assert MenuResult.launch_demo("fire").payload == "fire"
         assert MenuResult.open_settings().kind is MenuResultKind.OPEN_SETTINGS
         assert MenuResult.quit().kind is MenuResultKind.QUIT
 
@@ -238,6 +240,30 @@ class TestTransitions:
         sm.mode = AppMode.MENU
         sm._run_menu()
         assert sm.mode is AppMode.MENU
+
+    def test_menu_launch_demo_runs_and_stays_in_menu(self, config, monkeypatch):
+        """LAUNCH_DEMO runs the feature with controller=None then stays in MENU."""
+        launched = {}
+
+        def fake_run_feature(name, matrix, duration, controller=None):
+            launched["name"] = name
+            launched["controller"] = controller
+            return True
+
+        monkeypatch.setattr(main_module, "run_feature", fake_run_feature)
+
+        class DemoMenu:
+            def run(self, matrix, controller):
+                return MenuResult.launch_demo("fire")
+
+        ctrl = FakeController()
+        sm = make_sm(ctrl, config, menu=DemoMenu())
+        sm.mode = AppMode.MENU
+        sm._run_menu()
+        assert sm.mode is AppMode.MENU
+        assert launched["name"] == "fire"
+        # Demo runs with controller=None (non-interactive).
+        assert launched["controller"] is None
 
     def test_menu_quit_sets_shutdown(self, config):
         class QuitMenu:
