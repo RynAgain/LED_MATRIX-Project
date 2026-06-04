@@ -462,27 +462,41 @@ class AppStateMachine:
         called ``request_stop()``; the trigger is now a gamepad START press (or
         keyboard fallback) rather than a file write. It also surfaces a
         window-close (``is_quitting()``) as a shutdown request.
+
+        IMPORTANT: This thread only polls the controller when in IDLE mode.
+        In MENU and IN_GAME modes, the foreground loop owns the controller and
+        calls ``poll_events()`` itself. Polling from both threads would race on
+        the event buffer and reset directional held-state, causing the game to
+        miss D-pad/analog stick input.
         """
         logger.info("Input watcher thread started")
         while not self._shutdown.is_set():
-            try:
-                events = self.controller.poll_events()
-            except Exception:  # noqa: BLE001 - never let the watcher die
-                events = []
-
-            if self.controller.is_quitting():
-                self._shutdown.set()
-                break
-
-            # Only react to START while idling; in MENU/IN_GAME the foreground
-            # loop owns input and we must not steal the START edge from it.
+            # Only poll the controller when in IDLE mode. In MENU/IN_GAME the
+            # foreground loop owns input exclusively -- polling here would drain
+            # the event buffer and reset directional held-state, causing the
+            # game/menu to miss D-pad/analog stick input.
             if self.mode is AppMode.IDLE:
+                try:
+                    events = self.controller.poll_events()
+                except Exception:  # noqa: BLE001 - never let the watcher die
+                    events = []
+
+                if self.controller.is_quitting():
+                    self._shutdown.set()
+                    break
+
                 for ev in events:
                     if ev.button is Button.START and ev.type is EventType.PRESSED:
                         logger.info("START pressed during demo -> requesting MENU")
                         self._menu_requested.set()
                         request_stop()
                         break
+            else:
+                # Still check for window-close even when not polling events,
+                # since is_quitting() reads a flag set by the foreground poll.
+                if self.controller.is_quitting():
+                    self._shutdown.set()
+                    break
 
             self._shutdown.wait(timeout=self._input_poll_interval)
         logger.info("Input watcher thread stopped")

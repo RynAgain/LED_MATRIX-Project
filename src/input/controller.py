@@ -408,6 +408,30 @@ class Controller:
         except Exception:  # noqa: BLE001
             return "<unknown>"
 
+    # ----- event source (simulator bridge or direct pygame) -------------------
+    def _drain_simulator_events(self) -> list:
+        """Get raw pygame events, bridging the Windows threading limitation.
+
+        On Windows, pygame events can only be received from the thread that
+        created the display. When running in simulator mode, the simulator's
+        ``render()`` (main thread) collects events into a buffer; we drain
+        that buffer here. On the Pi (real rgbmatrix, no simulator), we call
+        ``pygame.event.get()`` directly since there's no display-thread issue.
+
+        This method is safe to call from any thread.
+        """
+        # Try to get events from the simulator's buffer first
+        try:
+            from src.simulator.matrix import _SimulatorWindow
+            window = _SimulatorWindow._instance
+            if window is not None and window._initialized:
+                return window.drain_events()
+        except (ImportError, AttributeError):
+            pass
+
+        # Fallback: direct pygame.event.get() (works on Pi / when no simulator)
+        return self._pygame.event.get()
+
     # ----- public API --------------------------------------------------------
     def poll_events(self) -> list[InputEvent]:
         """Pump pygame once and return logical edge + REPEAT events since the
@@ -430,7 +454,14 @@ class Controller:
 
         if self._pygame is not None:
             try:
-                raw_events = self._pygame.event.get()
+                # On Windows, pygame events can only be received from the
+                # thread that created the display. When running in simulator
+                # mode, the simulator's render() (main thread) collects events
+                # into a buffer; we drain that buffer here instead of calling
+                # pygame.event.get() directly (which would return nothing from
+                # a background thread). On the Pi with real rgbmatrix, there's
+                # no simulator window, so we use pygame.event.get() directly.
+                raw_events = self._drain_simulator_events()
             except Exception:  # noqa: BLE001 - SDL not ready, etc.
                 raw_events = []
 

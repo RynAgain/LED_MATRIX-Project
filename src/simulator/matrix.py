@@ -77,7 +77,16 @@ class _PixelBuffer:
 
 
 class _SimulatorWindow:
-    """Manages the pygame window for rendering the LED matrix."""
+    """Manages the pygame window for rendering the LED matrix.
+
+    Also acts as the event bridge between the main thread (where pygame
+    events are generated) and the Controller's background input thread.
+    On Windows, pygame events can only be received from the thread that
+    created the display. ``render()`` (called from the main thread on every
+    ``SetImage``) pumps the event queue and stores keyboard/joystick events
+    in a thread-safe list. The Controller reads from this list via
+    :meth:`drain_events`.
+    """
 
     _instance = None
     _instance_lock = threading.Lock()
@@ -106,6 +115,10 @@ class _SimulatorWindow:
         self._screen = None
         self._clock = None
         self._initialized = False
+        # Thread-safe event buffer: render() (main thread) collects events,
+        # Controller.poll_events() (background thread) drains them.
+        self._event_buffer = []
+        self._event_lock = threading.Lock()
 
     def _ensure_init(self):
         """Initialize pygame if not already done."""
@@ -127,16 +140,71 @@ class _SimulatorWindow:
             logger.error("Failed to initialize pygame: %s", e)
             self._initialized = False
 
+    def pump_events(self) -> None:
+        """Pump pygame events into the buffer without rendering.
+
+        Must be called from the main thread (the one that created the display).
+        This allows the controller to receive events even when the display isn't
+        being re-rendered (e.g. the menu waiting for input before redrawing).
+        """
+        if not PYGAME_AVAILABLE or not self._initialized:
+            return
+        all_events = pygame.event.get()
+        non_quit = []
+        for event in all_events:
+            if event.type == pygame.QUIT:
+                self._running = False
+                return
+            non_quit.append(event)
+        if non_quit:
+            with self._event_lock:
+                self._event_buffer.extend(non_quit)
+
+    def drain_events(self) -> list:
+        """Drain buffered pygame events (called by Controller from any thread).
+
+        Returns a list of pygame event objects collected by the main-thread
+        ``render()`` calls or ``pump_events()`` calls since the last drain.
+        This bridges the Windows limitation that pygame events can only be
+        received from the thread that created the display.
+
+        When called from the main thread (MENU/IN_GAME foreground loops),
+        this also pumps fresh events first so the caller always gets the
+        latest input without needing a separate render() call.
+
+        On the Pi (real rgbmatrix), this class is never instantiated, so the
+        Controller uses ``pygame.event.get()`` directly -- no impact there.
+        """
+        # If we're on the main thread, pump fresh events first so callers
+        # don't need to wait for a render() cycle to receive input.
+        if threading.current_thread() is threading.main_thread():
+            self.pump_events()
+
+        with self._event_lock:
+            events = self._event_buffer
+            self._event_buffer = []
+        return events
+
     def render(self, pixel_buffer, brightness=100):
         """Render the pixel buffer to the pygame window."""
         if not PYGAME_AVAILABLE or not self._initialized:
             return
 
-        # Process pygame events (needed to keep window responsive)
-        for event in pygame.event.get():
+        # Collect ALL pygame events from the main thread and buffer them
+        # for the Controller's background thread to consume via drain_events().
+        # This is required on Windows where pygame events can only be received
+        # from the thread that created the display.
+        all_events = pygame.event.get()
+        non_quit = []
+        for event in all_events:
             if event.type == pygame.QUIT:
                 self._running = False
                 return
+            non_quit.append(event)
+
+        if non_quit:
+            with self._event_lock:
+                self._event_buffer.extend(non_quit)
 
         if not self._running:
             return

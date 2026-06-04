@@ -2,9 +2,9 @@
   "enabled": true,
   "night_mode": {
     "enabled": true,
-    "start_hour": 22,
+    "start_hour": 18,
     "end_hour": 7,
-    "brightness": 20,
+    "brightness": 18,
     "allowed_features": [
       "time_display",
       "binary_clock"
