@@ -4,6 +4,9 @@
 Classic demoscene-style spinning wireframe shapes: cube, tetrahedron,
 octahedron, icosahedron, torus, and more. Cycles through shapes.
 Shape selection and timing are configurable via config/wireframe.json.
+
+Uses the shared 5x7 bitmap font from _fonts.py for crisp, readable
+shape name labels.
 """
 
 import json
@@ -11,7 +14,8 @@ import math
 import os
 import time
 import logging
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+from src.display._fonts import _draw_text, _text_width
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -29,6 +33,9 @@ CONFIG_PATH = os.path.join(
 # sqrt(3).  Every shape is normalised to this same radius so that they
 # all appear the same visual size on screen.
 _TARGET_RADIUS = math.sqrt(3)
+
+# Label colors — bright enough to read against the dark background
+LABEL_COLOR = (180, 180, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -219,14 +226,14 @@ def _torus_wireframe():
 
 # Registry: key must match the key names in config/wireframe.json "shapes"
 _SHAPE_REGISTRY = {
-    "cube": ("Cube", _cube),
-    "tetrahedron": ("Tetrahedron", _tetrahedron),
-    "octahedron": ("Octahedron", _octahedron),
-    "icosahedron": ("Icosahedron", _icosahedron),
-    "diamond": ("Diamond", _diamond),
-    "pyramid": ("Pyramid", _pyramid),
-    "star": ("Star", _star),
-    "torus": ("Torus", _torus_wireframe),
+    "cube": ("CUBE", _cube),
+    "tetrahedron": ("TETRA", _tetrahedron),
+    "octahedron": ("OCTA", _octahedron),
+    "icosahedron": ("ICOSA", _icosahedron),
+    "diamond": ("DIAMOND", _diamond),
+    "pyramid": ("PYRAMID", _pyramid),
+    "star": ("STAR", _star),
+    "torus": ("TORUS", _torus_wireframe),
 }
 
 # Deterministic display order
@@ -343,13 +350,11 @@ def run(matrix, duration=60):
                     b = min(255, int(color[2] * dot_bright * 1.3))
                     draw.point((sx, sy), fill=(r, g, b))
 
-            # Shape name at bottom
-            try:
-                font = ImageFont.load_default()
-                tx = (WIDTH - len(name) * 6) // 2
-                draw.text((tx, HEIGHT - 9), name, fill=(60, 60, 80), font=font)
-            except Exception:
-                pass
+            # Shape name at bottom — using shared 5x7 bitmap font
+            name_w = _text_width(name, scale=1, spacing=1)
+            name_x = max(0, (WIDTH - name_w) // 2)
+            _draw_text(draw, name, name_x, HEIGHT - 8, LABEL_COLOR,
+                       scale=1, spacing=1)
 
             matrix.SetImage(image)
 
