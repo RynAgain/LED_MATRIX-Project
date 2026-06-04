@@ -8,6 +8,6 @@
   "hat_index": 0,
   "axis_x": 0,
   "axis_y": 1,
-  "invert_y": false,
+  "invert_y": true,
   "deadzone": 0.5
 }
