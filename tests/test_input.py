@@ -470,20 +470,23 @@ class TestWantsQuit:
         assert ctrl.is_pressed(Button.SELECT)
         assert wants_quit(ctrl) is True
 
-    def test_start_alone_does_not_quit_immediately(self):
+    def test_start_alone_triggers_quit_immediately(self):
+        """START pressed alone now returns to menu immediately."""
         pg = FakePygame()
         ctrl, clock = make_controller(pygame_obj=pg)
         pg.event.post(FakeEvent(pg.KEYDOWN, key=pg.K_RETURN))
         ctrl.poll_events()
-        assert wants_quit(ctrl) is False
+        assert wants_quit(ctrl) is True
 
-    def test_hold_start_fallback_triggers_quit(self):
+    def test_hold_start_fallback_also_triggers_quit(self):
+        """Hold-START still triggers quit (backward compat path)."""
         pg = FakePygame()
         ctrl, clock = make_controller(pygame_obj=pg)
         pg.event.post(FakeEvent(pg.KEYDOWN, key=pg.K_RETURN))
         ctrl.poll_events()
-        assert wants_quit(ctrl) is False
-        # Hold past the fallback threshold.
+        # START alone already triggers quit immediately now
+        assert wants_quit(ctrl) is True
+        # Hold past the fallback threshold -- still True (redundant but valid).
         clock.advance(START_HOLD_QUIT_SECONDS + 0.1)
         ctrl.poll_events()  # refresh START-hold timer at new time
         assert wants_quit(ctrl) is True

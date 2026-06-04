@@ -702,15 +702,22 @@ class Controller:
 def wants_quit(controller: "Controller") -> bool:
     """Return True on the quit gesture.
 
-    Two equivalent gestures (per the spec's risk note about clones lacking a
+    Three equivalent gestures (per the spec's risk note about clones lacking a
     real Select button):
 
+    * **START pressed alone** (single press returns to menu immediately), or
     * **START + SELECT** held simultaneously (the deliberate combo), or
     * **holding START** alone for ~:data:`START_HOLD_QUIT_SECONDS` seconds.
 
     Callers should invoke this once per frame after ``poll_events()`` (which
     updates held-state and the START-hold timer).
+
+    NOTE: This function is only called inside game ``run()`` loops (interactive
+    mode). The menu system handles START separately in its own loop, so this
+    does not conflict with menu navigation.
     """
+    if controller.is_pressed(Button.START):
+        return True
     if controller.is_pressed(Button.START) and controller.is_pressed(Button.SELECT):
         return True
     if controller.start_hold_seconds() >= START_HOLD_QUIT_SECONDS:
