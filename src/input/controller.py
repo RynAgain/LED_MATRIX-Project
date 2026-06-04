@@ -351,6 +351,11 @@ class Controller:
         default so importing/using the controller never hard-crashes when no
         display exists. Any failure leaves the controller in a disconnected but
         functional (keyboard-only / no-op) state.
+
+        On the Pi (real rgbmatrix hardware, no display server), we only
+        initialize the subsystems we actually need (joystick + event queue)
+        rather than calling ``pygame.init()`` which attempts to start video,
+        audio, fonts, etc. and can block or fail on a headless system.
         """
         try:
             os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -367,10 +372,22 @@ class Controller:
             return
 
         try:
-            if not pygame.get_init():
-                pygame.init()
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
+            if _real_hardware_present():
+                # On the Pi we only need joystick + event subsystems.
+                # Avoid full pygame.init() which tries to start video/audio/
+                # font subsystems that don't exist on a headless system and
+                # can introduce latency or outright fail.
+                if not pygame.display.get_init():
+                    pygame.display.init()  # needed for event queue
+                if not pygame.joystick.get_init():
+                    pygame.joystick.init()
+            else:
+                # On dev/simulator machines, full init is fine (and needed for
+                # the simulator window, keyboard events, etc.).
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.joystick.get_init():
+                    pygame.joystick.init()
         except Exception as e:  # noqa: BLE001
             logger.warning("pygame joystick init failed (%s); no-controller mode", e)
 

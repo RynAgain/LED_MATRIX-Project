@@ -413,7 +413,7 @@ class AppStateMachine:
     def __init__(self, matrix, controller, config: dict,
                  shutdown_event: Optional[threading.Event] = None,
                  menu: Optional[MenuController] = None,
-                 input_poll_hz: float = 20.0):
+                 input_poll_hz: float = 60.0):
         """
         :param matrix: shared RGBMatrix / simulator / proxy (owned here).
         :param controller: shared :class:`src.input.Controller`.
