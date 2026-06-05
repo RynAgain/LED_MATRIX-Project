@@ -68,3 +68,6 @@ config/.backup/
 
 # Agent/editor scratch data (runtime DBs, embeddings, conversation state)
 .agent/
+
+# Auto-updater failure counter (runtime state, never commit)
+.update_failures

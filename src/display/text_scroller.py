@@ -31,9 +31,8 @@ CHAR_STEP = CHAR_W + CHAR_GAP  # 6px per character
 # Default messages to scroll
 DEFAULT_MESSAGES = [
     "Welcome to LED Matrix!",
-    "Hello World!",
-    "Raspberry Pi Rocks!",
-    "LED Matrix Project v2.0",
+    "Developed by KRYASATT",
+    "Press START to open menu"
 ]
 
 # Color themes

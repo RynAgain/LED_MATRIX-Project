@@ -10,11 +10,15 @@ import subprocess
 import logging
 import os
 import sys
+import time
 
 logger = logging.getLogger(__name__)
 
 # Project root is three levels up from this file
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Failure counter file path
+FAILURE_COUNTER_FILE = os.path.join(PROJECT_ROOT, ".update_failures")
 
 
 class AutoUpdater:
@@ -72,6 +76,100 @@ class AutoUpdater:
             logger.error("git command timed out: %s", " ".join(cmd))
             return None
 
+    def _clean_git_lock(self):
+        """Remove stale .git/index.lock files older than 10 minutes.
+
+        A stale lock file can permanently block all git operations if a
+        previous git process was killed (e.g., due to power loss or OOM).
+        """
+        lock_file = os.path.join(self.project_root, ".git", "index.lock")
+        if not os.path.exists(lock_file):
+            return
+
+        try:
+            lock_age = time.time() - os.path.getmtime(lock_file)
+            if lock_age > 600:  # 10 minutes
+                os.remove(lock_file)
+                logger.warning("Removed stale git lock file (age: %.0fs)", lock_age)
+            else:
+                logger.info("Git lock file exists but is recent (age: %.0fs), leaving it", lock_age)
+        except OSError as e:
+            logger.warning("Could not check/remove git lock file: %s", e)
+
+    def _get_failure_count(self):
+        """Read the consecutive failure counter from disk.
+
+        Returns:
+            Integer count of consecutive failures.
+        """
+        try:
+            with open(FAILURE_COUNTER_FILE, "r") as f:
+                return int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            return 0
+
+    def _set_failure_count(self, count):
+        """Write the consecutive failure counter to disk.
+
+        Args:
+            count: Integer failure count to persist.
+        """
+        try:
+            with open(FAILURE_COUNTER_FILE, "w") as f:
+                f.write(str(count))
+        except OSError as e:
+            logger.warning("Could not write failure counter: %s", e)
+
+    def _clear_failure_count(self):
+        """Reset the failure counter to zero (on successful update)."""
+        try:
+            if os.path.exists(FAILURE_COUNTER_FILE):
+                os.remove(FAILURE_COUNTER_FILE)
+        except OSError:
+            pass
+
+    def _increment_failure_count(self):
+        """Increment and return the new failure count."""
+        count = self._get_failure_count() + 1
+        self._set_failure_count(count)
+        logger.warning("Consecutive update failures: %d", count)
+        return count
+
+    def _nuclear_recovery(self):
+        """Perform a nuclear recovery: fetch and hard reset to remote branch.
+
+        This is the last resort when normal pull/reset strategies have failed
+        repeatedly. It guarantees the local repo matches the remote exactly.
+
+        Returns:
+            True if recovery succeeded, False otherwise.
+        """
+        logger.warning("NUCLEAR RECOVERY: Performing full fetch + hard reset...")
+
+        # Force remove lock file regardless of age
+        lock_file = os.path.join(self.project_root, ".git", "index.lock")
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+                logger.warning("Removed git lock file during nuclear recovery")
+            except OSError:
+                pass
+
+        result = self._run_git(["fetch", "origin", self.branch, "--force"], timeout=120)
+        if not result or result.returncode != 0:
+            logger.error("Nuclear recovery fetch failed: %s",
+                         result.stderr.strip() if result else "git not available")
+            return False
+
+        result = self._run_git(["reset", "--hard", f"origin/{self.branch}"])
+        if result and result.returncode == 0:
+            logger.info("Nuclear recovery succeeded: reset to origin/%s", self.branch)
+            return True
+        else:
+            logger.error("Nuclear recovery reset failed: %s",
+                         result.stderr.strip() if result else "git not available")
+            return False
+
     def _repair_git(self):
         """Attempt to repair a corrupted git repository.
 
@@ -109,11 +207,15 @@ class AutoUpdater:
     def fetch_remote(self):
         """
         Fetch latest changes from remote without applying them.
+        Cleans stale git lock files before fetching.
         If fetch fails due to corrupt objects, attempts automatic repair.
 
         Returns:
             True if fetch succeeded, False otherwise.
         """
+        # Clean stale lock files before any git operations
+        self._clean_git_lock()
+
         logger.info("Fetching remote changes...")
         result = self._run_git(["fetch", "origin", self.branch])
         if result and result.returncode == 0:
@@ -251,6 +353,11 @@ class AutoUpdater:
         pops stash, then restores config files from the temp backup to avoid
         git merge conflict markers in JSON configs.
 
+        Strategy:
+        1. Try git pull --ff-only (fast path, no divergence)
+        2. If that fails, fall back to git reset --hard origin/{branch}
+           (guaranteed to work when local has diverged)
+
         Returns:
             True if pull succeeded, False otherwise.
         """
@@ -262,19 +369,31 @@ class AutoUpdater:
         logger.info("Stashing local changes (including untracked files)...")
         self._run_git(["stash", "push", "--include-untracked", "-m", "auto-update-stash"])
 
-        # Pull changes
+        # Pull changes -- try fast-forward first, fall back to hard reset
         logger.info("Pulling updates from origin/%s...", self.branch)
         result = self._run_git(["pull", "origin", self.branch, "--ff-only"])
 
         pull_ok = result and result.returncode == 0
 
         if pull_ok:
-            logger.info("Pull completed: %s", result.stdout.strip())
+            logger.info("Pull completed (fast-forward): %s", result.stdout.strip())
         else:
+            # Fast-forward failed -- local branch has diverged from remote.
+            # Fall back to hard reset which is guaranteed to sync with remote.
             error = result.stderr.strip() if result else "git not available"
-            logger.error("Pull failed: %s", error)
+            logger.warning("Fast-forward pull failed: %s", error)
+            logger.info("Falling back to hard reset to origin/%s...", self.branch)
 
-        # Only restore stash if pull succeeded; otherwise leave changes safely stashed
+            reset_result = self._run_git(["reset", "--hard", f"origin/{self.branch}"])
+            if reset_result and reset_result.returncode == 0:
+                logger.info("Hard reset succeeded: now at origin/%s", self.branch)
+                pull_ok = True
+            else:
+                reset_error = reset_result.stderr.strip() if reset_result else "git not available"
+                logger.error("Hard reset also failed: %s", reset_error)
+                pull_ok = False
+
+        # Only restore stash if pull/reset succeeded; otherwise leave changes safely stashed
         if pull_ok:
             stash_result = self._run_git(["stash", "pop"])
             if stash_result and stash_result.returncode != 0:
@@ -303,7 +422,7 @@ class AutoUpdater:
             # Always restore from temp backup -- local config takes precedence
             self._restore_configs(config_tmp)
         else:
-            logger.warning("Skipping stash pop because pull failed. "
+            logger.warning("Both pull and hard reset failed. "
                            "Run 'git stash pop' manually after resolving the issue.")
             # Clean up temp dir even on failure
             import shutil
@@ -455,28 +574,81 @@ class AutoUpdater:
 
         return success
 
+    def _clean_old_stashes(self):
+        """Drop all stashes if there are more than 5 to prevent disk space issues."""
+        result = self._run_git(["stash", "list"])
+        if not result or result.returncode != 0:
+            return
+
+        stash_lines = [line for line in result.stdout.strip().split("\n") if line]
+        if len(stash_lines) > 5:
+            logger.info("Cleaning %d old stashes (limit: 5)...", len(stash_lines))
+            self._run_git(["stash", "clear"])
+            logger.info("All stashes cleared")
+
     def check_and_update(self):
         """
         Main update workflow: fetch, check, pull, install deps, restart.
+        Includes failure counting with nuclear recovery for persistent failures.
 
         Returns:
             True if an update was applied, False if no update or failure.
         """
         logger.info("Starting update check...")
 
+        # Check failure counter for nuclear recovery thresholds
+        failure_count = self._get_failure_count()
+        if failure_count >= 20:
+            # After 20 failures, force-remove lock file and try nuclear recovery
+            logger.warning("20+ consecutive failures detected, forcing lock removal + nuclear recovery")
+            lock_file = os.path.join(self.project_root, ".git", "index.lock")
+            if os.path.exists(lock_file):
+                try:
+                    os.remove(lock_file)
+                    logger.warning("Force-removed git lock file after 20 failures")
+                except OSError:
+                    pass
+            if self._nuclear_recovery():
+                self._clear_failure_count()
+                self.install_dependencies()
+                self.restart_display_service()
+                logger.info("Nuclear recovery (20+ failures) applied successfully")
+                self._clean_old_stashes()
+                return True
+            else:
+                self._increment_failure_count()
+                return False
+        elif failure_count >= 10:
+            # After 10 failures, try nuclear recovery (fetch + hard reset)
+            logger.warning("10+ consecutive failures detected, attempting nuclear recovery")
+            if self._nuclear_recovery():
+                self._clear_failure_count()
+                self.install_dependencies()
+                self.restart_display_service()
+                logger.info("Nuclear recovery (10+ failures) applied successfully")
+                self._clean_old_stashes()
+                return True
+            else:
+                self._increment_failure_count()
+                return False
+
         # Step 1: Fetch
         if not self.fetch_remote():
             logger.error("Update check failed at fetch stage")
+            self._increment_failure_count()
             return False
 
         # Step 2: Check for updates
         if not self.has_updates():
             logger.info("No updates available")
+            # No update needed is not a failure — clear counter
+            self._clear_failure_count()
             return False
 
         # Step 3: Pull
         if not self.pull_updates():
             logger.error("Update check failed at pull stage")
+            self._increment_failure_count()
             return False
 
         # Step 4: Install dependencies
@@ -484,6 +656,10 @@ class AutoUpdater:
 
         # Step 5: Restart display service
         self.restart_display_service()
+
+        # Success — clear failure counter and clean stashes
+        self._clear_failure_count()
+        self._clean_old_stashes()
 
         logger.info("Update applied successfully")
         return True

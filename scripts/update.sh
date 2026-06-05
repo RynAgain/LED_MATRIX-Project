@@ -3,7 +3,10 @@
 # Called by led-matrix-updater.timer via led-matrix-updater.service
 # Checks GitHub for changes and applies updates.
 
-set -e
+# NOTE: Do NOT use 'set -e' here — it causes silent script abortion when
+# pipeline commands (tee, wifi check) return non-zero. We use explicit
+# error checking where needed instead.
+set -o pipefail
 
 # Determine project root (parent of scripts/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +21,16 @@ log() {
     local msg="$(date '+%Y-%m-%d %H:%M:%S') [UPDATE] $1"
     echo "$msg" | tee -a "$LOG_FILE"
 }
+
+# Clean stale git locks before anything else
+LOCK_FILE="$PROJECT_ROOT/.git/index.lock"
+if [ -f "$LOCK_FILE" ]; then
+    LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0) ))
+    if [ "$LOCK_AGE" -gt 600 ]; then
+        rm -f "$LOCK_FILE"
+        log "Removed stale git lock file (age: ${LOCK_AGE}s)"
+    fi
+fi
 
 # Use venv python if available, fallback to system python
 if [ ! -f "$VENV_PYTHON" ]; then

@@ -410,6 +410,10 @@ class AppStateMachine:
     ``_command_watcher``.
     """
 
+    # Seconds the START button must be debounced before it can open the menu.
+    # Prevents accidental menu activation during gameplay transitions.
+    START_DEBOUNCE_SECONDS = 0.5
+
     def __init__(self, matrix, controller, config: dict,
                  shutdown_event: Optional[threading.Event] = None,
                  menu: Optional[MenuController] = None,
@@ -434,6 +438,11 @@ class AppStateMachine:
         self._menu_requested = threading.Event()
         self._input_poll_interval = 1.0 / input_poll_hz if input_poll_hz > 0 else 0.05
         self._input_thread: Optional[threading.Thread] = None
+
+        # Debounce tracking for START button: monotonic timestamp of the last
+        # time the menu was closed (returned to IDLE) or the system booted.
+        # START presses within START_DEBOUNCE_SECONDS of this time are ignored.
+        self._last_idle_entry_time: float = time.monotonic()
 
         self._carousel = DemoCarousel(
             matrix, self.config, self._shutdown,
@@ -492,6 +501,16 @@ class AppStateMachine:
 
                 for ev in events:
                     if ev.button is Button.START and ev.type is EventType.PRESSED:
+                        # Debounce: ignore START presses within 0.5s of entering
+                        # IDLE (prevents accidental menu activation during
+                        # gameplay transitions or rapid button mashing).
+                        elapsed_since_idle = time.monotonic() - self._last_idle_entry_time
+                        if elapsed_since_idle < self.START_DEBOUNCE_SECONDS:
+                            logger.debug(
+                                "START debounced (%.2fs < %.2fs)",
+                                elapsed_since_idle, self.START_DEBOUNCE_SECONDS,
+                            )
+                            break
                         logger.info("START pressed during demo -> requesting MENU")
                         self._menu_requested.set()
                         request_stop()
@@ -551,6 +570,7 @@ class AppStateMachine:
             self.mode = AppMode.MENU
         else:  # RESUME (or anything unexpected) -> back to the demo carousel.
             self.mode = AppMode.IDLE
+            self._last_idle_entry_time = time.monotonic()
 
     def _run_demo(self, name: str) -> None:
         """Run a feature in demo mode (no controller) for its configured duration.
@@ -635,6 +655,7 @@ class AppStateMachine:
                 else:  # pragma: no cover - defensive; unknown mode -> idle
                     logger.warning("Unknown mode %r, reverting to IDLE", self.mode)
                     self.mode = AppMode.IDLE
+                    self._last_idle_entry_time = time.monotonic()
         finally:
             logger.info("State machine loop exited")
 
