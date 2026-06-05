@@ -149,19 +149,43 @@ def run(matrix, duration=60):
                 if b[1] < 0:
                     bullets.remove(b)
                     continue
-                # Check hit
+                # Check hit on invaders
+                hit_something = False
                 for inv in invaders:
                     if inv.alive and inv.x <= b[0] <= inv.x + 4 and inv.y <= b[1] <= inv.y + 2:
                         inv.alive = False
                         if b in bullets:
                             bullets.remove(b)
                         score += 10
+                        hit_something = True
                         break
+                if hit_something:
+                    continue
+                # Check hit on shields (player bullets degrade shields too)
+                for i, (sx, sy) in enumerate(shields):
+                    if shield_health.get(i, 0) > 0:
+                        if sx <= b[0] <= sx + 6 and sy <= b[1] <= sy + 2:
+                            shield_health[i] -= 1
+                            if b in bullets:
+                                bullets.remove(b)
+                            break
 
             for b in enemy_bullets[:]:
                 b[1] += 1
                 if b[1] >= HEIGHT:
                     enemy_bullets.remove(b)
+                    continue
+                # Check enemy bullets hitting shields (shields absorb fire)
+                hit_shield = False
+                for i, (sx, sy) in enumerate(shields):
+                    if shield_health.get(i, 0) > 0:
+                        if sx <= b[0] <= sx + 6 and sy <= b[1] <= sy + 2:
+                            shield_health[i] -= 1
+                            enemy_bullets.remove(b)
+                            hit_shield = True
+                            break
+                if hit_shield:
+                    continue
 
             # Reset if all dead
             if not live_invaders:
@@ -172,6 +196,8 @@ def run(matrix, duration=60):
                         y = 3 + row * 5
                         invaders.append(Invader(x, y, row))
                 direction = 1
+                # Restore shields on new wave
+                shield_health = {i: 3 for i in range(len(shields))}
 
             # Draw invaders
             for inv in invaders:
