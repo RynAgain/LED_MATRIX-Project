@@ -2,14 +2,16 @@
 """Weather display for 64x64 LED matrix using Open-Meteo free API.
 
 Uses the shared 5x7 bitmap font from _fonts.py for crisp, readable text
-on the LED matrix. Layout is optimized for the 64x64 pixel space with
-clear sections for temperature, condition, wind, and humidity.
+on the LED matrix. Features animated weather icons (sun rays, rain drops,
+snow flakes, cloud movement, lightning) alongside temperature and conditions.
 """
 
 import time
+import math
 import logging
 import json
 import os
+import random
 import requests
 from PIL import Image, ImageDraw
 from src.display._fonts import _draw_text, _text_width
@@ -65,6 +67,192 @@ WMO_ACCENT = {
     95: (200, 50, 200),   # Storm purple
 }
 
+# Weather animation categories
+ANIM_CLEAR = 0
+ANIM_CLOUDY = 1
+ANIM_RAIN = 2
+ANIM_SNOW = 3
+ANIM_STORM = 4
+ANIM_FOG = 5
+
+def _code_to_anim(code):
+    """Map WMO weather code to animation type."""
+    if code in (0, 1):
+        return ANIM_CLEAR
+    elif code in (2, 3):
+        return ANIM_CLOUDY
+    elif code in (51, 53, 55, 61, 63, 65, 80, 81, 82):
+        return ANIM_RAIN
+    elif code in (71, 73, 75):
+        return ANIM_SNOW
+    elif code in (95, 96, 99):
+        return ANIM_STORM
+    elif code in (45, 48):
+        return ANIM_FOG
+    return ANIM_CLEAR
+
+
+class WeatherAnimator:
+    """Draws animated weather icons in a given region of the image."""
+
+    def __init__(self, anim_type):
+        self.anim_type = anim_type
+        self.tick = 0
+        # Rain/snow particles: (x, y) positions
+        self.particles = []
+        self._init_particles()
+
+    def _init_particles(self):
+        """Initialize particles for rain/snow animations."""
+        if self.anim_type in (ANIM_RAIN, ANIM_STORM):
+            self.particles = [[random.randint(2, 20), random.randint(0, 28)] for _ in range(8)]
+        elif self.anim_type == ANIM_SNOW:
+            self.particles = [[random.randint(2, 20), random.randint(0, 28)] for _ in range(6)]
+
+    def draw(self, draw_ctx, x_offset, y_offset, w=22, h=28):
+        """Draw one frame of the weather animation.
+
+        Args:
+            draw_ctx: PIL ImageDraw context
+            x_offset: left edge of the animation area
+            y_offset: top edge of the animation area
+            w: width of animation area
+            h: height of animation area
+        """
+        self.tick += 1
+
+        if self.anim_type == ANIM_CLEAR:
+            self._draw_sun(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_CLOUDY:
+            self._draw_clouds(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_RAIN:
+            self._draw_clouds(draw_ctx, x_offset, y_offset, w, h)
+            self._draw_rain(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_SNOW:
+            self._draw_clouds(draw_ctx, x_offset, y_offset, w, h)
+            self._draw_snow(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_STORM:
+            self._draw_clouds(draw_ctx, x_offset, y_offset, w, h)
+            self._draw_rain(draw_ctx, x_offset, y_offset, w, h)
+            self._draw_lightning(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_FOG:
+            self._draw_fog(draw_ctx, x_offset, y_offset, w, h)
+
+    def _draw_sun(self, draw_ctx, xo, yo, w, h):
+        """Animated sun with rotating rays."""
+        cx = xo + w // 2
+        cy = yo + h // 2
+        # Sun body
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                if dx * dx + dy * dy <= 9:
+                    draw_ctx.point((cx + dx, cy + dy), fill=(255, 200, 0))
+
+        # Rotating rays
+        num_rays = 8
+        ray_len = 4
+        angle_offset = self.tick * 0.1
+        for i in range(num_rays):
+            angle = angle_offset + i * (2 * math.pi / num_rays)
+            # Ray start (just outside sun body)
+            sx = cx + int(4 * math.cos(angle))
+            sy = cy + int(4 * math.sin(angle))
+            # Ray end
+            ex = cx + int((4 + ray_len) * math.cos(angle))
+            ey = cy + int((4 + ray_len) * math.sin(angle))
+            # Pulsing brightness
+            pulse = int(180 + 75 * math.sin(self.tick * 0.2 + i))
+            color = (pulse, pulse // 2, 0)
+            draw_ctx.line([(sx, sy), (ex, ey)], fill=color)
+
+    def _draw_clouds(self, draw_ctx, xo, yo, w, h):
+        """Drifting cloud shapes."""
+        # Cloud 1 (larger, drifts slowly)
+        drift1 = int(math.sin(self.tick * 0.05) * 3)
+        cx1 = xo + 10 + drift1
+        cy1 = yo + 6
+        for dx in range(-4, 5):
+            for dy in range(-2, 3):
+                if (dx * dx) / 16 + (dy * dy) / 4 <= 1:
+                    draw_ctx.point((cx1 + dx, cy1 + dy), fill=(140, 140, 160))
+
+        # Cloud 2 (smaller, drifts faster)
+        drift2 = int(math.sin(self.tick * 0.08 + 1.5) * 2)
+        cx2 = xo + 6 + drift2
+        cy2 = yo + 10
+        for dx in range(-3, 4):
+            for dy in range(-1, 2):
+                if (dx * dx) / 9 + (dy * dy) / 1 <= 1:
+                    draw_ctx.point((cx2 + dx, cy2 + dy), fill=(120, 120, 140))
+
+    def _draw_rain(self, draw_ctx, xo, yo, w, h):
+        """Falling rain drops."""
+        speed = 2 if self.anim_type == ANIM_STORM else 1
+        for p in self.particles:
+            p[1] += speed
+            if p[1] > h - 2:
+                p[1] = random.randint(10, 14)
+                p[0] = random.randint(2, w - 2)
+
+            px = xo + p[0]
+            py = yo + p[1]
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                draw_ctx.point((px, py), fill=(80, 140, 255))
+                if py + 1 < HEIGHT:
+                    draw_ctx.point((px, py + 1), fill=(40, 80, 180))
+
+    def _draw_snow(self, draw_ctx, xo, yo, w, h):
+        """Gently falling snowflakes with drift."""
+        for p in self.particles:
+            p[1] += 0.5
+            p[0] += math.sin(self.tick * 0.1 + p[1] * 0.3) * 0.3
+            if p[1] > h - 2:
+                p[1] = random.randint(10, 14)
+                p[0] = random.randint(2, w - 2)
+
+            px = xo + int(p[0])
+            py = yo + int(p[1])
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                # Snowflake: single bright pixel
+                brightness = int(180 + 75 * math.sin(self.tick * 0.15 + p[0]))
+                draw_ctx.point((px, py), fill=(brightness, brightness, brightness))
+
+    def _draw_lightning(self, draw_ctx, xo, yo, w, h):
+        """Occasional lightning flash."""
+        # Flash every ~40 ticks for a few frames
+        cycle = self.tick % 60
+        if cycle < 3:
+            # Lightning bolt shape
+            bx = xo + w // 2
+            by = yo + 12
+            points = [(bx, by), (bx - 1, by + 4), (bx + 2, by + 4),
+                      (bx, by + 8), (bx + 3, by + 5), (bx + 1, by + 5),
+                      (bx + 2, by + 2)]
+            for px, py in points:
+                if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                    draw_ctx.point((px, py), fill=(255, 255, 200))
+            # Brief screen flash effect
+            if cycle == 0:
+                for fx in range(xo, xo + w):
+                    for fy in range(yo, yo + h):
+                        if 0 <= fx < WIDTH and 0 <= fy < HEIGHT:
+                            if random.random() < 0.05:
+                                draw_ctx.point((fx, fy), fill=(100, 100, 120))
+
+    def _draw_fog(self, draw_ctx, xo, yo, w, h):
+        """Drifting fog layers."""
+        for layer in range(4):
+            y = yo + 5 + layer * 6
+            drift = int(math.sin(self.tick * 0.03 + layer * 1.2) * 4)
+            alpha = 60 + layer * 20
+            for x in range(w - 4):
+                px = xo + x + drift
+                # Wavy fog line
+                wave = int(math.sin((x + self.tick * 0.1) * 0.5) * 1.5)
+                py = y + wave
+                if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                    draw_ctx.point((px, py), fill=(alpha, alpha, alpha + 20))
+
 
 def _fetch_weather(lat=None, lon=None):
     """Fetch current weather from Open-Meteo (free, no API key)."""
@@ -98,18 +286,12 @@ def _get_accent_color(code):
     return WMO_ACCENT.get(color_key, (200, 200, 200))
 
 
-def _render_weather(weather):
-    """Render weather data to a PIL Image using the 5x7 bitmap font.
+def _render_weather(weather, animator):
+    """Render weather data with animated icon to a PIL Image.
 
     Layout (64x64):
-      Row  1-7:   "WEATHER" title centered
-      Row  9:     Separator line
-      Row 12-18:  Temperature (scale=2 for emphasis)
-      Row 22-28:  Condition text
-      Row 32:     Separator line
-      Row 35-41:  Wind label + value
-      Row 45-51:  Humidity label + value
-      Row 55-61:  Accent bar (weather-themed color)
+      Left side (0-22):  Animated weather icon
+      Right side (24-63): Temperature, condition, wind, humidity
     """
     image = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(image)
@@ -122,54 +304,45 @@ def _render_weather(weather):
     condition = WMO_CODES.get(code, "UNKNOWN")
     accent = _get_accent_color(code)
 
-    # Title "WEATHER" centered
-    title = "WEATHER"
-    tw = _text_width(title, scale=1)
-    _draw_text(draw, title, (WIDTH - tw) // 2, 1, TITLE_COLOR, scale=1, spacing=1)
+    # --- Left side: animated weather icon (columns 0-22, rows 2-30) ---
+    animator.draw(draw, x_offset=0, y_offset=2, w=22, h=28)
 
-    # Separator line
-    draw.line([(4, 9), (59, 9)], fill=SEPARATOR_COLOR)
+    # --- Right side: text data (columns 24-63) ---
+    text_x = 24
 
-    # Temperature — large (scale=2) for emphasis, centered
+    # Temperature — large (scale=2) for emphasis
     if temp is not None:
         temp_str = "{}F".format(int(temp))
-        tw2 = _text_width(temp_str, scale=2)
-        _draw_text(draw, temp_str, (WIDTH - tw2) // 2, 12, TEMP_COLOR,
-                   scale=2, spacing=1)
+        _draw_text(draw, temp_str, text_x, 4, TEMP_COLOR, scale=2, spacing=1)
     else:
-        na_str = "N/A"
-        tw2 = _text_width(na_str, scale=2)
-        _draw_text(draw, na_str, (WIDTH - tw2) // 2, 12, TEMP_COLOR,
-                   scale=2, spacing=1)
+        _draw_text(draw, "N/A", text_x, 4, TEMP_COLOR, scale=2, spacing=1)
 
-    # Condition — centered, accent color
-    cw = _text_width(condition, scale=1)
-    _draw_text(draw, condition, max(0, (WIDTH - cw) // 2), 28, accent,
-               scale=1, spacing=1)
+    # Condition text — below temperature
+    _draw_text(draw, condition, text_x, 20, accent, scale=1, spacing=1)
 
     # Separator line
-    draw.line([(4, 36), (59, 36)], fill=SEPARATOR_COLOR)
+    draw.line([(2, 32), (61, 32)], fill=SEPARATOR_COLOR)
 
-    # Wind
+    # Wind — full width below separator
     if wind is not None:
         wind_label = "WIND"
-        _draw_text(draw, wind_label, 2, 39, WIND_COLOR, scale=1, spacing=1)
+        _draw_text(draw, wind_label, 2, 36, WIND_COLOR, scale=1, spacing=1)
         wind_val = "{}MPH".format(int(wind))
         vw = _text_width(wind_val, scale=1)
-        _draw_text(draw, wind_val, WIDTH - vw - 2, 39, (255, 255, 255),
+        _draw_text(draw, wind_val, WIDTH - vw - 2, 36, (255, 255, 255),
                    scale=1, spacing=1)
 
     # Humidity
     if humidity is not None:
         hum_label = "HUM"
-        _draw_text(draw, hum_label, 2, 49, HUMIDITY_COLOR, scale=1, spacing=1)
+        _draw_text(draw, hum_label, 2, 46, HUMIDITY_COLOR, scale=1, spacing=1)
         hum_val = "{}%".format(int(humidity))
         hw = _text_width(hum_val, scale=1)
-        _draw_text(draw, hum_val, WIDTH - hw - 2, 49, (255, 255, 255),
+        _draw_text(draw, hum_val, WIDTH - hw - 2, 46, (255, 255, 255),
                    scale=1, spacing=1)
 
     # Accent bar at bottom (weather-themed color indicator)
-    draw.rectangle([4, 59, 59, 62], fill=accent)
+    draw.rectangle([4, 58, 59, 61], fill=accent)
 
     return image
 
@@ -179,6 +352,7 @@ def run(matrix, duration=60):
     start_time = time.time()
     last_fetch = 0
     weather = None
+    animator = None
 
     try:
         while time.time() - start_time < duration:
@@ -190,13 +364,17 @@ def run(matrix, duration=60):
             if now - last_fetch > 60 or weather is None:
                 weather = _fetch_weather()
                 last_fetch = now
+                if weather:
+                    anim_type = _code_to_anim(weather.get("code", 0))
+                    if animator is None or animator.anim_type != anim_type:
+                        animator = WeatherAnimator(anim_type)
 
-            if weather:
-                image = _render_weather(weather)
+            if weather and animator:
+                image = _render_weather(weather, animator)
                 matrix.SetImage(image)
 
-            # Sleep 1 second between refreshes (weather data doesn't need 30 FPS)
-            time.sleep(1)
+            # Animate at ~10 FPS for smooth weather animations
+            time.sleep(0.1)
 
     except Exception as e:
         logger.error("Error in weather display: %s", e, exc_info=True)

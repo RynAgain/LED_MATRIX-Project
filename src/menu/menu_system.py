@@ -136,6 +136,13 @@ class MenuSystem:
         self._registry = build_menu_registry(self._playable)
         self._stack = [[build_main_menu(), 0]]
 
+        # The user pressed START to open the menu, so START is likely still held.
+        # We must ignore START until it has been released at least once, otherwise
+        # the menu immediately closes on the first frame (wants_quit sees START
+        # held and returns True, or _handle_events sees a START PRESSED edge).
+        # In test mode (fps=0), START is never physically held so arm immediately.
+        self._start_armed = (self._frame_dt == 0.0)
+
         self._render(matrix)
         while True:
             if should_stop():
@@ -150,7 +157,8 @@ class MenuSystem:
             if result is not None:
                 return result
 
-            if wants_quit(controller):
+            # Only check wants_quit after START has been released and re-pressed.
+            if self._start_armed and wants_quit(controller):
                 # Quit gesture from the menu resumes to idle (mirrors in-game UX
                 # where the combo backs out one level).
                 return MenuResult.resume()
@@ -168,7 +176,15 @@ class MenuSystem:
         for event in controller.poll_events():
             btn = event.button
             is_press = event.type is EventType.PRESSED
+            is_release = event.type is EventType.RELEASED
             is_repeat = event.type is EventType.REPEAT
+
+            # Track START release so we know when it's safe to accept START
+            # as a "close menu" action. Without this, the START press that
+            # *opened* the menu would immediately close it.
+            if btn is Button.START and is_release:
+                self._start_armed = True
+                continue
 
             # UP/DOWN: honor PRESSED and REPEAT for smooth held auto-scroll.
             if btn is Button.UP and (is_press or is_repeat):
@@ -189,7 +205,7 @@ class MenuSystem:
                 else:
                     # B at the root -> resume to idle.
                     return MenuResult.resume()
-            elif is_press and btn is Button.START:
+            elif is_press and btn is Button.START and self._start_armed:
                 return MenuResult.resume()
 
         if dirty:
