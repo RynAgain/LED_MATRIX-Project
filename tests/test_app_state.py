@@ -348,8 +348,8 @@ class TestRunLoop:
         ctrl = FakeController(event_script=[_press(Button.START)])
         sm = make_sm(ctrl, config)
         sm.mode = AppMode.IDLE
-        # Bypass the 0.5s START debounce by backdating the idle entry time.
-        sm._last_idle_entry_time = time.monotonic() - 1.0
+        # Bypass the 2s START debounce by backdating the idle entry time.
+        sm._last_idle_entry_time = time.monotonic() - 3.0
         # Run a single iteration of the watcher body by calling it briefly.
         sm._start_input_thread()
         # Give the daemon thread a moment to consume the scripted START.

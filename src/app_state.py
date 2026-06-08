@@ -410,9 +410,10 @@ class AppStateMachine:
     ``_command_watcher``.
     """
 
-    # Seconds the START button must be debounced before it can open the menu.
+    # Seconds after entering IDLE before START/A can open the menu.
     # Prevents accidental menu activation during gameplay transitions.
-    START_DEBOUNCE_SECONDS = 0.5
+    # Matches the menu's own grace period for consistency.
+    START_DEBOUNCE_SECONDS = 2.0
 
     def __init__(self, matrix, controller, config: dict,
                  shutdown_event: Optional[threading.Event] = None,
@@ -500,18 +501,20 @@ class AppStateMachine:
                     break
 
                 for ev in events:
-                    if ev.button is Button.START and ev.type is EventType.PRESSED:
-                        # Debounce: ignore START presses within 0.5s of entering
+                    if ev.type is EventType.PRESSED and ev.button in (Button.START, Button.A):
+                        # Debounce: ignore presses within grace period of entering
                         # IDLE (prevents accidental menu activation during
                         # gameplay transitions or rapid button mashing).
                         elapsed_since_idle = time.monotonic() - self._last_idle_entry_time
                         if elapsed_since_idle < self.START_DEBOUNCE_SECONDS:
                             logger.debug(
-                                "START debounced (%.2fs < %.2fs)",
-                                elapsed_since_idle, self.START_DEBOUNCE_SECONDS,
+                                "%s debounced (%.2fs < %.2fs)",
+                                ev.button.value, elapsed_since_idle,
+                                self.START_DEBOUNCE_SECONDS,
                             )
                             break
-                        logger.info("START pressed during demo -> requesting MENU")
+                        logger.info("%s pressed during demo -> requesting MENU",
+                                    ev.button.value)
                         self._menu_requested.set()
                         request_stop()
                         break
