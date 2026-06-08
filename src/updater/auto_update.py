@@ -545,13 +545,112 @@ class AutoUpdater:
         except subprocess.TimeoutExpired:
             logger.error("Timed out installing %s", package)
 
+    def _reinstall_service_files(self):
+        """Re-install systemd service files from the repo if they've changed.
+
+        Copies service/timer files to /etc/systemd/system/ with path
+        substitution for the actual project root and current user.
+        This ensures service file updates in the repo take effect.
+        """
+        import getpass
+        import shutil
+
+        services_dir = os.path.join(self.project_root, "services")
+        if not os.path.isdir(services_dir):
+            return
+
+        actual_user = os.environ.get("USER", getpass.getuser())
+        service_files = [
+            "led-matrix.service",
+            "led-matrix-updater.service",
+            "led-matrix-updater.timer",
+        ]
+
+        for svc_file in service_files:
+            src_path = os.path.join(services_dir, svc_file)
+            dst_path = f"/etc/systemd/system/{svc_file}"
+
+            if not os.path.exists(src_path):
+                continue
+
+            try:
+                # Read template
+                with open(src_path, "r") as f:
+                    content = f.read()
+
+                # Substitute paths and user
+                content = content.replace("/home/ryn/LED_MATRIX-Project", self.project_root)
+                content = content.replace("User=ryn", f"User={actual_user}")
+                content = content.replace("Group=ryn", f"Group={actual_user}")
+
+                # Check if it differs from installed version
+                try:
+                    with open(dst_path, "r") as f:
+                        current = f.read()
+                    if current == content:
+                        continue  # No change needed
+                except (FileNotFoundError, PermissionError):
+                    pass
+
+                # Write updated service file
+                with open(dst_path, "w") as f:
+                    f.write(content)
+                logger.info("Updated service file: %s", svc_file)
+
+            except PermissionError:
+                # Try with sudo
+                try:
+                    proc = subprocess.run(
+                        ["sudo", "cp", src_path, dst_path],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if proc.returncode == 0:
+                        # Apply sed substitutions via sudo
+                        subprocess.run(
+                            ["sudo", "sed", "-i",
+                             f"s|/home/ryn/LED_MATRIX-Project|{self.project_root}|g",
+                             dst_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        subprocess.run(
+                            ["sudo", "sed", "-i",
+                             f"s|User=ryn|User={actual_user}|g",
+                             dst_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        subprocess.run(
+                            ["sudo", "sed", "-i",
+                             f"s|Group=ryn|Group={actual_user}|g",
+                             dst_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        logger.info("Updated service file (via sudo): %s", svc_file)
+                except Exception as e:
+                    logger.warning("Could not update service file %s: %s", svc_file, e)
+            except Exception as e:
+                logger.warning("Could not update service file %s: %s", svc_file, e)
+
+        # Reload systemd daemon to pick up changes
+        try:
+            subprocess.run(
+                ["sudo", "systemctl", "daemon-reload"],
+                capture_output=True, text=True, timeout=15
+            )
+            logger.info("Systemd daemon reloaded")
+        except Exception as e:
+            logger.warning("Could not reload systemd daemon: %s", e)
+
     def restart_display_service(self):
         """
         Restart the LED matrix display service via systemd.
+        Also re-installs service files if they've changed.
 
         Returns:
             True if restart commands succeeded, False otherwise.
         """
+        # Re-install service files first (picks up path/user changes)
+        self._reinstall_service_files()
+
         success = True
 
         # Restart display service

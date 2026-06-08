@@ -292,14 +292,14 @@ log_info "Step $STEP/$TOTAL_STEPS: Installing systemd services..."
 
 # Display service (runs as root for GPIO/hardware access)
 cp "$PROJECT_ROOT/services/led-matrix.service" /etc/systemd/system/led-matrix.service
-sed -i "s|/home/pi/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix.service
+sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix.service
 # NOTE: Display service intentionally runs as root (required by rpi-rgb-led-matrix for GPIO)
 
 # Updater service
 cp "$PROJECT_ROOT/services/led-matrix-updater.service" /etc/systemd/system/led-matrix-updater.service
-sed -i "s|/home/pi/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix-updater.service
-sed -i "s|User=pi|User=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
-sed -i "s|Group=pi|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
+sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix-updater.service
+sed -i "s|User=ryn|User=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
+sed -i "s|Group=ryn|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
 
 # Updater timer
 cp "$PROJECT_ROOT/services/led-matrix-updater.timer" /etc/systemd/system/led-matrix-updater.timer
