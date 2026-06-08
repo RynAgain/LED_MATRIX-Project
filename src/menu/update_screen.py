@@ -29,11 +29,15 @@ INFO_COLOR = (150, 150, 160)
 
 
 def run_force_update(matrix) -> None:
-    """Show update UI and trigger the updater service.
+    """Show update UI, pull latest code, and restart the display service.
 
-    This function blocks for ~3 seconds while displaying status messages,
-    then returns. The updater service may restart the display service
-    underneath — that's expected and fine.
+    This function:
+    1. Shows "UPDATING..." on the matrix
+    2. Runs git fetch + git reset --hard (guaranteed to get latest code)
+    3. Restarts the display service (which shows the boot screen)
+
+    If no network or git fails, falls back to just restarting the service
+    so the user at least gets a fresh start.
     """
     _show_message(matrix, "UPDATING...", TEXT_COLOR)
 
@@ -44,23 +48,52 @@ def run_force_update(matrix) -> None:
         time.sleep(1.5)
         return
 
-    # Trigger the updater service.
+    import os
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    # Step 1: Force pull latest code (git fetch + reset --hard)
+    _show_message(matrix, "PULLING...", TEXT_COLOR)
+    try:
+        # Fetch latest
+        subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=project_root,
+            capture_output=True, text=True, timeout=30
+        )
+        # Hard reset to remote (guaranteed to sync)
+        result = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"],
+            cwd=project_root,
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            _show_message(matrix, "UPDATED!", (50, 255, 50))
+        else:
+            _show_message(matrix, "PULL FAIL", (255, 150, 50), sub="RESTARTING")
+    except Exception as e:
+        logger.warning("Git pull failed during force update: %s", e)
+        _show_message(matrix, "GIT ERROR", (255, 150, 50), sub="RESTARTING")
+
+    time.sleep(1.5)
+
+    # Step 2: Always restart the display service (shows boot screen)
+    _show_message(matrix, "RESTARTING..", TEXT_COLOR)
+    time.sleep(0.5)
+
     try:
         subprocess.Popen(
-            ["sudo", "systemctl", "start", "led-matrix-updater.service"],
+            ["sudo", "systemctl", "restart", "led-matrix.service"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     except Exception as e:
-        logger.warning("Failed to trigger updater: %s", e)
-        _show_message(matrix, "UPDATE FAIL", (255, 80, 80))
+        logger.warning("Failed to restart display service: %s", e)
+        _show_message(matrix, "RESTART FAIL", (255, 80, 80))
         time.sleep(2.0)
         return
 
-    # Give the service a moment to start.
-    time.sleep(2.0)
-    _show_message(matrix, "RESTARTING..", TEXT_COLOR)
-    time.sleep(1.5)
+    # Give systemd a moment to kill us (we're the display service being restarted)
+    time.sleep(5.0)
 
 
 def _show_message(matrix, text: str, color, sub: str | None = None) -> None:
