@@ -136,12 +136,14 @@ class MenuSystem:
         self._registry = build_menu_registry(self._playable)
         self._stack = [[build_main_menu(), 0]]
 
-        # The user pressed START to open the menu, so START is likely still held.
-        # We must ignore START until it has been released at least once, otherwise
-        # the menu immediately closes on the first frame (wants_quit sees START
-        # held and returns True, or _handle_events sees a START PRESSED edge).
-        # In test mode (fps=0), START is never physically held so arm immediately.
+        # The user pressed START to open the menu, so START is likely still held
+        # or bouncing. We use BOTH a time-based grace period AND a release gate:
+        # - Ignore ALL START events for 2 seconds after menu opens (grace period)
+        # - After grace period, also require a RELEASED before honoring PRESSED
+        # In test mode (fps=0), bypass both gates since there's no physical button.
         self._start_armed = (self._frame_dt == 0.0)
+        self._menu_open_time = time.time()
+        self._start_grace_seconds = 2.0  # Ignore START for 2s after menu opens
 
         self._render(matrix)
         while True:
@@ -157,7 +159,7 @@ class MenuSystem:
             if result is not None:
                 return result
 
-            # Only check wants_quit after START has been released and re-pressed.
+            # Only check wants_quit after grace period AND START release.
             if self._start_armed and wants_quit(controller):
                 # Quit gesture from the menu resumes to idle (mirrors in-game UX
                 # where the combo backs out one level).
@@ -182,9 +184,15 @@ class MenuSystem:
             # Track START release so we know when it's safe to accept START
             # as a "close menu" action. Without this, the START press that
             # *opened* the menu would immediately close it.
-            if btn is Button.START and is_release:
-                self._start_armed = True
-                continue
+            # Also enforce the grace period — ignore ALL START events for
+            # the first 2 seconds after menu opens (handles button bounce).
+            if btn is Button.START:
+                in_grace = (time.time() - self._menu_open_time) < self._start_grace_seconds
+                if in_grace:
+                    continue  # Swallow all START events during grace period
+                if is_release:
+                    self._start_armed = True
+                    continue
 
             # UP/DOWN: honor PRESSED and REPEAT for smooth held auto-scroll.
             if btn is Button.UP and (is_press or is_repeat):
