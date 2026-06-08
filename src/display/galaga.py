@@ -198,15 +198,22 @@ class Ship:
         self.cooldown -= 1
 
     def update(self, aliens, enemy_bullets, diving_aliens):
-        """Smart AI with awareness of diving aliens."""
+        """Smart AI with Y-axis movement for better dodging."""
         if self.invincible > 0:
             self.invincible -= 1
 
-        # --- Phase 1: Dodge incoming threats ---
+        # Y-axis bounds: can move up to dodge, but not too far from home
+        y_home = HEIGHT - 5
+        y_min = HEIGHT - 18  # Can move up 13 pixels to dodge
+        y_max = HEIGHT - 3
+
+        # --- Phase 1: Dodge incoming threats (X and Y movement) ---
         danger_x_range = 5
-        danger_y_range = 20
+        danger_y_range = 22
         nearest_threat = None
         nearest_threat_dist = float('inf')
+        threat_x = 0
+        threat_y = 0
 
         # Check enemy bullets
         for b in enemy_bullets:
@@ -216,6 +223,8 @@ class Ship:
                 if dist < nearest_threat_dist:
                     nearest_threat_dist = dist
                     nearest_threat = (bx, by)
+                    threat_x = bx
+                    threat_y = by
 
         # Check diving aliens (they're threats too!)
         for a in diving_aliens:
@@ -224,13 +233,23 @@ class Ship:
                 if dist < nearest_threat_dist:
                     nearest_threat_dist = dist
                     nearest_threat = (a.x, a.y)
+                    threat_x = a.x
+                    threat_y = a.y
 
         if nearest_threat is not None:
+            # Dodge horizontally
             bx = nearest_threat[0]
             if bx <= self.x:
                 self.x = min(WIDTH - 3, self.x + 2)
             else:
                 self.x = max(2, self.x - 2)
+
+            # Dodge vertically — move away from the threat's trajectory
+            # If threat is very close (< 10px), move up aggressively
+            if nearest_threat_dist < 10:
+                self.y = max(y_min, self.y - 2)
+            elif nearest_threat_dist < 15:
+                self.y = max(y_min, self.y - 1)
         elif aliens:
             # --- Phase 2: Target lowest/diving alien ---
             # Prefer targeting diving aliens (they're more dangerous)
@@ -245,6 +264,17 @@ class Ship:
                 self.x = max(2, self.x - 1)
             elif target.x > self.x:
                 self.x = min(WIDTH - 3, self.x + 1)
+
+            # Drift back toward home Y when not dodging
+            if self.y < y_home:
+                self.y = min(y_home, self.y + 1)
+        else:
+            # No threats, no aliens — return to home position
+            if self.y < y_home:
+                self.y = min(y_home, self.y + 1)
+
+        # Clamp Y position
+        self.y = max(y_min, min(y_max, self.y))
 
         # --- Phase 3: Fire ---
         self.shoot()
