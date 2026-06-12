@@ -200,6 +200,11 @@
       "name": "hail_mary_clock",
       "type": "utility",
       "enabled": false
+    },
+    {
+      "name": "album_art",
+      "type": "utility",
+      "enabled": true
     }
   ]
 }
