@@ -95,8 +95,8 @@ ENEMY_PALETTES = [(220, 50, 50), (50, 160, 255), (255, 200, 40),
 
 class _Ship:
     """The player's Arwing."""
-    MAX_X = 12
-    MAX_Y = 6
+    MAX_X = 20         # Ship can reach full lateral range on 64px screen
+    MAX_Y = 16         # Ship can reach enemies anywhere on the Y axis too
 
     # Physics: momentum/inertia so the ship feels weighty like real Star Fox
     FRICTION = 0.87    # velocity decay (< 1 = drift after releasing input)
@@ -123,7 +123,7 @@ class _Ship:
         self.vx += dx * self.ACCEL
         self.vy += dy * self.ACCEL
         self.vx = max(-self.MAX_VEL, min(self.MAX_VEL, self.vx))
-        self.vy = max(-self.MAX_VEL * 0.5, min(self.MAX_VEL * 0.5, self.vy))
+        self.vy = max(-self.MAX_VEL, min(self.MAX_VEL, self.vy))  # Full vertical speed too
         # Bank angle tracks velocity (ship tilts as it slides)
         self.bank = max(-1.5, min(1.5, self.vx * 0.55))
 
@@ -155,8 +155,9 @@ class _Ship:
         # Friction: velocity decays (gives inertia/drift feel)
         self.vx *= self.FRICTION
         self.vy *= self.FRICTION
-        # Slight gravity pulling ship back to vertical center
-        self.vy -= self.y * 0.02
+        # Very slight gravity pulling ship back toward center (subtle, not aggressive)
+        self.vy -= self.y * 0.005
+        self.vx -= self.x * 0.003
         # Barrel roll
         if self.barrel_rolling:
             self.barrel_roll += 0.3
@@ -175,7 +176,8 @@ class _Ship:
 
     @property
     def screen_y(self):
-        return int(HEIGHT - 13 + self.y + math.sin(time.time() * 2.5) * 0.8)
+        # Ship moves freely across the play area (no forced idle bob)
+        return int(HEIGHT - 16 + self.y)
 
     def draw(self, draw_ctx, frame):
         sx, sy = self.screen_x, self.screen_y
@@ -243,8 +245,8 @@ class _Enemy:
 
     def __init__(self, behavior=0, offset=(0, 0)):
         self.z = 14.0 + random.uniform(0, 3)
-        self.x = random.uniform(-2.5, 2.5) + offset[0]
-        self.y = random.uniform(-0.8, 0.5) + offset[1]
+        self.x = random.uniform(-3.0, 3.0) + offset[0]
+        self.y = random.uniform(-2.0, 1.5) + offset[1]  # Full vertical spread
         self.speed = random.uniform(0.09, 0.14)
         self.behavior = behavior
         self.color = random.choice(ENEMY_PALETTES)
@@ -391,11 +393,11 @@ class _Laser:
 
     def update(self):
         # Move toward vanishing point (CX, HORIZON_Y) from ship position
-        # Lasers converge inward and fly "into" the screen
+        # Lasers converge both X and Y toward the center vanishing point
         self.y -= self.speed
-        # Converge toward center x as they go up (perspective)
-        self.x += (CX - self.x) * 0.08
-        self.life -= 0.06
+        # Converge X and Y toward vanishing point (perspective)
+        self.x += (CX - self.x) * 0.07
+        self.life -= 0.055
         self.speed *= 1.02
 
     def is_dead(self):
@@ -962,10 +964,11 @@ def run(matrix, duration=60, controller=None):
                     draw.point((random.randint(0, WIDTH - 1), random.randint(0, HEIGHT - 1)), fill=(255, 255, 255))
 
             # Aim target for HUD
-            # Reticle is where the ship is pointing (straight forward convergence)
-            # In Star Fox, the crosshair tracks with the ship — it IS the cursor
-            reticle_pos = (ship.screen_x, HORIZON_Y + 5)
-            _draw_hud(draw, frame, ship, reticle_pos, score, callout, firing_this_frame)
+            # Reticle shows where shots converge (between ship and vanishing point)
+            # It moves with the ship but partway toward center (perspective)
+            reticle_x = int(ship.screen_x * 0.6 + CX * 0.4)
+            reticle_y = int(ship.screen_y * 0.3 + (HORIZON_Y + 5) * 0.7)
+            _draw_hud(draw, frame, ship, (reticle_x, reticle_y), score, callout, firing_this_frame)
 
             if ship.alive:
                 ship.draw(draw, frame)
