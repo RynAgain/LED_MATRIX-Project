@@ -33,24 +33,28 @@ fi
 
 log "Starting update..."
 
-# Step 1: git pull (simple, clean)
-log "Running git pull..."
-PULL_OUTPUT=$(git pull 2>&1)
-PULL_EXIT=$?
+# Always use fetch + reset --hard (guaranteed to work even with local changes)
+# A plain 'git pull' fails when ANY tracked file has local modifications,
+# which happens constantly (config.json gets modified by carousel toggles).
+log "Running git fetch origin main..."
+git fetch origin main 2>&1 | tee -a "$LOG_FILE"
+FETCH_EXIT=$?
 
-if [ $PULL_EXIT -eq 0 ]; then
-    log "git pull OK: $PULL_OUTPUT"
-else
-    log "git pull failed (exit $PULL_EXIT): $PULL_OUTPUT"
-    log "Trying git fetch + reset --hard..."
-    git fetch origin main 2>&1 | tee -a "$LOG_FILE"
-    git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
-    if [ $? -ne 0 ]; then
-        log "ERROR: Both pull and reset failed. Manual intervention needed."
-        exit 1
-    fi
-    log "Hard reset succeeded"
+if [ $FETCH_EXIT -ne 0 ]; then
+    log "ERROR: git fetch failed (exit $FETCH_EXIT). No network?"
+    exit 1
 fi
+
+log "Running git reset --hard origin/main..."
+git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
+RESET_EXIT=$?
+
+if [ $RESET_EXIT -ne 0 ]; then
+    log "ERROR: git reset --hard failed (exit $RESET_EXIT)."
+    exit 1
+fi
+
+log "Code updated to latest origin/main"
 
 # Step 2: Install/update dependencies if requirements.txt changed
 if git diff HEAD~1 --name-only 2>/dev/null | grep -q "requirements.txt"; then
