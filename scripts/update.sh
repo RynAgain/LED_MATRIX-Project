@@ -1,66 +1,82 @@
 #!/bin/bash
 # LED Matrix Project - Update Script
-# Called by led-matrix-updater.timer via led-matrix-updater.service
-# Checks GitHub for changes and applies updates.
+# Called by led-matrix-updater.timer OR manually.
+# Simply: git pull, install deps if requirements changed, restart service.
 
-# NOTE: Do NOT use 'set -e' here — it causes silent script abortion when
-# pipeline commands (tee, wifi check) return non-zero. We use explicit
-# error checking where needed instead.
-set -o pipefail
-
-# Determine project root (parent of scripts/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_PYTHON="$PROJECT_ROOT/venv/bin/python3"
 LOG_FILE="$PROJECT_ROOT/logs/updater.log"
 
-# Ensure logs directory exists
 mkdir -p "$PROJECT_ROOT/logs"
 
 log() {
-    local msg="$(date '+%Y-%m-%d %H:%M:%S') [UPDATE] $1"
-    echo "$msg" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [UPDATE] $1" | tee -a "$LOG_FILE"
 }
-
-# Clean stale git locks before anything else
-LOCK_FILE="$PROJECT_ROOT/.git/index.lock"
-if [ -f "$LOCK_FILE" ]; then
-    LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0) ))
-    if [ "$LOCK_AGE" -gt 600 ]; then
-        rm -f "$LOCK_FILE"
-        log "Removed stale git lock file (age: ${LOCK_AGE}s)"
-    fi
-fi
 
 # Use venv python if available, fallback to system python
 if [ ! -f "$VENV_PYTHON" ]; then
     VENV_PYTHON="python3"
-    log "Virtual environment not found, using system Python"
 fi
 
-log "Starting update check..."
+cd "$PROJECT_ROOT" || { log "ERROR: Cannot cd to $PROJECT_ROOT"; exit 1; }
 
-# Ensure WiFi connectivity first
-log "Checking WiFi connectivity..."
-"$VENV_PYTHON" -m src.wifi.manager connect 2>&1 | tee -a "$LOG_FILE" || {
-    log "WARNING: WiFi connection check failed, attempting update anyway"
-}
+# Remove stale git lock if older than 5 minutes
+LOCK_FILE="$PROJECT_ROOT/.git/index.lock"
+if [ -f "$LOCK_FILE" ]; then
+    LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0) ))
+    if [ "$LOCK_AGE" -gt 300 ]; then
+        rm -f "$LOCK_FILE"
+        log "Removed stale git lock (age: ${LOCK_AGE}s)"
+    fi
+fi
 
-# Run the auto-updater
-cd "$PROJECT_ROOT"
-"$VENV_PYTHON" -m src.updater.auto_update update 2>&1 | tee -a "$LOG_FILE"
-EXIT_CODE=${PIPESTATUS[0]}
+log "Starting update..."
 
-if [ $EXIT_CODE -eq 0 ]; then
-    log "Update applied successfully"
+# Step 1: git pull (simple, clean)
+log "Running git pull..."
+PULL_OUTPUT=$(git pull 2>&1)
+PULL_EXIT=$?
+
+if [ $PULL_EXIT -eq 0 ]; then
+    log "git pull OK: $PULL_OUTPUT"
 else
-    log "No update needed or update failed (exit code: $EXIT_CODE)"
+    log "git pull failed (exit $PULL_EXIT): $PULL_OUTPUT"
+    log "Trying git fetch + reset --hard..."
+    git fetch origin main 2>&1 | tee -a "$LOG_FILE"
+    git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
+    if [ $? -ne 0 ]; then
+        log "ERROR: Both pull and reset failed. Manual intervention needed."
+        exit 1
+    fi
+    log "Hard reset succeeded"
 fi
 
-# Rotate log if it's too large (> 5MB)
-if [ -f "$LOG_FILE" ] && [ $(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0) -gt 5242880 ]; then
-    mv "$LOG_FILE" "$LOG_FILE.old"
-    log "Log rotated"
+# Step 2: Install/update dependencies if requirements.txt changed
+if git diff HEAD~1 --name-only 2>/dev/null | grep -q "requirements.txt"; then
+    log "requirements.txt changed, updating dependencies..."
+    $VENV_PYTHON -m pip install -r requirements.txt --quiet 2>&1 | tee -a "$LOG_FILE"
 fi
 
+# Step 3: Restart the display service
+log "Restarting led-matrix.service..."
+sudo systemctl restart led-matrix.service
+RESTART_EXIT=$?
+
+if [ $RESTART_EXIT -eq 0 ]; then
+    log "Service restarted successfully"
+else
+    log "WARNING: Service restart failed (exit $RESTART_EXIT)"
+fi
+
+# Rotate log if too large (> 2MB)
+if [ -f "$LOG_FILE" ]; then
+    LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "$LOG_SIZE" -gt 2097152 ]; then
+        mv "$LOG_FILE" "$LOG_FILE.old"
+        log "Log rotated"
+    fi
+fi
+
+log "Update complete"
 exit 0

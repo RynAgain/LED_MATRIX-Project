@@ -16,6 +16,7 @@ SyslogIdentifier=led-matrix-updater
 
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/ryn/LED_MATRIX-Project
+Environment=HOME=/home/ryn
 
 [Install]
 WantedBy=multi-user.target
