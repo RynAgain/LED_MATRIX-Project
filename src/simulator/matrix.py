@@ -186,25 +186,34 @@ class _SimulatorWindow:
         return events
 
     def render(self, pixel_buffer, brightness=100):
-        """Render the pixel buffer to the pygame window."""
+        """Render the pixel buffer to the pygame window.
+
+        On Windows, ``pygame.event.get()`` only returns events when called from
+        the thread that created the display surface. When features run in a
+        background thread (via the watchdog), this method is called from that
+        thread and event collection would yield nothing. Instead, we only pump
+        events here when we ARE on the main thread; otherwise we rely on the
+        main-thread's periodic ``pump_events()`` call (driven by
+        ``_pump_main_thread_events`` in ``src/main.py``) to collect events.
+        """
         if not PYGAME_AVAILABLE or not self._initialized:
             return
 
-        # Collect ALL pygame events from the main thread and buffer them
-        # for the Controller's background thread to consume via drain_events().
-        # This is required on Windows where pygame events can only be received
-        # from the thread that created the display.
-        all_events = pygame.event.get()
-        non_quit = []
-        for event in all_events:
-            if event.type == pygame.QUIT:
-                self._running = False
-                return
-            non_quit.append(event)
+        # Only pump events from the main thread (Windows SDL requirement).
+        # From background threads, skip event collection — the main thread's
+        # periodic pump_events() will handle it.
+        if threading.current_thread() is threading.main_thread():
+            all_events = pygame.event.get()
+            non_quit = []
+            for event in all_events:
+                if event.type == pygame.QUIT:
+                    self._running = False
+                    return
+                non_quit.append(event)
 
-        if non_quit:
-            with self._event_lock:
-                self._event_buffer.extend(non_quit)
+            if non_quit:
+                with self._event_lock:
+                    self._event_buffer.extend(non_quit)
 
         if not self._running:
             return

@@ -57,6 +57,12 @@ def _check_internet(timeout=3):
 def _run_feature_with_watchdog(feature_callable, duration, feature_name):
     """Run a feature with a watchdog timeout. Returns True if completed normally.
 
+    On Windows, pygame requires the main thread to pump the Win32 message queue.
+    If we simply block on ``thread.join()`` the window goes "Not Responding" and
+    keyboard events are lost. Instead we join in short bursts, pumping pygame
+    events between each burst so the window stays responsive and the controller
+    receives keyboard input.
+
     Args:
         feature_callable: A no-arg callable (closure) that runs the feature.
         duration: The configured duration, used to derive the watchdog timeout.
@@ -66,16 +72,49 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
 
     thread = threading.Thread(target=feature_callable, daemon=True)
     thread.start()
-    thread.join(timeout=timeout)
+
+    # Instead of blocking on thread.join(timeout), poll in short intervals
+    # so the main thread can pump the pygame event queue (keeping the window
+    # responsive on Windows and collecting keyboard events for the controller).
+    _PUMP_INTERVAL = 0.05  # 50ms = 20 pumps/sec — responsive without busy-waiting
+    deadline = time.time() + timeout
+    while thread.is_alive() and time.time() < deadline:
+        _pump_main_thread_events()
+        thread.join(timeout=_PUMP_INTERVAL)
 
     if thread.is_alive():
         logger.warning("Watchdog: %s hung after %ds, forcing stop", feature_name, timeout)
         request_stop()
-        thread.join(timeout=5)  # Give it 5 more seconds after stop request
+        # Give it 5 more seconds after stop request, still pumping events.
+        kill_deadline = time.time() + 5
+        while thread.is_alive() and time.time() < kill_deadline:
+            _pump_main_thread_events()
+            thread.join(timeout=_PUMP_INTERVAL)
         if thread.is_alive():
             logger.error("Watchdog: %s did not respond to stop request", feature_name)
         return False
     return True
+
+
+def _pump_main_thread_events():
+    """Pump the pygame event queue from the main thread.
+
+    This MUST be called from the main thread to satisfy the Windows/SDL
+    requirement that only the thread that created the display surface can
+    receive window messages. Pumped events are deposited into the simulator's
+    event buffer where the Controller's ``poll_events()`` can retrieve them.
+
+    On the Pi (real rgbmatrix, no simulator window) this is a no-op.
+    """
+    try:
+        from src.simulator.matrix import _SimulatorWindow, PYGAME_AVAILABLE
+        if not PYGAME_AVAILABLE:
+            return
+        window = _SimulatorWindow._instance
+        if window is not None and window._initialized:
+            window.pump_events()
+    except (ImportError, AttributeError):
+        pass
 
 
 # Project root is one level up from this file

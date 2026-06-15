@@ -85,7 +85,7 @@ class AppMode(Enum):
 # Playable games (CONTROLLER_OVERHAUL.md §4.2). Single source of truth for which
 # features the menu may launch interactively. Adding a game later is one line.
 # ---------------------------------------------------------------------------
-PLAYABLE_GAMES = {"snake", "tetris", "pong"}
+PLAYABLE_GAMES = {"snake", "tetris", "pong", "starfox"}
 
 
 # ---------------------------------------------------------------------------

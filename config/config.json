@@ -1,6 +1,6 @@
 {
   "github_branch": "main",
-  "display_duration": 35,
+  "display_duration": 60,
   "log_level": "DEBUG",
   "matrix_hardware": {
     "rows": 64,
@@ -204,6 +204,11 @@
     {
       "name": "album_art",
       "type": "utility",
+      "enabled": true
+    },
+    {
+      "name": "starfox",
+      "type": "game",
       "enabled": true
     }
   ]
