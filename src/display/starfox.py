@@ -98,9 +98,16 @@ class _Ship:
     MAX_X = 12
     MAX_Y = 6
 
+    # Physics: momentum/inertia so the ship feels weighty like real Star Fox
+    FRICTION = 0.87    # velocity decay (< 1 = drift after releasing input)
+    ACCEL = 0.4        # how fast input accelerates the ship
+    MAX_VEL = 2.8      # top sliding speed
+
     def __init__(self):
-        self.x = 0.0       # lateral offset from center (-MAX_X..MAX_X)
-        self.y = 0.0       # vertical offset (-MAX_Y..MAX_Y)
+        self.x = 0.0       # lateral position
+        self.y = 0.0       # vertical position
+        self.vx = 0.0      # velocity (momentum)
+        self.vy = 0.0
         self.bank = 0.0    # visual bank angle
         self.barrel_roll = 0.0
         self.barrel_rolling = False
@@ -112,11 +119,13 @@ class _Ship:
         self.alive = True
 
     def move(self, dx, dy):
-        """Move ship by dx, dy (clamped)."""
-        self.x = max(-self.MAX_X, min(self.MAX_X, self.x + dx))
-        self.y = max(-self.MAX_Y, min(self.MAX_Y, self.y + dy))
-        # Bank visually based on lateral movement
-        self.bank = max(-1.2, min(1.2, self.bank + dx * 0.15))
+        """Apply input as acceleration (ship has momentum/inertia)."""
+        self.vx += dx * self.ACCEL
+        self.vy += dy * self.ACCEL
+        self.vx = max(-self.MAX_VEL, min(self.MAX_VEL, self.vx))
+        self.vy = max(-self.MAX_VEL * 0.5, min(self.MAX_VEL * 0.5, self.vy))
+        # Bank angle tracks velocity (ship tilts as it slides)
+        self.bank = max(-1.5, min(1.5, self.vx * 0.55))
 
     def do_barrel_roll(self, direction=1):
         if not self.barrel_rolling and self._roll_cd <= 0:
@@ -137,8 +146,17 @@ class _Ship:
         return False
 
     def update(self, frame):
-        # Decay bank toward 0
-        self.bank *= 0.92
+        # Apply velocity to position (momentum)
+        self.x += self.vx
+        self.y += self.vy
+        # Clamp position
+        self.x = max(-self.MAX_X, min(self.MAX_X, self.x))
+        self.y = max(-self.MAX_Y, min(self.MAX_Y, self.y))
+        # Friction: velocity decays (gives inertia/drift feel)
+        self.vx *= self.FRICTION
+        self.vy *= self.FRICTION
+        # Slight gravity pulling ship back to vertical center
+        self.vy -= self.y * 0.02
         # Barrel roll
         if self.barrel_rolling:
             self.barrel_roll += 0.3
@@ -150,8 +168,6 @@ class _Ship:
         if self.shield_flash > 0:
             self.shield_flash -= 1
         self.boost = max(0, self.boost - 0.03)
-        # Gravity: ship drifts back to center vertically
-        self.y *= 0.97
 
     @property
     def screen_x(self):
@@ -361,33 +377,43 @@ class _Obstacle:
 
 
 class _Laser:
-    def __init__(self, x, y, target_x, target_y):
+    """Laser fires STRAIGHT FORWARD from the ship's position toward the vanishing point.
+
+    In Star Fox, the ship IS the cursor — lasers converge from the ship's screen
+    position toward the center/horizon. You aim by MOVING THE SHIP.
+    """
+    def __init__(self, x, y):
         self.x, self.y = float(x), float(y)
-        self.tx, self.ty = float(target_x), float(target_y)
-        self.speed = 4.5
+        # Converge toward vanishing point (center of horizon)
+        self.start_x = float(x)
+        self.speed = 5.0
         self.life = 1.0
 
     def update(self):
-        dx = self.tx - self.x
-        dy = self.ty - self.y
-        dist = max(1, math.hypot(dx, dy))
-        self.x += (dx / dist) * self.speed
-        self.y += (dy / dist) * self.speed
-        self.life -= 0.05
-        self.speed *= 1.01
+        # Move toward vanishing point (CX, HORIZON_Y) from ship position
+        # Lasers converge inward and fly "into" the screen
+        self.y -= self.speed
+        # Converge toward center x as they go up (perspective)
+        self.x += (CX - self.x) * 0.08
+        self.life -= 0.06
+        self.speed *= 1.02
 
     def is_dead(self):
-        return self.life <= 0 or self.y < 8
+        return self.life <= 0 or self.y < HORIZON_Y - 5
 
     def draw(self, draw_ctx):
         x, y = int(self.x), int(self.y)
         if 0 <= x < WIDTH and 0 <= y < HEIGHT:
             b = max(0.3, self.life)
-            draw_ctx.point((x, y), fill=tuple(int(c * b) for c in LASER_CORE))
+            core = tuple(int(c * b) for c in LASER_CORE)
+            glow = tuple(int(c * b * 0.5) for c in LASER_GLOW)
+            draw_ctx.point((x, y), fill=core)
             if y + 1 < HEIGHT:
-                draw_ctx.point((x, y + 1), fill=tuple(int(c * b) for c in LASER_CORE))
+                draw_ctx.point((x, y + 1), fill=core)
             if y + 2 < HEIGHT:
-                draw_ctx.point((x, y + 2), fill=tuple(int(c * b * 0.5) for c in LASER_GLOW))
+                draw_ctx.point((x, y + 2), fill=glow)
+            if y + 3 < HEIGHT:
+                draw_ctx.point((x, y + 3), fill=glow)
 
 
 class _EnemyLaser:
@@ -502,11 +528,23 @@ class _StarField:
 # ===========================================================================
 
 class _AI:
-    """Intelligent autopilot that plays like a skilled human."""
+    """Plays Star Fox like a skilled human: positions ship over enemies to aim.
+
+    In Star Fox, the ship IS the cursor. Lasers go straight forward from where
+    the ship is. So aiming means MOVING THE SHIP onto the enemy's screen
+    position, then firing a burst. A good player:
+    - Snaps aggressively to the nearest enemy's screen position
+    - Fires rapidly while lined up
+    - Breaks away to dodge incoming fire (barrel roll)
+    - Slides through rings for bonus points
+    - Moves with purpose — always heading toward a target
+    """
 
     def __init__(self):
         self._dodge_cd = 0
-        self._fire_cd = 0
+        self._current_target = None  # screen (x, y) we're sliding toward
+        self._on_target_frames = 0   # how many frames we've been lined up
+        self._target_switch_cd = 0   # cooldown before picking new target
 
     def decide(self, ship, enemies, obstacles, enemy_lasers, bank_offset, frame):
         """Returns (dx, dy, fire, roll_dir_or_0)."""
@@ -514,56 +552,76 @@ class _AI:
         fire = False
         roll = 0
 
-        # Priority 1: Barrel roll to dodge incoming fire
+        sx = ship.screen_x
+        sy = ship.screen_y
+
+        # --- Barrel roll to dodge incoming fire (highest priority) ---
         if self._dodge_cd > 0:
             self._dodge_cd -= 1
         incoming = [el for el in enemy_lasers
-                    if el.y > HEIGHT * 0.45 and abs(el.x - ship.screen_x) < 10]
+                    if el.y > HEIGHT * 0.4 and abs(el.x - sx) < 8]
         if incoming and not ship.barrel_rolling and self._dodge_cd <= 0:
             threat_x = sum(el.x for el in incoming) / len(incoming)
-            roll = 1 if threat_x > ship.screen_x else -1
-            self._dodge_cd = 50
+            roll = 1 if threat_x > sx else -1
+            self._dodge_cd = 60
+            return dx, dy, fire, roll  # Don't aim while rolling
 
-        # Priority 2: Fly through rings
-        rings = [o for o in obstacles if o.kind in ("ring", "arch") and 2 < o.z < 6 and not o.passed]
-        if rings:
-            target = min(rings, key=lambda o: o.z)
-            desired_x = target.x * 4
-            diff = desired_x - ship.x
-            dx = max(-1.5, min(1.5, diff * 0.2))
-        else:
-            # Priority 3: Dodge pylons
-            pylons = [o for o in obstacles if o.kind == "pylon" and 1.5 < o.z < 4.5]
-            if pylons:
-                nearest = min(pylons, key=lambda o: o.z)
-                if abs(nearest.x * 4 - ship.x) < 6:
-                    dx = 1.5 if nearest.x > 0 else -1.5
-            else:
-                # Priority 4: Track enemies
-                alive = [e for e in enemies if e.alive and 2 < e.z < 9]
-                if alive:
-                    target = min(alive, key=lambda e: e.z)
-                    sp = target.screen_pos(bank_offset)
-                    if sp:
-                        diff = (sp[0] - ship.screen_x) * 0.12
-                        dx = max(-1.2, min(1.2, diff))
+        # --- Pick a target to slide toward ---
+        # Prefer enemies (since that's the core gameplay)
+        alive = [e for e in enemies if e.alive and 1.5 < e.z < 10]
+        rings = [o for o in obstacles if o.kind in ("ring", "arch") and 1.5 < o.z < 5 and not o.passed]
+        pylons = [o for o in obstacles if o.kind == "pylon" and 1.0 < o.z < 3.5]
+
+        target_x, target_y = CX, CY - 5  # Default: center/forward
+
+        if alive:
+            # Target the nearest enemy — snap ship to their screen pos
+            nearest = min(alive, key=lambda e: e.z)
+            sp = nearest.screen_pos(bank_offset)
+            if sp:
+                target_x, target_y = sp
+        elif rings:
+            # Fly through nearest ring
+            ring = min(rings, key=lambda o: o.z)
+            target_x = CX + int(ring.x * (30.0 / ring.z))
+            target_y = CY - 5
+
+        # --- Dodge pylons (override target if about to hit one) ---
+        for pylon in pylons:
+            pylon_sx = CX + int(pylon.x * (30.0 / pylon.z))
+            if abs(pylon_sx - sx) < 8:
+                # Pylon in our path! Dodge to the side with more room
+                target_x = pylon_sx + (20 if pylon.x < 0 else -20)
+                break
+
+        # --- Slide ship toward target (this IS aiming in Star Fox) ---
+        diff_x = target_x - sx
+        diff_y = target_y - sy
+
+        # Aggressive movement — a skilled player snaps to targets fast
+        dx = max(-2.2, min(2.2, diff_x * 0.18))
+        dy = max(-0.8, min(0.8, diff_y * 0.08))
+
+        # --- Fire when lined up with an enemy ---
+        if alive:
+            nearest = min(alive, key=lambda e: e.z)
+            sp = nearest.screen_pos(bank_offset)
+            if sp:
+                dist_to_target = math.hypot(sx - sp[0], sy - sp[1])
+                # Fire when close to lined up (generous — skilled players spam fire while sliding)
+                if dist_to_target < 10:
+                    fire = True
+                    self._on_target_frames += 1
                 else:
-                    # Idle sway
-                    dx = math.sin(frame * 0.02) * 0.8
-
-        # Vertical: slight movement
-        dy = math.sin(frame * 0.015) * 0.3
-
-        # Fire at enemies
-        self._fire_cd -= 1
-        alive_enemies = [e for e in enemies if e.alive and e.z > 1.5]
-        if alive_enemies and self._fire_cd <= 0:
-            fire = True
-            self._fire_cd = random.randint(5, 12)
-        elif not alive_enemies and self._fire_cd <= 0:
-            fire = random.random() < 0.05  # Occasional forward shots
-            if fire:
-                self._fire_cd = 15
+                    self._on_target_frames = 0
+                    # Still fire occasionally while sliding toward target (suppressive fire)
+                    if random.random() < 0.15:
+                        fire = True
+        else:
+            # No enemies — occasional forward shots
+            if random.random() < 0.04:
+                fire = True
+            self._on_target_frames = 0
 
         return dx, dy, fire, roll
 
@@ -807,17 +865,11 @@ def run(matrix, duration=60, controller=None):
             firing_this_frame = False
             fire_cooldown = max(0, fire_cooldown - 1)
             if want_fire and fire_cooldown <= 0:
-                # Find aim target
-                alive = [e for e in enemies if e.alive and e.z > 1.5]
-                if alive:
-                    t = min(alive, key=lambda e: e.z)
-                    sp = t.screen_pos(bank_offset)
-                    aim = sp if sp else (CX, CY - 10)
-                else:
-                    aim = (CX + int(ship.x * 0.5), CY - 15)
+                # Lasers fire STRAIGHT FORWARD from ship position (ship IS the cursor)
                 sx = ship.screen_x
-                lasers.append(_Laser(sx - 4, ship.screen_y - 7, aim[0], aim[1]))
-                lasers.append(_Laser(sx + 4, ship.screen_y - 7, aim[0], aim[1]))
+                sy = ship.screen_y - 7
+                lasers.append(_Laser(sx - 4, sy))
+                lasers.append(_Laser(sx + 4, sy))
                 fire_cooldown = 4
                 firing_this_frame = True
 
@@ -910,9 +962,10 @@ def run(matrix, duration=60, controller=None):
                     draw.point((random.randint(0, WIDTH - 1), random.randint(0, HEIGHT - 1)), fill=(255, 255, 255))
 
             # Aim target for HUD
-            alive_e = [e for e in enemies if e.alive and e.z > 1.5]
-            aim_sp = min(alive_e, key=lambda e: e.z).screen_pos(bank_offset) if alive_e else None
-            _draw_hud(draw, frame, ship, aim_sp, score, callout, firing_this_frame)
+            # Reticle is where the ship is pointing (straight forward convergence)
+            # In Star Fox, the crosshair tracks with the ship — it IS the cursor
+            reticle_pos = (ship.screen_x, HORIZON_Y + 5)
+            _draw_hud(draw, frame, ship, reticle_pos, score, callout, firing_this_frame)
 
             if ship.alive:
                 ship.draw(draw, frame)
