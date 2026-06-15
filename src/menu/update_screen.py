@@ -72,48 +72,60 @@ def run_force_update(matrix) -> None:
 
     logger.info("Force update: working directory = %s", work_dir)
 
-    # --- Step 1: git pull ---
-    _show_message(matrix, "GIT PULL...", TEXT_COLOR)
+    # --- Step 1: git fetch + reset --hard (ALWAYS works, even with local changes) ---
+    # NOTE: This intentionally does NOT backup/restore config.json.
+    # The new config from GitHub includes new features (like starfox).
+    # User's carousel toggles get reset, but all new features appear immediately.
+    _show_message(matrix, "FETCHING...", TEXT_COLOR)
     time.sleep(0.3)
 
     pull_ok = False
     try:
-        result = subprocess.run(
-            ["git", "pull"],
+        # Remove stale lock file
+        lock_file = os.path.join(work_dir, ".git", "index.lock")
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+                logger.info("Removed stale git lock file")
+            except OSError:
+                pass
+
+        # Fetch latest from origin
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin", "main"],
             cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=60
+            capture_output=True, text=True, timeout=60
         )
-        if result.returncode == 0:
-            output = result.stdout.strip()
-            if "Already up to date" in output:
-                _show_message(matrix, "UP TO DATE", OK_COLOR)
-            else:
-                _show_message(matrix, "UPDATED!", OK_COLOR)
-            pull_ok = True
-            logger.info("git pull succeeded: %s", output[:200])
+        if fetch_result.returncode != 0:
+            logger.error("git fetch failed: %s", fetch_result.stderr.strip()[:200])
+            _show_message(matrix, "FETCH FAIL", ERR_COLOR)
+            time.sleep(2.0)
         else:
-            # git pull failed — try fetch + reset as fallback
-            logger.warning("git pull failed: %s", result.stderr.strip()[:200])
-            _show_message(matrix, "PULL FAIL", WARN_COLOR, sub="TRYING RESET")
-            time.sleep(1.0)
-            pull_ok = _try_hard_reset(matrix, work_dir)
+            # Hard reset to remote (guaranteed to sync regardless of local state)
+            _show_message(matrix, "UPDATING...", TEXT_COLOR)
+            reset_result = subprocess.run(
+                ["git", "reset", "--hard", "origin/main"],
+                cwd=work_dir,
+                capture_output=True, text=True, timeout=15
+            )
+            if reset_result.returncode == 0:
+                _show_message(matrix, "UPDATED!", OK_COLOR)
+                pull_ok = True
+                logger.info("Update succeeded: %s", reset_result.stdout.strip()[:200])
+            else:
+                _show_message(matrix, "RESET FAIL", ERR_COLOR)
+                logger.error("git reset failed: %s", reset_result.stderr.strip()[:200])
     except subprocess.TimeoutExpired:
-        logger.error("git pull timed out after 60s")
-        _show_message(matrix, "TIMEOUT", ERR_COLOR, sub="TRYING RESET")
-        time.sleep(1.0)
-        pull_ok = _try_hard_reset(matrix, work_dir)
+        logger.error("git operation timed out")
+        _show_message(matrix, "TIMEOUT", ERR_COLOR)
     except FileNotFoundError:
-        logger.error("git not found")
+        logger.error("git not found on this system")
         _show_message(matrix, "NO GIT!", ERR_COLOR)
         time.sleep(2.0)
         return
     except Exception as e:
-        logger.error("git pull error: %s", e)
-        _show_message(matrix, "ERROR", ERR_COLOR, sub=str(e)[:10])
-        time.sleep(2.0)
-        pull_ok = False
+        logger.error("Update error: %s", e)
+        _show_message(matrix, "ERROR", ERR_COLOR)
 
     time.sleep(1.0)
 
