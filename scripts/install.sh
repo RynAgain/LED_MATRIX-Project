@@ -293,6 +293,7 @@ log_info "Step $STEP/$TOTAL_STEPS: Installing systemd services..."
 # Display service (runs as root for GPIO/hardware access)
 cp "$PROJECT_ROOT/services/led-matrix.service" /etc/systemd/system/led-matrix.service
 sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix.service
+sed -i "s|HOME=/home/ryn|HOME=$ACTUAL_HOME|g" /etc/systemd/system/led-matrix.service
 # NOTE: Display service intentionally runs as root (required by rpi-rgb-led-matrix for GPIO)
 
 # Updater service
@@ -300,6 +301,7 @@ cp "$PROJECT_ROOT/services/led-matrix-updater.service" /etc/systemd/system/led-m
 sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix-updater.service
 sed -i "s|User=ryn|User=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
 sed -i "s|Group=ryn|Group=$ACTUAL_USER|g" /etc/systemd/system/led-matrix-updater.service
+sed -i "s|HOME=/home/ryn|HOME=$ACTUAL_HOME|g" /etc/systemd/system/led-matrix-updater.service
 
 # Updater timer
 cp "$PROJECT_ROOT/services/led-matrix-updater.timer" /etc/systemd/system/led-matrix-updater.timer
@@ -312,17 +314,50 @@ systemctl enable led-matrix-updater.timer
 log_info "Systemd services installed and enabled"
 
 # ---------------------------------------------------------------------------
+# Sudoers: Allow the updater user to restart services without a password
+# ---------------------------------------------------------------------------
+SUDOERS_FILE="/etc/sudoers.d/led-matrix-updater"
+if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$ACTUAL_USER" "$SUDOERS_FILE" 2>/dev/null; then
+    cat > "$SUDOERS_FILE" <<EOF
+# Allow LED Matrix updater to restart services without password prompt
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart led-matrix.service
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start led-matrix.service
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop led-matrix.service
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/systemd/system/*
+$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sed -i * /etc/systemd/system/*
+EOF
+    chmod 440 "$SUDOERS_FILE"
+    log_info "Sudoers file created: $ACTUAL_USER can restart services without password"
+else
+    log_info "Sudoers file already configured for $ACTUAL_USER"
+fi
+
+# ---------------------------------------------------------------------------
 # Step N+3: Configure WiFi (optional prompt)
 # ---------------------------------------------------------------------------
 STEP=$((STEP + 1))
 log_info "Step $STEP/$TOTAL_STEPS: WiFi configuration..."
 WIFI_CONFIG="$PROJECT_ROOT/config/wifi.json"
+WIFI_EXAMPLE="$PROJECT_ROOT/config/wifi.json.example"
+
+# Create wifi.json from example if it doesn't exist yet
+if [ ! -f "$WIFI_CONFIG" ] && [ -f "$WIFI_EXAMPLE" ]; then
+    cp "$WIFI_EXAMPLE" "$WIFI_CONFIG"
+    chown "$ACTUAL_USER:$ACTUAL_USER" "$WIFI_CONFIG"
+    log_info "Created wifi.json from wifi.json.example"
+fi
 
 if grep -q "YOUR_WIFI_SSID" "$WIFI_CONFIG" 2>/dev/null; then
     echo ""
     log_warn "WiFi is not configured yet."
     echo "  Edit $WIFI_CONFIG to add your WiFi network(s)."
     echo "  For open/public WiFi, leave password as empty string."
+    echo ""
+elif [ ! -f "$WIFI_CONFIG" ]; then
+    echo ""
+    log_warn "No wifi.json found and no example template available."
+    echo "  WiFi management will not be available until config/wifi.json is created."
     echo ""
 fi
 

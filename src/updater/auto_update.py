@@ -348,90 +348,77 @@ class AutoUpdater:
 
     def pull_updates(self):
         """
-        Pull latest changes from remote.
-        Backs up config files to a temp dir, stashes local changes, pulls,
-        pops stash, then restores config files from the temp backup to avoid
-        git merge conflict markers in JSON configs.
+        Apply latest changes from remote to the working tree.
 
         Strategy:
-        1. Try git pull --ff-only (fast path, no divergence)
-        2. If that fails, fall back to git reset --hard origin/{branch}
-           (guaranteed to work when local has diverged)
+        1. Backup config/*.json to a temp dir (user customizations)
+        2. git reset --hard origin/{branch} (guaranteed clean sync)
+        3. Restore config files from backup (preserves user settings)
+
+        We intentionally do NOT use git pull or stash -- hard reset is
+        deterministic and cannot fail due to merge conflicts, diverged
+        branches, or modified tracked files. This matches the update.sh
+        approach and eliminates the most common failure modes.
 
         Returns:
-            True if pull succeeded, False otherwise.
+            True if update succeeded, False otherwise.
         """
         # Backup configs to temp dir BEFORE any git operations
         config_tmp = self._backup_configs()
 
-        # Stash any local changes (e.g., config edits) AND untracked files
-        # that may conflict with incoming tracked files (e.g., rgbmatrix_src/)
-        logger.info("Stashing local changes (including untracked files)...")
-        self._run_git(["stash", "push", "--include-untracked", "-m", "auto-update-stash"])
+        # Hard reset to remote -- guaranteed to sync regardless of local state
+        logger.info("Resetting to origin/%s (hard reset)...", self.branch)
+        result = self._run_git(["reset", "--hard", f"origin/{self.branch}"])
 
-        # Pull changes -- try fast-forward first, fall back to hard reset
-        logger.info("Pulling updates from origin/%s...", self.branch)
-        result = self._run_git(["pull", "origin", self.branch, "--ff-only"])
+        if result and result.returncode == 0:
+            logger.info("Reset succeeded: now at origin/%s", self.branch)
 
-        pull_ok = result and result.returncode == 0
+            # Clean untracked files that might conflict, but preserve user dirs
+            clean_result = self._run_git([
+                "clean", "-fd",
+                "--exclude=config/",
+                "--exclude=logs/",
+                "--exclude=venv/",
+                "--exclude=downloaded_videos/",
+                "--exclude=.update_failures",
+            ])
+            if clean_result and clean_result.returncode == 0:
+                logger.debug("Cleaned untracked files")
 
-        if pull_ok:
-            logger.info("Pull completed (fast-forward): %s", result.stdout.strip())
-        else:
-            # Fast-forward failed -- local branch has diverged from remote.
-            # Fall back to hard reset which is guaranteed to sync with remote.
-            error = result.stderr.strip() if result else "git not available"
-            logger.warning("Fast-forward pull failed: %s", error)
-            logger.info("Falling back to hard reset to origin/%s...", self.branch)
-
-            reset_result = self._run_git(["reset", "--hard", f"origin/{self.branch}"])
-            if reset_result and reset_result.returncode == 0:
-                logger.info("Hard reset succeeded: now at origin/%s", self.branch)
-                pull_ok = True
-            else:
-                reset_error = reset_result.stderr.strip() if reset_result else "git not available"
-                logger.error("Hard reset also failed: %s", reset_error)
-                pull_ok = False
-
-        # Only restore stash if pull/reset succeeded; otherwise leave changes safely stashed
-        if pull_ok:
-            stash_result = self._run_git(["stash", "pop"])
-            if stash_result and stash_result.returncode != 0:
-                # Stash pop failed (conflict) or no stash exists
-                if "No stash entries found" not in (stash_result.stderr or ""):
-                    logger.warning("Stash pop had conflicts: %s", stash_result.stderr.strip())
-                    # Abort the conflicted merge state and drop the stash
-                    self._run_git(["checkout", "--", "."])
-                    self._run_git(["stash", "drop"])
-
-            # After stash pop (whether clean or conflicted), restore config
-            # files from the temp backup. This guarantees no conflict markers
-            # end up in config/*.json -- the user's local configs always win.
-            config_dir = os.path.join(self.project_root, "config")
-            conflict_found = False
-            for fname in os.listdir(config_dir):
-                if fname.endswith(".json"):
-                    fpath = os.path.join(config_dir, fname)
-                    if self._has_conflict_markers(fpath):
-                        logger.warning("Conflict markers detected in %s", fname)
-                        conflict_found = True
-
-            if conflict_found:
-                logger.info("Restoring config files from pre-pull backup to fix conflicts")
-
-            # Always restore from temp backup -- local config takes precedence
+            # Restore config files from pre-reset backup
+            # This preserves user's carousel toggles, API keys, WiFi config, etc.
             self._restore_configs(config_tmp)
+            return True
         else:
-            logger.warning("Both pull and hard reset failed. "
-                           "Run 'git stash pop' manually after resolving the issue.")
-            # Clean up temp dir even on failure
+            error = result.stderr.strip() if result else "git not available"
+            logger.error("Hard reset failed: %s", error)
+
+            # Last resort: try removing index and retrying
+            logger.warning("Attempting index removal recovery...")
+            lock_file = os.path.join(self.project_root, ".git", "index.lock")
+            index_file = os.path.join(self.project_root, ".git", "index")
+            for f in [lock_file, index_file]:
+                if os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+
+            # Retry reset
+            result = self._run_git(["reset", "--hard", f"origin/{self.branch}"])
+            if result and result.returncode == 0:
+                logger.info("Recovery reset succeeded")
+                self._restore_configs(config_tmp)
+                return True
+
+            # Truly failed -- clean up temp dir
+            logger.error("All reset attempts failed. Manual intervention required.")
             import shutil
             try:
                 shutil.rmtree(config_tmp)
             except OSError:
                 pass
-
-        return pull_ok
+            return False
 
     def install_dependencies(self):
         """
@@ -674,16 +661,20 @@ class AutoUpdater:
         return success
 
     def _clean_old_stashes(self):
-        """Drop all stashes if there are more than 5 to prevent disk space issues."""
+        """Drop any legacy stashes left from the old stash-based update strategy.
+
+        The current update strategy uses hard reset + config backup/restore,
+        so stashes are never created. This cleans up any that exist from before.
+        """
         result = self._run_git(["stash", "list"])
         if not result or result.returncode != 0:
             return
 
         stash_lines = [line for line in result.stdout.strip().split("\n") if line]
-        if len(stash_lines) > 5:
-            logger.info("Cleaning %d old stashes (limit: 5)...", len(stash_lines))
+        if stash_lines:
+            logger.info("Clearing %d legacy stashes...", len(stash_lines))
             self._run_git(["stash", "clear"])
-            logger.info("All stashes cleared")
+            logger.info("Legacy stashes cleared")
 
     def check_and_update(self):
         """

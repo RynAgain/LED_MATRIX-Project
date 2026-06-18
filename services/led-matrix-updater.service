@@ -14,9 +14,18 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=led-matrix-updater
 
+# Prevent hanging forever if git or pip gets stuck
+TimeoutStartSec=600
+TimeoutStopSec=30
+
+# Environment for Python and git operations
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/ryn/LED_MATRIX-Project
 Environment=HOME=/home/ryn
+Environment=GIT_TERMINAL_PROMPT=0
+
+# Allow the update script to run sudo systemctl commands
+# (requires /etc/sudoers.d/led-matrix-updater from install.sh)
 
 [Install]
 WantedBy=multi-user.target
