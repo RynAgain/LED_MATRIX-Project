@@ -1,26 +1,27 @@
 """
-Barricade (Malefiz) -- AI-driven (demo) or controller-playable (interactive)
-on a 64x64 LED matrix.
+Barricade (Quoridor-style) -- AI-driven (demo) or controller-playable
+(interactive) on a 64x64 LED matrix.
 
 Features:
-- Classic Barricade/Malefiz board game adapted to pixel grid
-- Pyramid-shaped path graph with ~45 nodes
-- 2 players, 3 pieces each, racing to a single goal at top
-- Dice-based movement with exact-step BFS pathfinding
-- Barricade capture and strategic placement mechanics
-- Opponent piece capture (sends them home)
-- Animated dice roll, piece movement, and captures
+- 9x9 grid-based race game
+- 2 players start on opposite sides, race to reach the other side
+- Each turn: move your pawn 1 step OR place a 2-cell wall
+- Walls block movement but can never fully seal off a path to goal
+- Each player has 10 walls to place
+- Pawn jumping: if adjacent to opponent, can jump over them
 - AI vs AI (DEMO) or player vs AI (INTERACTIVE)
+- Path validation (BFS) ensures walls never completely block
 
 Control scheme (INTERACTIVE mode, ``controller is not None``)
 ------------------------------------------------------------
-- **UP / DOWN** cycle through selectable pieces or valid destinations
-- **LEFT / RIGHT** navigate barricade placement cursor
-- **A** confirm selection (piece, destination, or barricade placement)
-- **B** cancel / go back to previous selection phase
+- **D-pad** moves the cursor / selects direction to move pawn
+- **A** confirm: move pawn to cursor position
+- **B** toggle between MOVE mode and WALL PLACEMENT mode
+- In wall mode: **D-pad** positions wall, **A** places, **B** cancels
+- **LEFT/RIGHT** in wall mode rotates wall (horizontal/vertical)
 - **Start + Select** (or hold Start ~1.5s) quits to menu
 
-DEMO mode (``controller is None``) is AI vs AI at readable pace (~1.5s/turn),
+DEMO mode (``controller is None``) is AI vs AI at readable pace,
 auto-restarts on game end, runs until ``duration`` elapses or ``should_stop()``.
 """
 
@@ -42,207 +43,34 @@ logger = logging.getLogger(__name__)
 
 # --- Constants ---
 SIZE = 64
-FPS = 15
+FPS = 10
 FRAME_DUR = 1.0 / FPS
+
+# Board dimensions
+GRID_SIZE = 9      # 9x9 grid
+CELL_PX = 5        # pixels per cell
+GAP_PX = 2         # gap between cells (where walls live)
+BOARD_OFFSET_X = 2  # left margin
+BOARD_OFFSET_Y = 2  # top margin
+# Total board: 9*5 + 8*2 = 61px; offset 2 -> ends at 63
+
+# Wall budget per player
+MAX_WALLS = 10
 
 # Colors
 BG_COLOR = (0, 0, 0)
-PATH_COLOR = (20, 20, 40)
-NODE_COLOR = (30, 30, 50)
-P1_COLOR = (0, 200, 255)       # Cyan
-P2_COLOR = (255, 100, 40)      # Orange-red
-BARRICADE_COLOR = (200, 200, 200)
-GOAL_COLOR = (255, 215, 0)     # Gold
-SELECT_COLOR = (0, 255, 100)   # Bright green
-VALID_COLOR = (0, 80, 40)      # Dim green
-DICE_COLOR = (255, 255, 255)
-TURN_INDICATOR_DIM = 80
-
-# Game states
-STATE_ROLL_DICE = 0
-STATE_SELECT_PIECE = 1
-STATE_SELECT_DEST = 2
-STATE_ANIMATE_MOVE = 3
-STATE_PLACE_BARRICADE = 4
-STATE_NEXT_TURN = 5
-STATE_GAME_OVER = 6
-
-# Board layout constants
-BOARD_X_OFFSET = 3
-BOARD_Y_OFFSET = 2
-NODE_SPACING_X = 7
-NODE_SPACING_Y = 6
-
-
-# ---------------------------------------------------------------------------
-# Board topology definition
-# ---------------------------------------------------------------------------
-
-def _build_board():
-    """Build the Barricade board graph.
-
-    Returns:
-        nodes: list of (px, py) pixel positions for each node
-        edges: dict mapping node_index -> list of connected node_indices
-        home_nodes: {0: [idx, ...], 1: [idx, ...]} per player
-        goal_node: index of the goal node
-        initial_barricades: list of node indices that start with barricades
-    """
-    nodes = []
-    edges = {}
-
-    # Helper: add a node and return its index
-    def add_node(px, py):
-        idx = len(nodes)
-        nodes.append((px, py))
-        edges[idx] = []
-        return idx
-
-    # Helper: connect two nodes bidirectionally
-    def connect(a, b):
-        if b not in edges[a]:
-            edges[a].append(b)
-        if a not in edges[b]:
-            edges[b].append(a)
-
-    # Build rows from top to bottom
-    # Row 0: Goal node (single, top center)
-    goal = add_node(BOARD_X_OFFSET + 4 * NODE_SPACING_X, BOARD_Y_OFFSET)
-
-    # Row 1: 3 nodes
-    row1 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X + NODE_SPACING_X // 2
-        row1.append(add_node(x, BOARD_Y_OFFSET + NODE_SPACING_Y))
-
-    # Connect row1 to goal (center node)
-    connect(goal, row1[1])
-
-    # Row 2: 5 nodes
-    row2 = []
-    for i in range(5):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X
-        row2.append(add_node(x, BOARD_Y_OFFSET + 2 * NODE_SPACING_Y))
-
-    # Row 3: 3 nodes
-    row3 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X + NODE_SPACING_X // 2
-        row3.append(add_node(x, BOARD_Y_OFFSET + 3 * NODE_SPACING_Y))
-
-    # Row 4: 5 nodes
-    row4 = []
-    for i in range(5):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X
-        row4.append(add_node(x, BOARD_Y_OFFSET + 4 * NODE_SPACING_Y))
-
-    # Row 5: 3 nodes
-    row5 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X + NODE_SPACING_X // 2
-        row5.append(add_node(x, BOARD_Y_OFFSET + 5 * NODE_SPACING_Y))
-
-    # Row 6: 5 nodes
-    row6 = []
-    for i in range(5):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X
-        row6.append(add_node(x, BOARD_Y_OFFSET + 6 * NODE_SPACING_Y))
-
-    # Row 7: 3 nodes
-    row7 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X + NODE_SPACING_X // 2
-        row7.append(add_node(x, BOARD_Y_OFFSET + 7 * NODE_SPACING_Y))
-
-    # Row 8: 5 nodes (bottom path row)
-    row8 = []
-    for i in range(5):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X
-        row8.append(add_node(x, BOARD_Y_OFFSET + 8 * NODE_SPACING_Y))
-
-    # Home rows (below the board)
-    # Player 1 (left): 3 home nodes
-    home_p1 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 1) * NODE_SPACING_X
-        home_p1.append(add_node(x, BOARD_Y_OFFSET + 9 * NODE_SPACING_Y + 2))
-
-    # Player 2 (right): 3 home nodes
-    home_p2 = []
-    for i in range(3):
-        x = BOARD_X_OFFSET + (i + 3) * NODE_SPACING_X
-        home_p2.append(add_node(x, BOARD_Y_OFFSET + 9 * NODE_SPACING_Y + 2))
-
-    # --- Horizontal connections within rows ---
-    for row in [row1, row2, row3, row4, row5, row6, row7, row8]:
-        for i in range(len(row) - 1):
-            connect(row[i], row[i + 1])
-
-    # --- Vertical connections (3-node rows to 5-node rows) ---
-    # Row1 (3) <-> Row2 (5): staggered
-    connect(row1[0], row2[0])
-    connect(row1[0], row2[1])
-    connect(row1[1], row2[2])
-    connect(row1[2], row2[3])
-    connect(row1[2], row2[4])
-
-    # Row2 (5) <-> Row3 (3): staggered
-    connect(row2[0], row3[0])
-    connect(row2[1], row3[0])
-    connect(row2[2], row3[1])
-    connect(row2[3], row3[2])
-    connect(row2[4], row3[2])
-
-    # Row3 (3) <-> Row4 (5): staggered
-    connect(row3[0], row4[0])
-    connect(row3[0], row4[1])
-    connect(row3[1], row4[2])
-    connect(row3[2], row4[3])
-    connect(row3[2], row4[4])
-
-    # Row4 (5) <-> Row5 (3): staggered
-    connect(row4[0], row5[0])
-    connect(row4[1], row5[0])
-    connect(row4[2], row5[1])
-    connect(row4[3], row5[2])
-    connect(row4[4], row5[2])
-
-    # Row5 (3) <-> Row6 (5): staggered
-    connect(row5[0], row6[0])
-    connect(row5[0], row6[1])
-    connect(row5[1], row6[2])
-    connect(row5[2], row6[3])
-    connect(row5[2], row6[4])
-
-    # Row6 (5) <-> Row7 (3): staggered
-    connect(row6[0], row7[0])
-    connect(row6[1], row7[0])
-    connect(row6[2], row7[1])
-    connect(row6[3], row7[2])
-    connect(row6[4], row7[2])
-
-    # Row7 (3) <-> Row8 (5): staggered
-    connect(row7[0], row8[0])
-    connect(row7[0], row8[1])
-    connect(row7[1], row8[2])
-    connect(row7[2], row8[3])
-    connect(row7[2], row8[4])
-
-    # Home connections: each home node connects to nearest row8 node
-    connect(home_p1[0], row8[0])
-    connect(home_p1[1], row8[1])
-    connect(home_p1[2], row8[2])
-    connect(home_p2[0], row8[2])
-    connect(home_p2[1], row8[3])
-    connect(home_p2[2], row8[4])
-
-    # Initial barricades: placed on row2, row4, row6 middle nodes
-    initial_barricades = [row2[1], row2[3], row4[1], row4[3],
-                          row6[1], row6[3], row3[1], row5[1], row1[1]]
-
-    home_nodes = {0: home_p1, 1: home_p2}
-
-    return nodes, edges, home_nodes, goal, initial_barricades
+GRID_COLOR = (15, 15, 30)        # dim grid lines
+CELL_COLOR = (8, 8, 16)          # cell fill
+P1_COLOR = (0, 200, 255)         # Cyan (starts bottom, goes to top)
+P2_COLOR = (255, 100, 40)        # Orange (starts top, goes to bottom)
+WALL_COLOR = (180, 140, 60)      # Warm brown/gold walls
+CURSOR_COLOR = (0, 255, 100)     # Bright green cursor
+VALID_MOVE_COLOR = (0, 60, 30)   # Dim green for valid moves
+GOAL_ROW_P1 = (0, 40, 60)       # Dim cyan tint for P1's goal row
+GOAL_ROW_P2 = (40, 20, 0)       # Dim orange tint for P2's goal row
+WALL_PREVIEW_OK = (80, 180, 40)  # Green preview (valid placement)
+WALL_PREVIEW_BAD = (180, 40, 40) # Red preview (invalid placement)
+WALLS_LEFT_COLOR = (120, 120, 120)
 
 
 # ---------------------------------------------------------------------------
@@ -250,366 +78,492 @@ def _build_board():
 # ---------------------------------------------------------------------------
 
 class BarricadeGame:
-    """Full Barricade game state and logic."""
+    """Quoridor-style barricade game on a 9x9 grid."""
 
     def __init__(self):
-        (self.nodes, self.edges, self.home_nodes,
-         self.goal_node, initial_barricades) = _build_board()
-        self.barricades = set(initial_barricades)
-        # Each player has 3 pieces; value = node index where piece sits
-        self.pieces = {
-            0: list(self.home_nodes[0]),  # P1 starts on home nodes
-            1: list(self.home_nodes[1]),  # P2 starts on home nodes
+        # Player positions: (row, col), 0-indexed
+        # P1 starts at bottom center (row 8), P2 at top center (row 0)
+        self.pawns = {
+            0: (8, 4),  # P1 bottom center
+            1: (0, 4),  # P2 top center
         }
+        # Walls remaining per player
+        self.walls_remaining = {0: MAX_WALLS, 1: MAX_WALLS}
+        # Placed walls: set of ((row, col), orientation)
+        # Wall position is the top-left gap intersection where it starts
+        # orientation: 'H' = horizontal (blocks vertical movement), spans 2 cols
+        # orientation: 'V' = vertical (blocks horizontal movement), spans 2 rows
+        # For H wall at (r, c): blocks passage between row r and r+1, at columns c and c+1
+        # For V wall at (r, c): blocks passage between col c and c+1, at rows r and r+1
+        self.walls = set()
         self.active_player = 0
-        self.dice_value = 0
-        self.state = STATE_ROLL_DICE
         self.winner = -1
+        self.tick = 0
 
-        # Animation/selection state
-        self.selected_piece_idx = 0  # index into self.pieces[player]
-        self.valid_moves = []        # list of (piece_local_idx, dest_node) tuples
-        self.selected_move_idx = 0
-        self.barricade_options = []  # valid placement nodes
-        self.barricade_cursor = 0
-        self.captured_barricade = False
-
-        # Animation
-        self.anim_path = []          # nodes to traverse for move animation
-        self.anim_step = 0
-        self.anim_tick = 0
-        self.tick = 0                # global frame counter
-
-    def roll_dice(self):
-        """Roll the dice (1-6)."""
-        self.dice_value = random.randint(1, 6)
-        return self.dice_value
-
-    def get_movable_pieces(self):
-        """Find which pieces of active player can legally move.
-
-        Returns list of (piece_local_idx, list_of_dest_nodes) for pieces
-        that have at least one valid destination.
-        """
-        player = self.active_player
-        result = []
-        for i, piece_node in enumerate(self.pieces[player]):
-            dests = self._find_reachable(piece_node, self.dice_value, player)
-            if dests:
-                result.append((i, dests))
-        return result
-
-    def _find_reachable(self, start_node, steps, player):
-        """BFS to find all nodes reachable in exactly `steps` moves.
-
-        Rules:
-        - Cannot pass through barricades (but can land on one at final step)
-        - Cannot pass through any piece (but can land on opponent at final step)
-        - Cannot land on own piece
-        """
-        # BFS: (current_node, steps_remaining, visited_set)
-        queue = deque()
-        queue.append((start_node, steps, frozenset([start_node])))
-        reachable = set()
-
-        # All occupied nodes (both players)
-        own_pieces = set(self.pieces[player])
-        opp_pieces = set(self.pieces[1 - player])
-        blocked = self.barricades | own_pieces | opp_pieces
-        # Remove start node from blocked (we're moving FROM it)
-        blocked = blocked - {start_node}
-
-        while queue:
-            node, remaining, visited = queue.popleft()
-
-            if remaining == 0:
-                # Reached exact distance; valid if not own piece
-                if node not in own_pieces or node == start_node:
-                    if node != start_node:
-                        reachable.add(node)
-                continue
-
-            for neighbor in self.edges.get(node, []):
-                if neighbor in visited:
-                    continue
-
-                if remaining == 1:
-                    # Final step: can land on barricade or opponent (capture)
-                    # but not on own piece
-                    if neighbor in own_pieces:
-                        continue
-                    queue.append((neighbor, 0, visited | {neighbor}))
-                else:
-                    # Intermediate step: cannot pass through blocked nodes
-                    if neighbor in blocked:
-                        continue
-                    queue.append((neighbor, remaining - 1, visited | {neighbor}))
-
-        return list(reachable)
-
-    def move_piece(self, piece_idx, dest_node):
-        """Execute a move. Returns path for animation.
-
-        Handles barricade capture and opponent capture.
-        """
-        player = self.active_player
-        start = self.pieces[player][piece_idx]
-
-        # Find shortest path for animation (BFS ignoring barricades/pieces at dest)
-        path = self._find_path(start, dest_node, player)
-
-        # Check captures
-        self.captured_barricade = False
-        if dest_node in self.barricades:
-            self.barricades.remove(dest_node)
-            self.captured_barricade = True
-
-        # Check opponent capture
-        opp = 1 - player
-        for i, opp_node in enumerate(self.pieces[opp]):
-            if opp_node == dest_node:
-                # Send opponent piece home
-                self.pieces[opp][i] = self.home_nodes[opp][i]
-                break
-
-        # Move piece
-        self.pieces[player][piece_idx] = dest_node
-
-        return path
-
-    def _find_path(self, start, end, player):
-        """Find a valid path from start to end for animation.
-
-        Uses BFS respecting the movement rules but ensures we reach end.
-        Returns the node sequence including start and end.
-        """
-        # Simple BFS for shortest path (for animation, allow passing through
-        # intermediate nodes loosely -- the move is already validated)
-        queue = deque([(start, [start])])
-        visited = {start}
-
-        while queue:
-            node, path = queue.popleft()
-            if node == end:
-                return path
-            for neighbor in self.edges.get(node, []):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, path + [neighbor]))
-
-        # Fallback: just start and end
-        return [start, end]
-
-    def get_barricade_placements(self):
-        """Get valid nodes where a captured barricade can be placed.
-
-        Cannot place on: home nodes, goal node, occupied nodes, existing barricades.
-        """
-        invalid = set()
-        invalid.add(self.goal_node)
-        invalid |= self.barricades
-        for p_pieces in self.pieces.values():
-            invalid |= set(p_pieces)
-        for home_list in self.home_nodes.values():
-            invalid |= set(home_list)
-
-        valid = []
-        for i in range(len(self.nodes)):
-            if i not in invalid:
-                valid.append(i)
-        return valid
-
-    def place_barricade(self, node_idx):
-        """Place a captured barricade on the given node."""
-        self.barricades.add(node_idx)
+    def get_goal_row(self, player):
+        """Player's target row."""
+        return 0 if player == 0 else 8
 
     def check_winner(self):
-        """Check if any piece is on the goal node. Returns player id or -1."""
-        for player, pieces in self.pieces.items():
-            if self.goal_node in pieces:
-                return player
+        """Check if either player reached their goal row."""
+        if self.pawns[0][0] == 0:
+            return 0
+        if self.pawns[1][0] == 8:
+            return 1
         return -1
 
-    def get_node_row(self, node_idx):
-        """Get approximate row (0=top/goal) of a node for AI scoring."""
-        if node_idx >= len(self.nodes):
-            return 9
-        _, py = self.nodes[node_idx]
-        return (py - BOARD_Y_OFFSET) // NODE_SPACING_Y
+    def can_move_between(self, r1, c1, r2, c2):
+        """Check if a pawn can move between two adjacent cells.
+
+        Considers walls that block the passage.
+        """
+        # Must be adjacent (Manhattan distance 1)
+        dr = r2 - r1
+        dc = c2 - c1
+        if abs(dr) + abs(dc) != 1:
+            return False
+        # Bounds check
+        if not (0 <= r2 < GRID_SIZE and 0 <= c2 < GRID_SIZE):
+            return False
+
+        # Check if a wall blocks this movement
+        if dr == 1:  # Moving down (r1 -> r1+1)
+            # Horizontal wall at gap row r1 blocks this
+            # Check H walls at (r1, c1) and (r1, c1-1)
+            if ((r1, c1), 'H') in self.walls:
+                return False
+            if c1 > 0 and ((r1, c1 - 1), 'H') in self.walls:
+                return False
+        elif dr == -1:  # Moving up (r1 -> r1-1)
+            # Horizontal wall at gap row r1-1 blocks this
+            if ((r1 - 1, c1), 'H') in self.walls:
+                return False
+            if c1 > 0 and ((r1 - 1, c1 - 1), 'H') in self.walls:
+                return False
+        elif dc == 1:  # Moving right (c1 -> c1+1)
+            # Vertical wall at gap col c1 blocks this
+            if ((r1, c1), 'V') in self.walls:
+                return False
+            if r1 > 0 and ((r1 - 1, c1), 'V') in self.walls:
+                return False
+        elif dc == -1:  # Moving left (c1 -> c1-1)
+            # Vertical wall at gap col c1-1 blocks this
+            if ((r1, c1 - 1), 'V') in self.walls:
+                return False
+            if r1 > 0 and ((r1 - 1, c1 - 1), 'V') in self.walls:
+                return False
+
+        return True
+
+    def get_valid_moves(self, player):
+        """Get all valid pawn moves for a player.
+
+        Includes: adjacent moves and jumps over opponent.
+        """
+        r, c = self.pawns[player]
+        opp_r, opp_c = self.pawns[1 - player]
+        moves = []
+
+        # Check all 4 directions
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if not (0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE):
+                continue
+            if not self.can_move_between(r, c, nr, nc):
+                continue
+
+            if (nr, nc) == (opp_r, opp_c):
+                # Opponent is adjacent — try to jump over
+                jr, jc = nr + dr, nc + dc
+                if (0 <= jr < GRID_SIZE and 0 <= jc < GRID_SIZE and
+                        self.can_move_between(nr, nc, jr, jc)):
+                    moves.append((jr, jc))
+                else:
+                    # Can't jump straight — try diagonal jumps
+                    for sdr, sdc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        if (sdr, sdc) == (-dr, -dc):
+                            continue  # Don't go back
+                        sr, sc = nr + sdr, nc + sdc
+                        if (0 <= sr < GRID_SIZE and 0 <= sc < GRID_SIZE and
+                                self.can_move_between(nr, nc, sr, sc) and
+                                (sr, sc) != (r, c)):
+                            moves.append((sr, sc))
+            else:
+                moves.append((nr, nc))
+
+        return moves
+
+    def move_pawn(self, player, dest):
+        """Move a player's pawn to destination."""
+        self.pawns[player] = dest
+
+    def is_wall_valid(self, pos, orientation, player=None):
+        """Check if a wall placement is valid.
+
+        Conditions:
+        1. Within bounds
+        2. Doesn't overlap existing walls
+        3. Doesn't completely block either player's path to goal
+        4. Player has walls remaining (if player specified)
+        """
+        r, c = pos
+        if player is not None and self.walls_remaining[player] <= 0:
+            return False
+
+        # Bounds check
+        if orientation == 'H':
+            if r < 0 or r >= GRID_SIZE - 1 or c < 0 or c >= GRID_SIZE - 2:
+                return False
+        else:  # 'V'
+            if r < 0 or r >= GRID_SIZE - 2 or c < 0 or c >= GRID_SIZE - 1:
+                return False
+
+        # Overlap check
+        if (pos, orientation) in self.walls:
+            return False
+
+        # Check crossing walls
+        if orientation == 'H':
+            # Can't overlap with H wall shifted by 1
+            if ((r, c + 1), 'H') in self.walls:
+                return False
+            if c > 0 and ((r, c - 1), 'H') in self.walls:
+                return False
+            # Can't cross a V wall at same intersection
+            if ((r, c), 'V') in self.walls:
+                # Only conflicts if they share the center point
+                # H at (r,c) occupies gap-row r, cols c and c+1
+                # V at (r,c) occupies gap-col c, rows r and r+1
+                # They cross at the intersection (r, c)
+                return False
+        else:  # 'V'
+            if ((r + 1, c), 'V') in self.walls:
+                return False
+            if r > 0 and ((r - 1, c), 'V') in self.walls:
+                return False
+            # Can't cross H wall at same intersection
+            if ((r, c), 'H') in self.walls:
+                return False
+
+        # Path validation: both players must still be able to reach their goals
+        # Temporarily place wall
+        self.walls.add((pos, orientation))
+        p1_can_reach = self._can_reach_goal(0)
+        p2_can_reach = self._can_reach_goal(1)
+        self.walls.remove((pos, orientation))
+
+        if not p1_can_reach or not p2_can_reach:
+            return False
+
+        return True
+
+    def _can_reach_goal(self, player):
+        """BFS check: can player reach their goal row?"""
+        goal_row = self.get_goal_row(player)
+        start = self.pawns[player]
+        visited = {start}
+        queue = deque([start])
+
+        while queue:
+            r, c = queue.popleft()
+            if r == goal_row:
+                return True
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE and
+                        (nr, nc) not in visited and
+                        self.can_move_between(r, c, nr, nc)):
+                    visited.add((nr, nc))
+                    queue.append((nr, nc))
+
+        return False
+
+    def place_wall(self, pos, orientation, player):
+        """Place a wall and decrement player's wall count."""
+        self.walls.add((pos, orientation))
+        self.walls_remaining[player] -= 1
+
+    def get_all_valid_walls(self, player):
+        """Get all valid wall placements for a player."""
+        if self.walls_remaining[player] <= 0:
+            return []
+        valid = []
+        for r in range(GRID_SIZE - 1):
+            for c in range(GRID_SIZE - 2):
+                if self.is_wall_valid((r, c), 'H', player):
+                    valid.append(((r, c), 'H'))
+        for r in range(GRID_SIZE - 2):
+            for c in range(GRID_SIZE - 1):
+                if self.is_wall_valid((r, c), 'V', player):
+                    valid.append(((r, c), 'V'))
+        return valid
 
     # --- Rendering ---
 
-    def draw(self, tick=0):
-        """Render the board to a PIL Image."""
+    def _cell_px(self, row, col):
+        """Get the top-left pixel position of a cell."""
+        x = BOARD_OFFSET_X + col * (CELL_PX + GAP_PX)
+        y = BOARD_OFFSET_Y + row * (CELL_PX + GAP_PX)
+        return x, y
+
+    def _cell_center(self, row, col):
+        """Get the center pixel of a cell."""
+        x, y = self._cell_px(row, col)
+        return x + CELL_PX // 2, y + CELL_PX // 2
+
+    def draw(self, tick=0, cursor=None, valid_moves=None,
+             wall_preview=None, wall_valid=None, mode='move'):
+        """Render the board to a PIL Image.
+
+        Args:
+            tick: animation frame counter
+            cursor: (row, col) of cursor highlight (interactive mode)
+            valid_moves: list of (row, col) to highlight as valid
+            wall_preview: ((row, col), orientation) wall being previewed
+            wall_valid: bool, whether the preview wall is valid
+            mode: 'move' or 'wall' for UI indicator
+        """
         image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
         draw = ImageDraw.Draw(image)
 
-        # Draw edges (path lines)
-        for node_idx, neighbors in self.edges.items():
-            x1, y1 = self.nodes[node_idx]
-            for n_idx in neighbors:
-                if n_idx > node_idx:  # avoid drawing twice
-                    x2, y2 = self.nodes[n_idx]
-                    draw.line([(x1, y1), (x2, y2)], fill=PATH_COLOR)
+        # Draw goal row tints
+        for c in range(GRID_SIZE):
+            # P1 goal (row 0)
+            x, y = self._cell_px(0, c)
+            draw.rectangle([x, y, x + CELL_PX - 1, y + CELL_PX - 1],
+                           fill=GOAL_ROW_P1)
+            # P2 goal (row 8)
+            x, y = self._cell_px(8, c)
+            draw.rectangle([x, y, x + CELL_PX - 1, y + CELL_PX - 1],
+                           fill=GOAL_ROW_P2)
 
-        # Draw empty nodes
-        for i, (nx, ny) in enumerate(self.nodes):
-            draw.point((nx, ny), fill=NODE_COLOR)
+        # Draw cells
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                x, y = self._cell_px(r, c)
+                if r == 0:
+                    fill = GOAL_ROW_P1
+                elif r == 8:
+                    fill = GOAL_ROW_P2
+                else:
+                    fill = CELL_COLOR
+                draw.rectangle([x, y, x + CELL_PX - 1, y + CELL_PX - 1],
+                               fill=fill)
 
-        # Draw goal node (pulsing gold)
-        gx, gy = self.nodes[self.goal_node]
-        pulse = int(180 + 75 * math.sin(tick * 0.1))
-        goal_color = (pulse, int(pulse * 0.84), 0)
-        draw.rectangle([gx - 1, gy - 1, gx + 1, gy + 1], fill=goal_color)
-
-        # Draw barricades
-        for b_idx in self.barricades:
-            bx, by = self.nodes[b_idx]
-            draw.rectangle([bx - 1, by - 1, bx, by], fill=BARRICADE_COLOR)
-
-        # Draw pieces
-        for player, pieces in self.pieces.items():
-            color = P1_COLOR if player == 0 else P2_COLOR
-            for piece_node in pieces:
-                px, py = self.nodes[piece_node]
-                draw.rectangle([px - 1, py - 1, px, py], fill=color)
-
-        # Draw turn indicator (top-left corner)
-        indicator_color = P1_COLOR if self.active_player == 0 else P2_COLOR
-        brightness = int(TURN_INDICATOR_DIM + 40 * math.sin(tick * 0.15))
-        ic = tuple(max(0, min(255, int(c * brightness / 255)))
-                   for c in indicator_color)
-        draw.point((1, 1), fill=ic)
-
-        # Draw dice value (top-right area)
-        if self.dice_value > 0:
-            _draw_digit(image, str(self.dice_value), SIZE - 5, 1, DICE_COLOR, SIZE)
-
-        return image
-
-    def draw_with_highlights(self, highlights, selected_idx, tick=0):
-        """Draw board with highlighted nodes (for selection phases)."""
-        image = self.draw(tick)
-        draw = ImageDraw.Draw(image)
-
-        # Draw valid options with dim pulse
-        for i, node_idx in enumerate(highlights):
-            nx, ny = self.nodes[node_idx]
-            if i == selected_idx:
-                # Active selection: bright green blink
-                if tick % 10 < 6:
-                    draw.rectangle([nx - 1, ny - 1, nx + 1, ny + 1],
-                                   fill=SELECT_COLOR)
-            else:
-                # Other valid options: dim green pulse
-                pulse = int(30 + 20 * math.sin(tick * 0.12 + i))
-                draw.rectangle([nx - 1, ny - 1, nx, ny],
+        # Draw valid moves
+        if valid_moves:
+            for r, c in valid_moves:
+                x, y = self._cell_px(r, c)
+                pulse = int(30 + 25 * math.sin(tick * 0.2))
+                draw.rectangle([x, y, x + CELL_PX - 1, y + CELL_PX - 1],
                                fill=(0, pulse, 0))
 
+        # Draw placed walls
+        for (wr, wc), orient in self.walls:
+            self._draw_wall(draw, wr, wc, orient, WALL_COLOR)
+
+        # Draw wall preview
+        if wall_preview is not None:
+            (wr, wc), orient = wall_preview
+            color = WALL_PREVIEW_OK if wall_valid else WALL_PREVIEW_BAD
+            # Blink the preview
+            if tick % 8 < 5:
+                self._draw_wall(draw, wr, wc, orient, color)
+
+        # Draw pawns
+        for player, (pr, pc) in self.pawns.items():
+            color = P1_COLOR if player == 0 else P2_COLOR
+            x, y = self._cell_px(pr, pc)
+            # Pawn: filled 3x3 centered in 5x5 cell
+            draw.rectangle([x + 1, y + 1, x + 3, y + 3], fill=color)
+
+        # Draw cursor
+        if cursor is not None:
+            cr, cc = cursor
+            x, y = self._cell_px(cr, cc)
+            # Blinking border
+            if tick % 6 < 4:
+                draw.rectangle([x - 1, y - 1, x + CELL_PX, y + CELL_PX],
+                               outline=CURSOR_COLOR)
+
+        # Draw walls remaining (bottom area if space, or tiny indicators)
+        # P1 wall count (bottom-left)
+        p1_walls = self.walls_remaining[0]
+        p2_walls = self.walls_remaining[1]
+        _draw_digit(image, str(p1_walls % 10), 1, SIZE - 6, P1_COLOR, SIZE)
+        _draw_digit(image, str(p2_walls % 10), SIZE - 4, SIZE - 6, P2_COLOR, SIZE)
+
+        # Turn indicator
+        indicator_color = P1_COLOR if self.active_player == 0 else P2_COLOR
+        brightness = int(150 + 105 * math.sin(tick * 0.15))
+        ic = tuple(max(0, min(255, int(c * brightness / 255)))
+                   for c in indicator_color)
+        draw.rectangle([SIZE // 2 - 1, SIZE - 3, SIZE // 2 + 1, SIZE - 1],
+                       fill=ic)
+
         return image
+
+    def _draw_wall(self, draw, wr, wc, orient, color):
+        """Draw a single wall on the board."""
+        if orient == 'H':
+            # Horizontal wall between rows wr and wr+1, spanning cols wc and wc+1
+            # It sits in the horizontal gap below row wr
+            x1, _ = self._cell_px(0, wc)
+            _, y1_base = self._cell_px(wr, 0)
+            y = y1_base + CELL_PX  # start of gap
+            x_end, _ = self._cell_px(0, wc + 1)
+            x_end += CELL_PX - 1
+            draw.rectangle([x1, y, x_end, y + GAP_PX - 1], fill=color)
+        else:  # 'V'
+            # Vertical wall between cols wc and wc+1, spanning rows wr and wr+1
+            x1_base, _ = self._cell_px(0, wc)
+            x = x1_base + CELL_PX  # start of gap
+            _, y1 = self._cell_px(wr, 0)
+            _, y_end = self._cell_px(wr + 1, 0)
+            y_end += CELL_PX - 1
+            draw.rectangle([x, y1, x + GAP_PX - 1, y_end], fill=color)
 
 
 # ---------------------------------------------------------------------------
 # AI Logic
 # ---------------------------------------------------------------------------
 
-def _ai_choose_piece_and_dest(game):
-    """AI selects the best piece and destination.
+def _bfs_distance(game, start, goal_row):
+    """BFS shortest distance from start to any cell in goal_row."""
+    visited = {start}
+    queue = deque([(start, 0)])
+    while queue:
+        (r, c), dist = queue.popleft()
+        if r == goal_row:
+            return dist
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if (0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE and
+                    (nr, nc) not in visited and
+                    game.can_move_between(r, c, nr, nc)):
+                visited.add((nr, nc))
+                queue.append(((nr, nc), dist + 1))
+    return 999  # unreachable (shouldn't happen with valid boards)
 
-    Heuristic: forward progress + capture bonuses + randomness.
-    Returns (piece_local_idx, dest_node) or None if no moves.
+
+def _ai_decide(game):
+    """AI decides: move pawn or place wall.
+
+    Strategy:
+    - If we're closer to goal than opponent, move forward
+    - If opponent is closer, consider placing a wall to slow them
+    - Always move if no walls remaining
+    - Move toward shortest path to goal
+
+    Returns: ('move', (row, col)) or ('wall', ((row, col), orient))
     """
-    movable = game.get_movable_pieces()
-    if not movable:
+    player = game.active_player
+    opp = 1 - player
+    my_pos = game.pawns[player]
+    opp_pos = game.pawns[opp]
+    my_goal = game.get_goal_row(player)
+    opp_goal = game.get_goal_row(opp)
+
+    my_dist = _bfs_distance(game, my_pos, my_goal)
+    opp_dist = _bfs_distance(game, opp_pos, opp_goal)
+
+    # Consider wall placement if opponent is close and we have walls
+    place_wall = False
+    if (game.walls_remaining[player] > 0 and
+            opp_dist <= my_dist and
+            opp_dist < 6 and
+            random.random() < 0.6):
+        place_wall = True
+
+    # Also consider wall if opponent is much closer
+    if (game.walls_remaining[player] > 0 and
+            opp_dist < my_dist - 2 and
+            random.random() < 0.8):
+        place_wall = True
+
+    if place_wall:
+        wall_choice = _ai_choose_wall(game, player)
+        if wall_choice is not None:
+            return ('wall', wall_choice)
+
+    # Move pawn toward goal via shortest path
+    move_choice = _ai_choose_move(game, player)
+    if move_choice is not None:
+        return ('move', move_choice)
+
+    # Fallback: if somehow no moves (shouldn't happen), skip
+    return None
+
+
+def _ai_choose_move(game, player):
+    """AI chooses the best pawn move (toward goal)."""
+    moves = game.get_valid_moves(player)
+    if not moves:
         return None
 
-    best_score = -999
-    best_choice = None
+    goal_row = game.get_goal_row(player)
+    best_dist = 999
+    best_moves = []
 
-    for piece_idx, destinations in movable:
-        current_row = game.get_node_row(game.pieces[game.active_player][piece_idx])
-        for dest in destinations:
-            dest_row = game.get_node_row(dest)
-            score = 0
+    for dest in moves:
+        dist = _bfs_distance(game, dest, goal_row)
+        if dist < best_dist:
+            best_dist = dist
+            best_moves = [dest]
+        elif dist == best_dist:
+            best_moves.append(dest)
 
-            # Forward progress (lower row number = closer to goal)
-            progress = current_row - dest_row
-            score += progress * 3
-
-            # Reaching goal is maximum priority
-            if dest == game.goal_node:
-                score += 100
-
-            # Barricade capture bonus
-            if dest in game.barricades:
-                score += 5
-
-            # Opponent capture bonus
-            opp = 1 - game.active_player
-            if dest in game.pieces[opp]:
-                opp_row = game.get_node_row(dest)
-                score += 4 + (9 - opp_row)  # more valuable to capture advanced pieces
-
-            # Small randomness for variety
-            score += random.uniform(-1.5, 1.5)
-
-            if score > best_score:
-                best_score = score
-                best_choice = (piece_idx, dest)
-
-    return best_choice
+    return random.choice(best_moves) if best_moves else moves[0]
 
 
-def _ai_place_barricade(game):
-    """AI chooses where to place a captured barricade.
+def _ai_choose_wall(game, player):
+    """AI chooses a wall that maximally increases opponent's path length.
 
-    Strategy: block the opponent's most advanced piece's path toward goal.
+    Samples a subset of valid walls and picks the one that increases
+    the opponent's distance the most.
     """
-    options = game.get_barricade_placements()
-    if not options:
+    opp = 1 - player
+    opp_pos = game.pawns[opp]
+    opp_goal = game.get_goal_row(opp)
+    current_opp_dist = _bfs_distance(game, opp_pos, opp_goal)
+
+    # Sample walls (checking all is expensive)
+    candidates = []
+
+    # Generate walls near the opponent's position
+    opp_r, opp_c = opp_pos
+    for dr in range(-3, 4):
+        for dc in range(-3, 4):
+            wr, wc = opp_r + dr, opp_c + dc
+            for orient in ['H', 'V']:
+                if game.is_wall_valid((wr, wc), orient, player):
+                    candidates.append(((wr, wc), orient))
+
+    if not candidates:
         return None
 
-    opp = 1 - game.active_player
-    opp_pieces = game.pieces[opp]
+    # Score each candidate by how much it increases opponent's distance
+    best_score = 0
+    best_wall = None
 
-    # Find opponent's most advanced piece (lowest row number)
-    best_opp_piece = min(opp_pieces, key=lambda n: game.get_node_row(n))
-    best_opp_row = game.get_node_row(best_opp_piece)
+    # Limit evaluation to avoid lag
+    sample = random.sample(candidates, min(20, len(candidates)))
 
-    # Prefer placing barricade on nodes close to (but above) the opponent's
-    # best piece — ideally in rows 1-3 above it
-    best_score = -999
-    best_node = options[0]
+    for (wr, wc), orient in sample:
+        game.walls.add(((wr, wc), orient))
+        new_dist = _bfs_distance(game, opp_pos, opp_goal)
+        game.walls.remove(((wr, wc), orient))
 
-    for node_idx in options:
-        node_row = game.get_node_row(node_idx)
-        score = 0
-
-        # Prefer nodes that are above the opponent's best piece
-        if node_row < best_opp_row:
-            score += 5 - abs(node_row - (best_opp_row - 2))
-        else:
-            score -= 3
-
-        # Prefer nodes closer to center (more likely on opponent's path)
-        nx, _ = game.nodes[node_idx]
-        center_dist = abs(nx - (BOARD_X_OFFSET + 4 * NODE_SPACING_X))
-        score -= center_dist * 0.2
-
-        # Don't place right next to our own pieces
-        own_pieces = set(game.pieces[game.active_player])
-        if node_idx in game.edges:
-            for neighbor in game.edges[node_idx]:
-                if neighbor in own_pieces:
-                    score -= 2
-
-        score += random.uniform(-1, 1)
-
+        score = new_dist - current_opp_dist
+        # Small bonus for not hurting our own path
         if score > best_score:
             best_score = score
-            best_node = node_idx
+            best_wall = ((wr, wc), orient)
 
-    return best_node
+    # Only place wall if it actually helps
+    if best_score >= 1:
+        return best_wall
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -625,105 +579,73 @@ def _run_demo(matrix, duration, start_time):
         if should_stop():
             return
 
-        # --- ROLL DICE ---
-        game.roll_dice()
+        # AI decides
+        decision = _ai_decide(game)
 
-        # Brief dice animation
-        for _ in range(5):
-            if should_stop():
-                return
-            game.dice_value = random.randint(1, 6)
-            image = game.draw(tick)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(0.08)
-
-        game.roll_dice()  # Final roll
-        image = game.draw(tick)
-        matrix.SetImage(image)
-        if not interruptible_sleep(0.3):
-            return
-
-        # --- AI SELECT PIECE AND DESTINATION ---
-        choice = _ai_choose_piece_and_dest(game)
-
-        if choice is None:
-            # No valid moves — skip turn
+        if decision is None:
+            # No valid action (shouldn't happen); switch turn
             game.active_player = 1 - game.active_player
-            tick += 1
-            if not interruptible_sleep(0.3):
-                return
             continue
 
-        piece_idx, dest_node = choice
+        action_type, action_data = decision
 
-        # Highlight selected piece briefly
-        highlight_node = game.pieces[game.active_player][piece_idx]
-        for _ in range(6):
-            if should_stop():
-                return
-            image = game.draw_with_highlights([highlight_node], 0, tick)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(0.07)
+        if action_type == 'move':
+            # Animate pawn move
+            dest = action_data
+            old_pos = game.pawns[game.active_player]
 
-        # --- ANIMATE MOVE ---
-        path = game.move_piece(piece_idx, dest_node)
-
-        # Animate along path
-        player_color = P1_COLOR if game.active_player == 0 else P2_COLOR
-        for path_node in path[1:]:  # skip start (already there)
-            if should_stop():
-                return
-            # Temporarily show piece at intermediate position
-            image = game.draw(tick)
-            draw = ImageDraw.Draw(image)
-            px, py = game.nodes[path_node]
-            draw.rectangle([px - 1, py - 1, px, py], fill=player_color)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(0.1)
-
-        # Render final state
-        image = game.draw(tick)
-        matrix.SetImage(image)
-
-        # --- PLACE BARRICADE if captured ---
-        if game.captured_barricade:
-            if not interruptible_sleep(0.2):
-                return
-            barricade_node = _ai_place_barricade(game)
-            if barricade_node is not None:
-                game.place_barricade(barricade_node)
-                # Brief highlight of placed barricade
-                image = game.draw(tick)
-                draw = ImageDraw.Draw(image)
-                bx, by = game.nodes[barricade_node]
-                draw.rectangle([bx - 1, by - 1, bx + 1, by + 1],
-                               fill=(255, 255, 255))
-                matrix.SetImage(image)
-                if not interruptible_sleep(0.3):
+            # Flash the move
+            for i in range(4):
+                if should_stop():
                     return
+                valid = game.get_valid_moves(game.active_player)
+                image = game.draw(tick, cursor=dest, valid_moves=valid)
+                matrix.SetImage(image)
+                tick += 1
+                time.sleep(0.08)
 
-        # --- CHECK WIN ---
+            game.move_pawn(game.active_player, dest)
+            image = game.draw(tick)
+            matrix.SetImage(image)
+
+        elif action_type == 'wall':
+            pos, orient = action_data
+
+            # Show wall preview briefly
+            for i in range(5):
+                if should_stop():
+                    return
+                image = game.draw(tick, wall_preview=(pos, orient),
+                                  wall_valid=True)
+                matrix.SetImage(image)
+                tick += 1
+                time.sleep(0.08)
+
+            game.place_wall(pos, orient, game.active_player)
+            image = game.draw(tick)
+            matrix.SetImage(image)
+
+        # Check winner
         winner = game.check_winner()
         if winner >= 0:
-            # Win animation
             color = P1_COLOR if winner == 0 else P2_COLOR
             label = "P1 WINS" if winner == 0 else "P2 WINS"
             show_banner(matrix, [label], color=color, hold=2.0)
-            # Reset for next game
+            # Reset
             game = BarricadeGame()
             tick = 0
             continue
 
-        # --- NEXT TURN ---
+        # Next turn
         game.active_player = 1 - game.active_player
-        game.dice_value = 0
         tick += 1
 
-        if not interruptible_sleep(0.2):
+        if not interruptible_sleep(0.4):
             return
+
+        # Render idle frame
+        image = game.draw(tick)
+        matrix.SetImage(image)
 
 
 # ---------------------------------------------------------------------------
@@ -734,44 +656,63 @@ def _run_interactive(matrix, controller, start_time):
     """Player (P1) vs AI (P2) interactive game."""
     from src.input.controller import wants_quit, Button, EventType
 
-    _INTERACTIVE_MAX_SECONDS = 600  # 10 min safety cap
+    _INTERACTIVE_MAX_SECONDS = 600  # 10 min cap
 
     game = BarricadeGame()
-    game.active_player = 0  # Player goes first
+    game.active_player = 0
     tick = 0
 
-    show_banner(matrix, ["BARRICADE", "READY"], color=P1_COLOR, hold=1.2)
+    show_banner(matrix, ["BARRICADE", "A:MOVE B:WALL"], color=P1_COLOR, hold=1.5)
 
     while time.time() - start_time < _INTERACTIVE_MAX_SECONDS:
         if should_stop():
             return
 
         if game.active_player == 1:
-            # --- AI TURN ---
-            _ai_turn(game, matrix, tick)
-            tick += 5
+            # AI turn
+            if not interruptible_sleep(0.3):
+                return
+            decision = _ai_decide(game)
+            if decision:
+                action_type, action_data = decision
+                if action_type == 'move':
+                    game.move_pawn(1, action_data)
+                elif action_type == 'wall':
+                    pos, orient = action_data
+                    # Brief preview
+                    for _ in range(4):
+                        if should_stop():
+                            return
+                        image = game.draw(tick, wall_preview=(pos, orient),
+                                          wall_valid=True)
+                        matrix.SetImage(image)
+                        tick += 1
+                        time.sleep(0.08)
+                    game.place_wall(pos, orient, 1)
+
+            image = game.draw(tick)
+            matrix.SetImage(image)
 
             winner = game.check_winner()
             if winner >= 0:
-                safe_rumble(controller, 0.6 if winner == 1 else 1.0, 300)
-                msg = "YOU WIN!" if winner == 0 else "YOU LOSE"
-                color = (80, 255, 120) if winner == 0 else (255, 80, 80)
-                show_banner(matrix, [msg], color=color, hold=2.0)
+                safe_rumble(controller, 0.6, 300)
+                show_banner(matrix, ["YOU LOSE"], color=(255, 80, 80), hold=2.0)
                 return
 
             game.active_player = 0
-            game.dice_value = 0
+            if not interruptible_sleep(0.2):
+                return
             continue
 
         # --- PLAYER TURN ---
-        # Roll dice (press A to roll)
-        game.dice_value = 0
-        image = game.draw(tick)
-        matrix.SetImage(image)
+        mode = 'move'  # 'move' or 'wall'
+        cursor_r, cursor_c = game.pawns[0]
+        wall_orient = 'H'
+        wall_r, wall_c = cursor_r, cursor_c
+        valid_moves = game.get_valid_moves(0)
 
-        # Wait for A press to roll
-        rolled = False
-        while not rolled:
+        turn_done = False
+        while not turn_done:
             if should_stop():
                 return
             controller.poll_events()
@@ -780,207 +721,84 @@ def _run_interactive(matrix, controller, start_time):
 
             events = controller.poll_events()
             for ev in events:
-                if ev.button == Button.A and ev.event_type == EventType.PRESSED:
-                    rolled = True
-                    break
+                if ev.event_type not in (EventType.PRESSED, EventType.REPEAT):
+                    continue
 
-            # Show blinking "roll" indicator
-            tick += 1
-            image = game.draw(tick)
-            matrix.SetImage(image)
-            time.sleep(FRAME_DUR)
+                if ev.button == Button.B:
+                    # Toggle mode
+                    if mode == 'move':
+                        if game.walls_remaining[0] > 0:
+                            mode = 'wall'
+                            wall_r = max(0, cursor_r - 1)
+                            wall_c = max(0, cursor_c - 1)
+                    else:
+                        mode = 'move'
 
-        # Dice animation
-        for _ in range(6):
-            if should_stop():
-                return
-            game.dice_value = random.randint(1, 6)
-            image = game.draw(tick)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(0.08)
-
-        game.roll_dice()
-        image = game.draw(tick)
-        matrix.SetImage(image)
-        time.sleep(0.3)
-
-        # Find movable pieces
-        movable = game.get_movable_pieces()
-        if not movable:
-            show_banner(matrix, ["NO MOVES"], color=(200, 200, 200), hold=1.0)
-            game.active_player = 1
-            game.dice_value = 0
-            continue
-
-        # --- SELECT PIECE ---
-        piece_options = [(pi, dests) for pi, dests in movable]
-        sel_idx = 0
-
-        selecting_piece = True
-        while selecting_piece:
-            if should_stop():
-                return
-            controller.poll_events()
-            if wants_quit(controller):
-                return
-
-            events = controller.poll_events()
-            for ev in events:
-                if ev.event_type == EventType.PRESSED:
+                elif mode == 'move':
                     if ev.button == Button.UP:
-                        sel_idx = (sel_idx - 1) % len(piece_options)
+                        cursor_r = max(0, cursor_r - 1)
                     elif ev.button == Button.DOWN:
-                        sel_idx = (sel_idx + 1) % len(piece_options)
+                        cursor_r = min(GRID_SIZE - 1, cursor_r + 1)
+                    elif ev.button == Button.LEFT:
+                        cursor_c = max(0, cursor_c - 1)
+                    elif ev.button == Button.RIGHT:
+                        cursor_c = min(GRID_SIZE - 1, cursor_c + 1)
                     elif ev.button == Button.A:
-                        selecting_piece = False
-                        break
+                        if (cursor_r, cursor_c) in valid_moves:
+                            game.move_pawn(0, (cursor_r, cursor_c))
+                            turn_done = True
 
-            # Render with piece highlights
-            piece_nodes = [game.pieces[0][pi] for pi, _ in piece_options]
-            image = game.draw_with_highlights(piece_nodes, sel_idx, tick)
-            matrix.SetImage(image)
+                elif mode == 'wall':
+                    if ev.button == Button.UP:
+                        wall_r = max(0, wall_r - 1)
+                    elif ev.button == Button.DOWN:
+                        max_r = GRID_SIZE - 2 if wall_orient == 'H' else GRID_SIZE - 3
+                        wall_r = min(max_r, wall_r + 1)
+                    elif ev.button == Button.LEFT:
+                        wall_c = max(0, wall_c - 1)
+                    elif ev.button == Button.RIGHT:
+                        max_c = GRID_SIZE - 3 if wall_orient == 'H' else GRID_SIZE - 2
+                        wall_c = min(max_c, wall_c + 1)
+                    elif ev.button == Button.A:
+                        if game.is_wall_valid((wall_r, wall_c), wall_orient, 0):
+                            game.place_wall((wall_r, wall_c), wall_orient, 0)
+                            turn_done = True
+                    elif ev.button == Button.SELECT:
+                        # Rotate wall orientation
+                        wall_orient = 'V' if wall_orient == 'H' else 'H'
+                        # Clamp position
+                        if wall_orient == 'H':
+                            wall_c = min(wall_c, GRID_SIZE - 3)
+                            wall_r = min(wall_r, GRID_SIZE - 2)
+                        else:
+                            wall_r = min(wall_r, GRID_SIZE - 3)
+                            wall_c = min(wall_c, GRID_SIZE - 2)
+
+            # Render
             tick += 1
+            if mode == 'move':
+                image = game.draw(tick, cursor=(cursor_r, cursor_c),
+                                  valid_moves=valid_moves)
+            else:
+                is_valid = game.is_wall_valid((wall_r, wall_c), wall_orient, 0)
+                image = game.draw(tick,
+                                  wall_preview=((wall_r, wall_c), wall_orient),
+                                  wall_valid=is_valid, mode='wall')
+            matrix.SetImage(image)
             time.sleep(FRAME_DUR)
 
-        chosen_piece_idx, destinations = piece_options[sel_idx]
-
-        # --- SELECT DESTINATION ---
-        dest_idx = 0
-        selecting_dest = True
-        while selecting_dest:
-            if should_stop():
-                return
-            controller.poll_events()
-            if wants_quit(controller):
-                return
-
-            events = controller.poll_events()
-            for ev in events:
-                if ev.event_type == EventType.PRESSED:
-                    if ev.button in (Button.UP, Button.RIGHT):
-                        dest_idx = (dest_idx + 1) % len(destinations)
-                    elif ev.button in (Button.DOWN, Button.LEFT):
-                        dest_idx = (dest_idx - 1) % len(destinations)
-                    elif ev.button == Button.A:
-                        selecting_dest = False
-                        break
-                    elif ev.button == Button.B:
-                        # Go back to piece selection would be complex;
-                        # just keep in dest selection
-                        pass
-
-            image = game.draw_with_highlights(destinations, dest_idx, tick)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(FRAME_DUR)
-
-        dest_node = destinations[dest_idx]
-
-        # --- ANIMATE MOVE ---
-        path = game.move_piece(chosen_piece_idx, dest_node)
-        for path_node in path[1:]:
-            if should_stop():
-                return
-            image = game.draw(tick)
-            draw = ImageDraw.Draw(image)
-            px, py = game.nodes[path_node]
-            draw.rectangle([px - 1, py - 1, px, py], fill=P1_COLOR)
-            matrix.SetImage(image)
-            tick += 1
-            time.sleep(0.1)
-
+        # End of player turn
         image = game.draw(tick)
         matrix.SetImage(image)
 
-        # --- PLACE BARRICADE if captured ---
-        if game.captured_barricade:
-            options = game.get_barricade_placements()
-            if options:
-                b_idx = 0
-                placing = True
-                while placing:
-                    if should_stop():
-                        return
-                    controller.poll_events()
-                    if wants_quit(controller):
-                        return
-
-                    events = controller.poll_events()
-                    for ev in events:
-                        if ev.event_type in (EventType.PRESSED, EventType.REPEAT):
-                            if ev.button in (Button.RIGHT, Button.UP):
-                                b_idx = (b_idx + 1) % len(options)
-                            elif ev.button in (Button.LEFT, Button.DOWN):
-                                b_idx = (b_idx - 1) % len(options)
-                            elif ev.button == Button.A:
-                                placing = False
-                                break
-
-                    image = game.draw_with_highlights(options, b_idx, tick)
-                    matrix.SetImage(image)
-                    tick += 1
-                    time.sleep(FRAME_DUR)
-
-                game.place_barricade(options[b_idx])
-
-        # --- CHECK WIN ---
         winner = game.check_winner()
         if winner >= 0:
             safe_rumble(controller, 1.0, 400)
             show_banner(matrix, ["YOU WIN!"], color=(80, 255, 120), hold=2.0)
             return
 
-        # --- NEXT TURN ---
         game.active_player = 1
-        game.dice_value = 0
         tick += 1
-
-
-def _ai_turn(game, matrix, tick):
-    """Execute a single AI turn with animations."""
-    # Roll dice
-    game.roll_dice()
-    for _ in range(4):
-        game.dice_value = random.randint(1, 6)
-        image = game.draw(tick)
-        matrix.SetImage(image)
-        tick += 1
-        time.sleep(0.08)
-    game.roll_dice()
-    image = game.draw(tick)
-    matrix.SetImage(image)
-    time.sleep(0.3)
-
-    # Choose move
-    choice = _ai_choose_piece_and_dest(game)
-    if choice is None:
-        time.sleep(0.3)
-        return
-
-    piece_idx, dest_node = choice
-    path = game.move_piece(piece_idx, dest_node)
-
-    # Animate
-    for path_node in path[1:]:
-        image = game.draw(tick)
-        draw = ImageDraw.Draw(image)
-        px, py = game.nodes[path_node]
-        draw.rectangle([px - 1, py - 1, px, py], fill=P2_COLOR)
-        matrix.SetImage(image)
-        tick += 1
-        time.sleep(0.1)
-
-    # Place barricade
-    if game.captured_barricade:
-        time.sleep(0.2)
-        barricade_node = _ai_place_barricade(game)
-        if barricade_node is not None:
-            game.place_barricade(barricade_node)
-
-    image = game.draw(tick)
-    matrix.SetImage(image)
-    time.sleep(0.2)
 
 
 # ---------------------------------------------------------------------------
@@ -988,7 +806,7 @@ def _ai_turn(game, matrix, tick):
 # ---------------------------------------------------------------------------
 
 def run(matrix, duration=60, controller=None):
-    """Run the Barricade feature.
+    """Run the Barricade (Quoridor) feature.
 
     Args:
         matrix: RGBMatrix instance (or mock).

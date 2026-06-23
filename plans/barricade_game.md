@@ -1,205 +1,108 @@
-# Barricade (Malefiz) - LED Matrix Game Architecture
+# Barricade (Quoridor-style) - LED Matrix Game Architecture
 
 ## Overview
 
-Barricade (also known as Malefiz) adapted for a 64×64 LED matrix. Players race pieces from bottom to top while placing barricades to block opponents. Supports both AI-vs-AI demo mode and player-vs-AI interactive mode.
+A Quoridor-style grid race game adapted for the 64×64 LED matrix. Two players race pawns from opposite sides of a 9×9 grid to reach the other side. Each turn, a player either moves their pawn one step OR places a 2-cell wall to block the opponent. Walls cannot fully seal off a player's path.
 
-## Game Rules (Simplified for 2-Player)
+## Game Rules
 
-1. **Objective**: First player to move any piece to the GOAL node at the top wins
-2. **Dice**: Each turn rolls 1–6; the piece must move exactly that many steps
-3. **Movement**: Pieces move along connected path nodes (no jumping over barricades or other pieces)
-4. **Barricade capture**: Landing on a barricade removes it; the player must then place it on any empty path node (except home rows or goal)
-5. **Opponent capture**: Landing on an opponent sends them back to their home base
-6. **Blocked paths**: If no piece can move the full dice count, the turn is skipped
+1. **Board**: 9×9 grid. P1 starts at bottom-center (row 8), P2 at top-center (row 0)
+2. **Objective**: P1 races to row 0, P2 races to row 8
+3. **Turn options**: MOVE pawn one step (up/down/left/right) OR PLACE a 2-cell wall
+4. **Walls**: Each player has 10 walls. A wall spans 2 cells and sits in the gap between cells
+5. **Wall constraint**: A placement is invalid if it completely blocks either player's path to goal (BFS validation)
+6. **Pawn jumping**: If adjacent to opponent, you can jump over them
+7. **Walls don't overlap**: No crossing or stacking
 
 ## Board Layout (64×64 pixels)
 
 ```
-Board Grid: 9 columns x 9 rows of path nodes
-Node spacing: 7px horizontal, 6px vertical
-Piece size: 2×2 pixels
-Barricade: 2×2 white/gray pixels
-Path connections: 1px dim lines
+Cell size: 5×5 pixels
+Gap between cells: 2px (where walls live)
+Grid: 9 cells * 5px + 8 gaps * 2px = 61px
+Offset: 2px margin -> fits perfectly in 64px
+
+Board area: 61×61 pixels (with 2px offset)
+Bottom row: wall count indicators + turn indicator
 ```
-
-### Visual Layout (schematic)
-
-```
-Row 0:            [GOAL]              <- single node, top center
-Row 1:       O----O----O----O         <- 4 connected nodes
-Row 2:    O----O----O----O----O       <- 5 connected nodes  
-Row 3:       O----O----O----O         <- 4 connected nodes
-Row 4:    O----O----O----O----O       <- 5 connected (full width)
-Row 5:       O----O----O----O         <- 4 connected nodes
-Row 6:    O----O----O----O----O       <- 5 connected nodes
-Row 7:       O----O----O----O         <- 4 connected nodes
-Row 8:    O----O----O----O----O       <- 5 connected (bottom paths)
-           |     |     |     |
-Home L:   [P][P][P]         [P][P][P]  <- 3 pieces per player
-```
-
-### Pixel Coordinates
-
-| Element | Size | Notes |
-|---------|------|-------|
-| Board offset | x=3, y=2 | Centers the grid |
-| Node-to-node horizontal | 7px | Fits 9 columns in ~60px |
-| Node-to-node vertical | 6px | Fits 9 rows + home in ~62px |
-| Piece | 2×2 px | Colored square on node |
-| Barricade | 2×2 px | White square on node |
-| Path line | 1px | Dim gray connecting nodes |
-| Dice display | top-right corner | 3×5 digit, shown briefly |
-| Turn indicator | 1px colored dot | Top-left, player's color |
 
 ### Color Palette
 
 | Element | Color | RGB |
 |---------|-------|-----|
 | Background | Black | (0, 0, 0) |
-| Path lines | Dim blue-gray | (20, 20, 40) |
-| Path nodes (empty) | Dim dot | (30, 30, 50) |
-| Player 1 pieces | Cyan | (0, 200, 255) |
-| Player 2 pieces | Orange-red | (255, 100, 40) |
-| Barricade | White | (200, 200, 200) |
-| Goal node | Gold pulse | (255, 215, 0) |
-| Selected/highlight | Bright green | (0, 255, 100) |
-| Valid move overlay | Dim green blink | (0, 80, 40) |
-| Dice number | White | (255, 255, 255) |
+| Cells | Very dark blue | (8, 8, 16) |
+| P1 pawn | Cyan | (0, 200, 255) |
+| P2 pawn | Orange-red | (255, 100, 40) |
+| Walls (placed) | Warm gold | (180, 140, 60) |
+| Wall preview (valid) | Green | (80, 180, 40) |
+| Wall preview (invalid) | Red | (180, 40, 40) |
+| P1 goal row tint | Dark cyan | (0, 40, 60) |
+| P2 goal row tint | Dark orange | (40, 20, 0) |
+| Cursor | Bright green | (0, 255, 100) |
+| Valid moves | Pulsing green | (0, 30-55, 0) |
 
-## Game State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> ROLL_DICE
-    ROLL_DICE --> SELECT_PIECE: dice animated
-    SELECT_PIECE --> SHOW_MOVES: piece chosen
-    SELECT_PIECE --> ROLL_DICE: no valid moves - skip turn
-    SHOW_MOVES --> ANIMATE_MOVE: destination chosen
-    ANIMATE_MOVE --> PLACE_BARRICADE: landed on barricade
-    ANIMATE_MOVE --> NEXT_TURN: normal move complete
-    ANIMATE_MOVE --> OPPONENT_SENT_HOME: landed on opponent
-    OPPONENT_SENT_HOME --> NEXT_TURN: animation done
-    PLACE_BARRICADE --> NEXT_TURN: barricade placed
-    NEXT_TURN --> ROLL_DICE: switch player
-    NEXT_TURN --> GAME_OVER: piece reached goal
-    GAME_OVER --> [*]: banner shown
-```
-
-### Turn Phases
-
-1. **ROLL_DICE** — Brief dice animation (0.5s), show result
-2. **SELECT_PIECE** — If multiple pieces can legally move, highlight selectable ones
-3. **SHOW_MOVES** — Highlight all valid destination nodes for chosen piece
-4. **ANIMATE_MOVE** — Piece slides node-by-node toward destination (0.1s per hop)
-5. **PLACE_BARRICADE** — Cursor over board, player picks empty node for captured barricade
-6. **NEXT_TURN** — Check win condition, swap active player
-
-## Board Data Structure
+## Data Model
 
 ```python
-# Board represented as a graph
-class BarricadeBoard:
-    nodes: list[tuple[int, int]]        # pixel positions of each node
-    edges: dict[int, list[int]]         # adjacency list (node_index -> neighbors)
-    barricades: set[int]                # node indices with barricades
-    pieces: dict[int, list[int]]        # player_id -> list of node indices
-    home_nodes: dict[int, list[int]]    # player_id -> home node indices
-    goal_node: int                      # index of the goal node
+class BarricadeGame:
+    pawns: dict[int, tuple[int, int]]       # player -> (row, col)
+    walls_remaining: dict[int, int]         # player -> count (starts at 10)
+    walls: set[tuple[tuple[int,int], str]]  # ((row,col), 'H'|'V')
+    active_player: int                      # 0 or 1
 ```
 
-The board topology is **hardcoded** as a graph with ~40 path nodes. Vertical connections create the pyramid shape with bottleneck passages that barricades can block effectively.
+### Wall Encoding
 
-## AI Design (Demo Mode)
+- `((r, c), 'H')`: Horizontal wall blocking vertical movement between rows r and r+1, spanning columns c and c+1
+- `((r, c), 'V')`: Vertical wall blocking horizontal movement between columns c and c+1, spanning rows r and r+1
 
-Both players run AI. The heuristic evaluates each legal move by:
+## AI Strategy
 
-1. **Forward progress** (+3 per row advanced toward goal)
-2. **Barricade capture** (+5 if capturing unblocks a direct path)
-3. **Opponent capture** (+4 if sending opponent back)
-4. **Barricade placement** (place to block opponent's most-advanced piece)
-5. **Risk penalty** (-2 if moving into a position easily captured next turn)
+1. **BFS distance** to goal computed for both players
+2. **Move** if we're farther from goal than opponent (close the gap)
+3. **Place wall** if opponent is closer (probability-based):
+   - Samples walls near opponent
+   - Picks the one that maximally increases opponent's BFS distance
+   - Only places if it increases distance by ≥1
+4. **Move choice**: always toward shortest BFS path to goal
+5. **Randomness**: ties broken randomly for variety
 
-The AI adds small randomness (±1) to scores so demo games vary. Decision delay ~0.3s for readability.
+## Interactive Controls
 
-## Interactive Mode - Controller Mapping
-
-| Input | Action |
-|-------|--------|
-| D-pad UP/DOWN | Cycle through selectable pieces or valid destinations |
-| D-pad LEFT/RIGHT | Navigate barricade placement cursor |
-| A button | Confirm selection (piece, destination, or barricade placement) |
-| B button | Cancel / go back to previous phase |
-| Start+Select | Quit to menu |
-
-### Cursor Behavior
-
-- A blinking highlight (green) shows the current selection
-- Valid options pulse dimly; the active selection pulses brightly
-- D-pad cycles through valid options only (skip invalid nodes)
-
-## Demo Mode Behavior
-
-- AI vs AI at a readable pace (~1.5s per turn total)
-- Auto-restarts when a game ends (brief "P1 WINS" banner)
-- Runs until `duration` elapses or `should_stop()` fires
-- Initial barricade positions randomized each game for variety
+| Mode | Input | Action |
+|------|-------|--------|
+| Move | D-pad | Move cursor over grid |
+| Move | A | Move pawn to cursor (if valid) |
+| Move | B | Switch to Wall mode |
+| Wall | D-pad | Position wall on grid |
+| Wall | A | Place wall (if valid) |
+| Wall | B | Cancel (back to Move mode) |
+| Wall | Select | Rotate wall H↔V |
+| Any | Start+Select | Quit to menu |
 
 ## Module Structure
 
-```
-src/display/barricade.py    <- single file (follows project convention)
-```
+Single file: `src/display/barricade.py` (~500 lines)
 
-### Key Classes/Functions
+### Key Components
 
 | Name | Purpose |
 |------|---------|
-| `BarricadeGame` | Full game state, board, pieces, logic |
-| `BarricadeGame.roll_dice()` | Generate 1-6 roll |
-| `BarricadeGame.get_valid_moves(piece_idx, roll)` | BFS for reachable nodes at exact distance |
-| `BarricadeGame.move_piece(piece_idx, dest)` | Execute move, handle captures |
-| `BarricadeGame.get_barricade_placements()` | Valid nodes for placing a captured barricade |
-| `BarricadeGame.check_winner()` | Check if any piece is on goal |
-| `BarricadeGame.draw(matrix)` | Render full board state to PIL Image |
-| `_run_demo(matrix, duration, start_time)` | AI vs AI game loop |
-| `_run_interactive(matrix, controller, start_time)` | Player vs AI loop |
-| `run(matrix, duration=60, controller=None)` | Entry point (matches project pattern) |
+| `BarricadeGame` | Full game state, board, walls, validation |
+| `BarricadeGame.can_move_between(r1,c1,r2,c2)` | Check wall blocking |
+| `BarricadeGame.get_valid_moves(player)` | Adjacent moves + jumps |
+| `BarricadeGame.is_wall_valid(pos, orient, player)` | Full validation including BFS path check |
+| `BarricadeGame.draw(...)` | Render to 64×64 PIL Image |
+| `_bfs_distance(game, start, goal_row)` | Shortest path length |
+| `_ai_decide(game)` | AI move/wall decision |
+| `_run_demo(matrix, duration, start_time)` | AI vs AI loop |
+| `_run_interactive(matrix, controller, start_time)` | Player vs AI |
+| `run(matrix, duration=60, controller=None)` | Entry point |
 
-### Path-Finding (Valid Moves)
+## Integration
 
-Movement uses **BFS with exact distance**:
-- From the piece's current node, explore all paths of exactly `dice_roll` steps
-- Cannot pass through barricades or other pieces (but CAN land on them at exactly the right step count)
-- Landing on a barricade at the final step = capture
-- Landing on an opponent at the final step = send home
-
-## Integration Points
-
-1. **Feature registry** — Add `"barricade": "src.display.barricade"` to [`src/feature_registry.py`](src/feature_registry.py:9)
-2. **Imports** — Use `_shared.should_stop`, `interruptible_sleep`, `read_direction`, `safe_rumble`, `show_banner`
-3. **Utils** — Use `_draw_digit` for dice display, `_scale_color` for pulse effects
-4. **Fonts** — Use `_fonts._draw_text` for winner banner text
-5. **Run signature** — `run(matrix, duration=60, controller=None)` matching all other games
-
-## Initial Barricade Placement
-
-Each game starts with 9 barricades placed on predetermined positions (middle rows of the board), ensuring:
-- No player's immediate exit path is blocked on turn 1
-- Multiple bottleneck passages have barricades creating strategic choices
-- Positions are shuffled slightly each game for variety (demo mode)
-
-## Animation Details
-
-| Animation | Duration | Description |
-|-----------|----------|-------------|
-| Dice roll | 0.5s | Flash random numbers then settle |
-| Piece move | 0.1s/hop | Slide through intermediate nodes |
-| Barricade capture | 0.2s | Flash white then disappear |
-| Opponent sent home | 0.3s | Flash red then teleport to home |
-| Goal reached | 1.0s | Radial pulse from goal node |
-| Turn indicator | continuous | Gentle pulse of active player color |
-
-## File Size Estimate
-
-~450-550 lines (comparable to [`pong.py`](src/display/pong.py) at 501 lines and [`tetris.py`](src/display/tetris.py) at 804 lines).
+- [`src/feature_registry.py`](src/feature_registry.py:50): `"barricade": "src.display.barricade"`
+- [`src/app_state.py`](src/app_state.py:88): in `PLAYABLE_GAMES`
+- [`src/menu/menu_data.py`](src/menu/menu_data.py:123): in `_GAME_LABELS` and `_GAME_ORDER`
+- [`config/config.json`](config/config.json:219): in sequence as `"type": "game", "enabled": true`
