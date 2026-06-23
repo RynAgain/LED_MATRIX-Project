@@ -225,6 +225,11 @@
       "name": "package_boy",
       "type": "game",
       "enabled": true
+    },
+    {
+      "name": "death_ball",
+      "type": "game",
+      "enabled": true
     }
   ]
 }

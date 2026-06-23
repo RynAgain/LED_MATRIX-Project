@@ -49,4 +49,5 @@ FEATURE_MODULES = {
     "fractal": "src.display.fractal",
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
+    "death_ball": "src.display.death_ball",
 }

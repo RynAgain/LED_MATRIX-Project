@@ -122,11 +122,12 @@ _GAME_LABELS = {
     "starfox": "STARFOX",
     "barricade": "BARRICADE",
     "package_boy": "PKG BOY",
+    "death_ball": "DEATHBALL",
 }
 
 # A stable display order for games so the menu does not jitter run-to-run
 # (PLAYABLE_GAMES is a set, which is unordered).
-_GAME_ORDER = ["snake", "tetris", "pong", "starfox", "barricade", "package_boy"]
+_GAME_ORDER = ["snake", "tetris", "pong", "starfox", "barricade", "package_boy", "death_ball"]
 
 
 def _ordered_games(playable) -> List[str]:
