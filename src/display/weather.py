@@ -74,9 +74,21 @@ ANIM_RAIN = 2
 ANIM_SNOW = 3
 ANIM_STORM = 4
 ANIM_FOG = 5
+ANIM_HELL = 6  # >90F clear or >100F any weather: burning city
 
-def _code_to_anim(code):
-    """Map WMO weather code to animation type."""
+def _code_to_anim(code, temp=None):
+    """Map WMO weather code to animation type.
+
+    Special case: if temp > 100F with any weather, or > 90F with clear sky,
+    show the HELL (burning city) animation instead.
+    """
+    # Hell mode: extreme heat
+    if temp is not None:
+        if temp >= 100:
+            return ANIM_HELL
+        if temp >= 90 and code in (0, 1):
+            return ANIM_HELL
+
     if code in (0, 1):
         return ANIM_CLEAR
     elif code in (2, 3):
@@ -121,7 +133,9 @@ class WeatherAnimator:
         """
         self.tick += 1
 
-        if self.anim_type == ANIM_CLEAR:
+        if self.anim_type == ANIM_HELL:
+            self._draw_hell(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_CLEAR:
             self._draw_sun(draw_ctx, x_offset, y_offset, w, h)
         elif self.anim_type == ANIM_CLOUDY:
             self._draw_clouds(draw_ctx, x_offset, y_offset, w, h)
@@ -252,6 +266,74 @@ class WeatherAnimator:
                 py = y + wave
                 if 0 <= px < WIDTH and 0 <= py < HEIGHT:
                     draw_ctx.point((px, py), fill=(alpha, alpha, alpha + 20))
+
+
+    def _draw_hell(self, draw_ctx, xo, yo, w, h):
+        """Burning city under angry sun — extreme heat animation.
+
+        Shows: angry red/orange sun at top, city skyline silhouette at bottom,
+        flickering flames rising from buildings, heat shimmer waves.
+        """
+        # Angry sun (top area, red/orange pulsing)
+        cx = xo + w // 2
+        cy = yo + 5
+        pulse = int(200 + 55 * math.sin(self.tick * 0.15))
+        # Sun body (red-orange)
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                if dx * dx + dy * dy <= 9:
+                    draw_ctx.point((cx + dx, cy + dy), fill=(pulse, pulse // 3, 0))
+
+        # Heat rays (wavy, angry red)
+        for i in range(6):
+            angle = self.tick * 0.08 + i * (math.pi / 3)
+            ray_len = 3 + int(math.sin(self.tick * 0.2 + i) * 2)
+            sx = cx + int(4 * math.cos(angle))
+            sy = cy + int(4 * math.sin(angle))
+            ex = cx + int((4 + ray_len) * math.cos(angle))
+            ey = cy + int((4 + ray_len) * math.sin(angle))
+            draw_ctx.line([(sx, sy), (ex, ey)], fill=(pulse, pulse // 4, 0))
+
+        # City skyline silhouette (bottom portion)
+        buildings = [
+            (xo + 1, yo + h - 8, 3, 8),
+            (xo + 4, yo + h - 12, 2, 12),
+            (xo + 7, yo + h - 6, 3, 6),
+            (xo + 10, yo + h - 10, 2, 10),
+            (xo + 13, yo + h - 7, 3, 7),
+            (xo + 16, yo + h - 9, 3, 9),
+            (xo + 19, yo + h - 5, 2, 5),
+        ]
+        for bx, by, bw, bh in buildings:
+            # Building silhouette (dark)
+            for dx in range(bw):
+                for dy in range(bh):
+                    px, py = bx + dx, by + dy
+                    if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                        draw_ctx.point((px, py), fill=(20, 10, 5))
+
+        # Flames rising from buildings
+        for bx, by, bw, _ in buildings:
+            # 1-2 flame particles per building
+            for f in range(2):
+                fx = bx + random.randint(0, bw - 1)
+                fy = by - random.randint(1, 4)
+                # Flicker
+                if random.random() < 0.7:
+                    if 0 <= fx < WIDTH and 0 <= fy < HEIGHT:
+                        flame_colors = [
+                            (255, 80, 0), (255, 140, 0),
+                            (255, 200, 0), (200, 40, 0)
+                        ]
+                        draw_ctx.point((fx, fy),
+                                       fill=random.choice(flame_colors))
+
+        # Heat shimmer (wavy horizontal lines in the air)
+        for shimmer_y in range(yo + 12, yo + h - 12, 4):
+            wave_x = int(math.sin(self.tick * 0.1 + shimmer_y * 0.3) * 2)
+            px = xo + w // 2 + wave_x
+            if 0 <= px < WIDTH and 0 <= shimmer_y < HEIGHT:
+                draw_ctx.point((px, shimmer_y), fill=(80, 40, 0))
 
 
 def _sanity_check_code(code, rain, cloud_cover):
@@ -422,7 +504,8 @@ def run(matrix, duration=60):
                 if new_weather is not None:
                     weather = new_weather
                     last_successful_fetch = now
-                    anim_type = _code_to_anim(weather.get("code", 0))
+                    anim_type = _code_to_anim(weather.get("code", 0),
+                                              temp=weather.get("temp"))
                     if animator is None or animator.anim_type != anim_type:
                         animator = WeatherAnimator(anim_type)
                 else:
