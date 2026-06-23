@@ -254,14 +254,45 @@ class WeatherAnimator:
                     draw_ctx.point((px, py), fill=(alpha, alpha, alpha + 20))
 
 
+def _sanity_check_code(code, rain, cloud_cover):
+    """Cross-check weather_code against actual precipitation and cloud data.
+
+    Open-Meteo's weather_code is model-predicted and often reports storms
+    (code 95+) or rain (61+) when precipitation is actually 0mm and skies
+    are clear. Override bogus codes using real observations.
+    """
+    # If code says rain/storm but there's no precipitation, fix it
+    rain_codes = {51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99}
+    if code in rain_codes and rain is not None and rain <= 0.0:
+        # No actual rain — determine condition from cloud cover
+        if cloud_cover is not None:
+            if cloud_cover < 20:
+                return 0   # Clear
+            elif cloud_cover < 50:
+                return 1   # Mostly clear
+            elif cloud_cover < 80:
+                return 2   # Partly cloudy
+            else:
+                return 3   # Overcast
+        return 2  # Default to partly cloudy if no cloud data
+
+    return code
+
+
 def _fetch_weather(lat=None, lon=None):
-    """Fetch current weather from Open-Meteo (free, no API key)."""
+    """Fetch current weather from Open-Meteo (free, no API key).
+
+    Requests additional fields (rain, cloud_cover) to cross-check the
+    weather_code which is often unreliable (predicts storms that aren't
+    happening based on model interpolation rather than observations).
+    """
     if lat is None or lon is None:
         lat, lon = _load_location()
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}"
-        f"&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m"
+        f"&current=temperature_2m,weather_code,wind_speed_10m,"
+        f"relative_humidity_2m,rain,cloud_cover,precipitation"
         f"&temperature_unit=fahrenheit&wind_speed_unit=mph"
     )
     try:
@@ -269,9 +300,23 @@ def _fetch_weather(lat=None, lon=None):
         resp.raise_for_status()
         data = resp.json()
         current = data.get("current", {})
+
+        # Get raw code and cross-check against actual conditions
+        raw_code = current.get("weather_code", 0)
+        rain = current.get("rain", current.get("precipitation", 0.0))
+        cloud_cover = current.get("cloud_cover")
+        corrected_code = _sanity_check_code(raw_code, rain, cloud_cover)
+
+        if corrected_code != raw_code:
+            logger.info(
+                "Weather code corrected: %d -> %d (rain=%.1f, clouds=%s%%)",
+                raw_code, corrected_code, rain or 0,
+                cloud_cover if cloud_cover is not None else "?"
+            )
+
         return {
             "temp": current.get("temperature_2m"),
-            "code": current.get("weather_code", 0),
+            "code": corrected_code,
             "wind": current.get("wind_speed_10m"),
             "humidity": current.get("relative_humidity_2m"),
         }
