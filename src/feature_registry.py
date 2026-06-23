@@ -46,4 +46,6 @@ FEATURE_MODULES = {
     "hail_mary_clock": "src.display.hail_mary_clock",
     "album_art": "src.display.album_art",
     "starfox": "src.display.starfox",
+    "fractal": "src.display.fractal",
+    "barricade": "src.display.barricade",
 }

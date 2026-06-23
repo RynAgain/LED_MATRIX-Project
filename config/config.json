@@ -174,7 +174,7 @@
     {
       "name": "maze_3d",
       "type": "effect",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "terrain_ball",
@@ -208,6 +208,16 @@
     },
     {
       "name": "starfox",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "fractal",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "barricade",
       "type": "game",
       "enabled": true
     }

@@ -286,12 +286,17 @@ def _get_accent_color(code):
     return WMO_ACCENT.get(color_key, (200, 200, 200))
 
 
-def _render_weather(weather, animator):
+def _render_weather(weather, animator, stale=False):
     """Render weather data with animated icon to a PIL Image.
 
     Layout (64x64):
       Left side (0-22):  Animated weather icon
       Right side (24-63): Temperature, condition, wind, humidity
+
+    Args:
+        weather: Dict with temp, code, wind, humidity
+        animator: WeatherAnimator instance
+        stale: If True, data is outdated (>15 min since last successful fetch)
     """
     image = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(image)
@@ -344,6 +349,10 @@ def _render_weather(weather, animator):
     # Accent bar at bottom (weather-themed color indicator)
     draw.rectangle([4, 58, 59, 61], fill=accent)
 
+    # Stale data indicator — dim dot in top-right corner
+    if stale:
+        draw.point((62, 1), fill=(80, 40, 0))
+
     return image
 
 
@@ -351,6 +360,7 @@ def run(matrix, duration=60):
     """Run the weather display for the specified duration."""
     start_time = time.time()
     last_fetch = 0
+    last_successful_fetch = 0
     weather = None
     animator = None
 
@@ -360,17 +370,23 @@ def run(matrix, duration=60):
                 break
             now = time.time()
 
-            # Fetch weather every 60 seconds
-            if now - last_fetch > 60 or weather is None:
-                weather = _fetch_weather()
+            # Fetch weather every 5 minutes (API updates ~15min, no need to hammer)
+            if now - last_fetch > 300 or weather is None:
+                new_weather = _fetch_weather()
                 last_fetch = now
-                if weather:
+                if new_weather is not None:
+                    weather = new_weather
+                    last_successful_fetch = now
                     anim_type = _code_to_anim(weather.get("code", 0))
                     if animator is None or animator.anim_type != anim_type:
                         animator = WeatherAnimator(anim_type)
+                else:
+                    logger.warning("Weather fetch failed, keeping last known data")
 
             if weather and animator:
-                image = _render_weather(weather, animator)
+                # If data is stale (>15 min), show a dim indicator
+                stale = (now - last_successful_fetch > 900) if last_successful_fetch else False
+                image = _render_weather(weather, animator, stale=stale)
                 matrix.SetImage(image)
 
             # Animate at ~10 FPS for smooth weather animations
