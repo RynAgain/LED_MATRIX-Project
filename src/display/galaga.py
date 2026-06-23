@@ -287,25 +287,51 @@ class Ship:
 
 
 class TractorBeam:
-    """Visual effect for boss alien capture attempt."""
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.timer = 30
+    """Visual effect for boss alien capture attempt.
+
+    The boss dives down first, then deploys the beam once it reaches
+    mid-screen (y >= 30). The beam extends downward from the boss's
+    current position toward the player.
+    """
+    def __init__(self, boss, ship_x):
+        self.boss = boss  # Reference to the diving boss alien
+        self.ship_x = ship_x
+        self.active = False  # Beam not yet deployed
+        self.timer = 50  # Total lifetime (dive + beam)
+        self.beam_timer = 0  # Frames beam has been active
         self.width = 1
+        # Start the boss diving toward the player
+        if not boss.diving:
+            boss.start_dive(ship_x, DIVE_STRAIGHT)
 
     def update(self):
         self.timer -= 1
-        self.width = min(6, self.width + 0.3)
-        return self.timer > 0
+        if self.timer <= 0:
+            return False
+
+        # Activate beam once boss is far enough down (past y=30)
+        if not self.active and self.boss.alive and self.boss.y >= 30:
+            self.active = True
+
+        if self.active:
+            self.beam_timer += 1
+            self.width = min(6, self.width + 0.3)
+
+        return self.boss.alive and self.timer > 0
 
     def draw(self, draw_ctx):
+        if not self.active or not self.boss.alive:
+            return
+        # Draw beam extending downward from boss position
+        bx = self.boss.x
+        by = self.boss.y + 2
         w = int(self.width)
-        for dy in range(self.y, min(self.y + 20, HEIGHT)):
-            alpha = max(0, 255 - (dy - self.y) * 8)
-            spread = int(w * (dy - self.y) / 20)
+        beam_length = min(25, self.beam_timer * 2)
+        for dy in range(by, min(by + beam_length, HEIGHT)):
+            alpha = max(0, 255 - (dy - by) * 6)
+            spread = int(w * (dy - by) / max(1, beam_length))
             draw_ctx.rectangle(
-                [self.x - spread, dy, self.x + spread, dy],
+                [bx - spread, dy, bx + spread, dy],
                 fill=(0, alpha, alpha // 2)
             )
 
@@ -476,10 +502,11 @@ def run(matrix, duration=60):
 
             # --- Tractor beam (boss special attack) ---
             if random.random() < 0.003 * wave:
-                boss_aliens = [a for a in formation_aliens if a.alien_type == ALIEN_BOSS]
+                boss_aliens = [a for a in formation_aliens
+                               if a.alien_type == ALIEN_BOSS and a.dive_cooldown <= 0]
                 if boss_aliens:
                     boss = random.choice(boss_aliens)
-                    tractor_beams.append(TractorBeam(boss.x, boss.y + 2))
+                    tractor_beams.append(TractorBeam(boss, ship.x))
 
             # Update tractor beams
             for tb in tractor_beams[:]:
