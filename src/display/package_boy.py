@@ -489,7 +489,7 @@ class PackageBoyGame:
         if house.subscriber and not house.delivered:
             # Lit porch — pulsing yellow
             pulse = int(180 + 75 * math.sin(tick * 0.2 + y))
-            draw.point((x, porch_y), fill=(pulse, pulse // 1.2, 0))
+            draw.point((x, porch_y), fill=(pulse, int(pulse * 0.83), 0))
         elif house.delivered and not house.broken_window:
             # Delivered — green check
             draw.point((x, porch_y), fill=(0, 200, 0))
