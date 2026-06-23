@@ -48,4 +48,5 @@ FEATURE_MODULES = {
     "starfox": "src.display.starfox",
     "fractal": "src.display.fractal",
     "barricade": "src.display.barricade",
+    "package_boy": "src.display.package_boy",
 }

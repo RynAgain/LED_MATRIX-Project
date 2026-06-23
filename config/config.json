@@ -220,6 +220,11 @@
       "name": "barricade",
       "type": "game",
       "enabled": true
+    },
+    {
+      "name": "package_boy",
+      "type": "game",
+      "enabled": true
     }
   ]
 }
