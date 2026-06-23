@@ -63,7 +63,9 @@ GRID_COLOR = (15, 15, 30)        # dim grid lines
 CELL_COLOR = (8, 8, 16)          # cell fill
 P1_COLOR = (0, 200, 255)         # Cyan (starts bottom, goes to top)
 P2_COLOR = (255, 100, 40)        # Orange (starts top, goes to bottom)
-WALL_COLOR = (180, 140, 60)      # Warm brown/gold walls
+# Wall colors per player (dimmer than pawn color to distinguish)
+P1_WALL_COLOR = (0, 120, 160)    # Dim cyan wall
+P2_WALL_COLOR = (160, 60, 20)    # Dim orange wall
 CURSOR_COLOR = (0, 255, 100)     # Bright green cursor
 VALID_MOVE_COLOR = (0, 60, 30)   # Dim green for valid moves
 GOAL_ROW_P1 = (0, 40, 60)       # Dim cyan tint for P1's goal row
@@ -89,13 +91,13 @@ class BarricadeGame:
         }
         # Walls remaining per player
         self.walls_remaining = {0: MAX_WALLS, 1: MAX_WALLS}
-        # Placed walls: set of ((row, col), orientation)
+        # Placed walls: dict mapping ((row, col), orientation) -> player_id
         # Wall position is the top-left gap intersection where it starts
         # orientation: 'H' = horizontal (blocks vertical movement), spans 2 cols
         # orientation: 'V' = vertical (blocks horizontal movement), spans 2 rows
         # For H wall at (r, c): blocks passage between row r and r+1, at columns c and c+1
         # For V wall at (r, c): blocks passage between col c and c+1, at rows r and r+1
-        self.walls = set()
+        self.walls = {}
         self.active_player = 0
         self.winner = -1
         self.tick = 0
@@ -247,10 +249,10 @@ class BarricadeGame:
 
         # Path validation: both players must still be able to reach their goals
         # Temporarily place wall
-        self.walls.add((pos, orientation))
+        self.walls[(pos, orientation)] = -1  # temp marker
         p1_can_reach = self._can_reach_goal(0)
         p2_can_reach = self._can_reach_goal(1)
-        self.walls.remove((pos, orientation))
+        del self.walls[(pos, orientation)]
 
         if not p1_can_reach or not p2_can_reach:
             return False
@@ -280,7 +282,7 @@ class BarricadeGame:
 
     def place_wall(self, pos, orientation, player):
         """Place a wall and decrement player's wall count."""
-        self.walls.add((pos, orientation))
+        self.walls[(pos, orientation)] = player
         self.walls_remaining[player] -= 1
 
     def get_all_valid_walls(self, player):
@@ -358,9 +360,10 @@ class BarricadeGame:
                 draw.rectangle([x, y, x + CELL_PX - 1, y + CELL_PX - 1],
                                fill=(0, pulse, 0))
 
-        # Draw placed walls
-        for (wr, wc), orient in self.walls:
-            self._draw_wall(draw, wr, wc, orient, WALL_COLOR)
+        # Draw placed walls (colored by player who placed them)
+        for ((wr, wc), orient), owner in self.walls.items():
+            color = P1_WALL_COLOR if owner == 0 else P2_WALL_COLOR
+            self._draw_wall(draw, wr, wc, orient, color)
 
         # Draw wall preview
         if wall_preview is not None:
@@ -550,9 +553,9 @@ def _ai_choose_wall(game, player):
     sample = random.sample(candidates, min(20, len(candidates)))
 
     for (wr, wc), orient in sample:
-        game.walls.add(((wr, wc), orient))
+        game.walls[((wr, wc), orient)] = player  # temp
         new_dist = _bfs_distance(game, opp_pos, opp_goal)
-        game.walls.remove(((wr, wc), orient))
+        del game.walls[((wr, wc), orient)]
 
         score = new_dist - current_opp_dist
         # Small bonus for not hurting our own path
