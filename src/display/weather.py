@@ -266,11 +266,11 @@ def _sanity_check_code(code, rain, cloud_cover):
     if code in rain_codes and rain is not None and rain <= 0.0:
         # No actual rain — determine condition from cloud cover
         if cloud_cover is not None:
-            if cloud_cover < 20:
+            if cloud_cover < 10:
                 return 0   # Clear
-            elif cloud_cover < 50:
+            elif cloud_cover < 30:
                 return 1   # Mostly clear
-            elif cloud_cover < 80:
+            elif cloud_cover < 70:
                 return 2   # Partly cloudy
             else:
                 return 3   # Overcast
