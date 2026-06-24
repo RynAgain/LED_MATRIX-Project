@@ -51,4 +51,6 @@ FEATURE_MODULES = {
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",
     "fish_tank": "src.display.fish_tank",
+    "icy_tower": "src.display.icy_tower",
+    "moon_tracker": "src.display.moon_tracker",
 }
