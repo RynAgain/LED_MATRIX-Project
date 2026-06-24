@@ -35,11 +35,11 @@ HOUR_DIM = (0, 20, 35)
 MINUTE_DIM = (0, 30, 15)
 SECOND_DIM = (30, 18, 6)
 
-# Label colors
-LABEL_COLOR = (60, 60, 90)
-BIT_LABEL_COLOR = (40, 40, 65)
-COLON_COLOR = (80, 80, 120)
-SEPARATOR_COLOR = (15, 15, 30)
+# Label colors - bright enough to read clearly on the matrix
+LABEL_COLOR = (140, 140, 200)
+BIT_LABEL_COLOR = (120, 120, 180)
+COLON_COLOR = (100, 100, 150)
+SEPARATOR_COLOR = (20, 20, 40)
 
 
 def _draw_circle(draw, cx, cy, r, fill_color, glow_color=None, glow_radius=0):

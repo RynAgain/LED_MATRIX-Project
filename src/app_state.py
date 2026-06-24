@@ -260,7 +260,8 @@ class DemoCarousel:
       feature and ``run_feature`` (which itself uses ``_run_feature_with_watchdog``);
     * a 0.5s pause between features;
     * config reload + ``_check_schedule()`` night-mode/brightness/feature
-      filtering between cycles.
+      filtering between cycles;
+    * a background update check at the end of each cycle (non-blocking).
 
     The single *new* behavior is the ``menu_requested`` callback: when it returns
     True (a START press detected by the background input thread, which also
@@ -282,6 +283,7 @@ class DemoCarousel:
         self.config = config or {}
         self._shutdown = shutdown_event
         self._menu_requested = menu_requested or (lambda: False)
+        self._update_thread: Optional[threading.Thread] = None
         self._refresh_enabled()
 
     def _refresh_enabled(self) -> None:
@@ -380,6 +382,39 @@ class DemoCarousel:
                 )
                 # Interruptible so a START press / shutdown is still responsive.
                 self._shutdown.wait(timeout=30)
+
+            # Check for updates in the background at the end of each cycle.
+            # Non-blocking: runs in a daemon thread so the next cycle starts
+            # immediately. Only one update check runs at a time.
+            self._trigger_update_check()
+
+    def _trigger_update_check(self) -> None:
+        """Kick off a background update check if one isn't already running.
+
+        This is non-blocking -- the update check runs in a daemon thread.
+        If the check finds an update, AutoUpdater handles the pull + restart
+        of the display service (which restarts the whole process cleanly).
+        """
+        if self._update_thread is not None and self._update_thread.is_alive():
+            logger.debug("Update check already in progress, skipping")
+            return
+
+        def _do_update_check():
+            try:
+                from src.updater.auto_update import AutoUpdater
+                updater = AutoUpdater()
+                if updater.fetch_remote() and updater.has_updates():
+                    logger.info("Update available at end of demo cycle, applying...")
+                    updater.pull_updates()
+                    updater.install_dependencies()
+                    updater.restart_display_service()
+                else:
+                    logger.debug("No updates available (end-of-cycle check)")
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Background update check failed (non-fatal): %s", e)
+
+        self._update_thread = threading.Thread(target=_do_update_check, daemon=True)
+        self._update_thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +639,11 @@ class AppStateMachine:
         to the game; the game returns on ``wants_quit(controller)`` or game-over.
         On return we always go back to MENU. (Game modules themselves are
         extended in Phase 5; here we just wire the launch + return transition.)
+
+        Games do NOT time out -- they run indefinitely until the user exits
+        via the quit gesture (START to return to menu, or Start+Select combo).
+        The duration is set to a very large value (24 hours) so that only
+        user input or game-over logic ends the session.
         """
         name = getattr(self, "_pending_game", None)
         self._pending_game = None
@@ -614,12 +654,19 @@ class AppStateMachine:
         clear_stop()
         from src.main import run_feature
         try:
-            duration = self.config.get("display_duration", 60)
+            # Games get an effectively infinite duration (24 hours).
+            # They only exit via:
+            #   1. wants_quit(controller) -- START press or Start+Select combo
+            #   2. Game-over logic within the game itself
+            #   3. Process shutdown
+            # This ensures the user is never kicked out of an active game
+            # by a timer.
+            game_duration = 86400  # 24 hours -- effectively no timeout
             # Forward the controller so the game runs interactively. run_feature
             # gains an optional controller kwarg in this phase; demos never pass
             # one (CONTROLLER_OVERHAUL.md §5.1). Game modules themselves are
             # converted to honor it in Phase 5.
-            run_feature(name, self.matrix, duration, controller=self.controller)
+            run_feature(name, self.matrix, game_duration, controller=self.controller)
         except Exception:  # noqa: BLE001 - a crashing game must not crash the app
             logger.error("Game '%s' crashed; returning to menu", name, exc_info=True)
         finally:
