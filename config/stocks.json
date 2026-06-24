@@ -1,4 +1,7 @@
 {
+  "mode": "top_movers",
+  "top_movers_count": 5,
+  "min_market_cap_billions": 1,
   "symbols": [
     "AMZN",
     "AAPL",
