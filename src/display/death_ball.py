@@ -45,33 +45,33 @@ SIZE = 64
 FPS = 20
 FRAME_DUR = 1.0 / FPS
 
-# Physics
-GRAVITY = 0.4
-BALL_GRAVITY = 0.25
-WALK_SPEED = 1.5
-JUMP_VEL = -3.5
-DOUBLE_JUMP_VEL = -3.0
-AIR_CONTROL = 0.7
+# Physics (tuned for 2x feel -- bigger jumps, more airtime)
+GRAVITY = 0.35
+BALL_GRAVITY = 0.22
+WALK_SPEED = 1.8
+JUMP_VEL = -4.2
+DOUBLE_JUMP_VEL = -3.8
+AIR_CONTROL = 0.8
 BALL_BOUNCE = 0.7
 BALL_FRICTION = 0.98
-BALL_MAX_SPEED = 5.0
-KICK_POWER = 3.5
-BLAST_POWER = 4.0
-FAST_FALL = 2.0
+BALL_MAX_SPEED = 5.5
+KICK_POWER = 4.0
+BLAST_POWER = 4.5
+FAST_FALL = 2.5
 
 # Mana
 MAX_MANA = 100
 BLAST_COST = 50
 MANA_REGEN = 2
 
-# Arena
+# Arena (scaled for bigger feel)
 FLOOR_Y = 60
 CEILING_Y = 2
 WALL_LEFT = 1
 WALL_RIGHT = 62
-GOAL_TOP = 20
-GOAL_BOTTOM = 44
-GOAL_DEPTH = 5
+GOAL_TOP = 18
+GOAL_BOTTOM = 48
+GOAL_DEPTH = 6
 
 # Scoring
 WIN_SCORE = 3
@@ -81,7 +81,7 @@ ROUND_TIME = 60 * FPS  # 60 seconds in frames
 BG_COLOR = (0, 0, 0)
 WALL_COLOR = (40, 40, 60)
 FLOOR_COLOR = (50, 50, 70)
-PLATFORM_COLOR = (60, 50, 80)
+PLATFORM_COLOR = (70, 60, 100)
 P1_COLOR = (80, 150, 255)
 P2_COLOR = (255, 80, 150)
 BALL_COLOR = (255, 220, 50)
@@ -94,12 +94,12 @@ MANA_COLOR = (100, 200, 255)
 MANA_EMPTY = (40, 60, 80)
 SCORE_COLOR = (255, 255, 255)
 
-# Platforms: (x_start, x_end, y)
+# Platforms: (x_start, x_end, y) -- wider and more spaced for bigger feel
 PLATFORMS = [
-    (22, 41, 40),   # center low
-    (8, 20, 28),    # upper-left
-    (43, 55, 28),   # upper-right
-    (26, 37, 16),   # top center
+    (18, 45, 42),   # center low (wide)
+    (4, 22, 28),    # upper-left (wide)
+    (41, 59, 28),   # upper-right (wide)
+    (22, 41, 14),   # top center (wide)
 ]
 
 
@@ -176,9 +176,9 @@ class Wizard:
                 self.x = WALL_RIGHT
                 self.vx = 0
 
-        # Floor
-        if self.y >= FLOOR_Y - 5:
-            self.y = FLOOR_Y - 5
+        # Floor (wizard is 7px tall now)
+        if self.y >= FLOOR_Y - 7:
+            self.y = FLOOR_Y - 7
             self.vy = 0
             self.on_ground = True
             self.jumps_left = 2
@@ -191,10 +191,10 @@ class Wizard:
         # Platform collisions (one-way: land on top only)
         if self.vy > 0:  # only when falling
             for px_start, px_end, py in PLATFORMS:
-                if (self.x >= px_start - 1 and self.x <= px_end + 1 and
-                        self.y >= py - 5 and self.y <= py and
-                        self.y + self.vy >= py - 5):
-                    self.y = py - 5
+                if (self.x >= px_start - 2 and self.x <= px_end + 2 and
+                        self.y >= py - 7 and self.y <= py and
+                        self.y + self.vy >= py - 7):
+                    self.y = py - 7
                     self.vy = 0
                     self.on_ground = True
                     self.jumps_left = 2
@@ -212,8 +212,8 @@ class Ball:
 
     def reset(self):
         self.x = SIZE / 2.0
-        self.y = SIZE / 3.0
-        self.vx = random.choice([-1.5, 1.5])
+        self.y = 8.0  # Start near top
+        self.vx = 0.0  # Drop straight down
         self.vy = 0.0
         self.trail = []
         self.speed_mult = 1.0
@@ -311,8 +311,8 @@ class DeathBallGame:
     """Full Death Ball game state."""
 
     def __init__(self):
-        self.wizard1 = Wizard(16, FLOOR_Y - 5, 1, 0)
-        self.wizard2 = Wizard(48, FLOOR_Y - 5, -1, 1)
+        self.wizard1 = Wizard(16, FLOOR_Y - 7, 1, 0)
+        self.wizard2 = Wizard(48, FLOOR_Y - 7, -1, 1)
         self.ball = Ball()
         self.scores = [0, 0]
         self.timer = ROUND_TIME
@@ -325,11 +325,11 @@ class DeathBallGame:
     def reset_round(self):
         """Reset positions after a goal."""
         self.wizard1.x = 16
-        self.wizard1.y = FLOOR_Y - 5
+        self.wizard1.y = FLOOR_Y - 7
         self.wizard1.vx = 0
         self.wizard1.vy = 0
         self.wizard2.x = 48
-        self.wizard2.y = FLOOR_Y - 5
+        self.wizard2.y = FLOOR_Y - 7
         self.wizard2.vx = 0
         self.wizard2.vy = 0
         self.ball.reset()
@@ -475,13 +475,21 @@ class DeathBallGame:
                 color = BALL_TRAIL_COLORS[min(i, len(BALL_TRAIL_COLORS) - 1)]
                 draw.point((tx, ty), fill=color)
 
-        # Ball
+        # Ball (bigger 2x2 with glow)
         bx, by = int(self.ball.x), int(self.ball.y)
         speed = self.ball.get_speed()
         # Ball brightness increases with speed
         bright = min(255, int(180 + speed * 15))
         ball_c = (bright, int(bright * 0.86), int(bright * 0.2))
-        if 0 <= bx < SIZE - 1 and 0 <= by < SIZE - 1:
+        glow_c = (bright // 4, int(bright * 0.2), int(bright * 0.05))
+        if 0 <= bx < SIZE - 2 and 0 <= by < SIZE - 2:
+            # Glow (5x5)
+            for dx in range(-2, 3):
+                for dy in range(-2, 3):
+                    gx, gy = bx + dx, by + dy
+                    if 0 <= gx < SIZE and 0 <= gy < SIZE and (abs(dx) + abs(dy)) > 1:
+                        draw.point((gx, gy), fill=glow_c)
+            # Core (3x3)
             draw.rectangle([bx - 1, by - 1, bx + 1, by + 1], fill=ball_c)
 
         # Wizards
@@ -528,28 +536,37 @@ class DeathBallGame:
         return image
 
     def _draw_wizard(self, draw, wizard, color, tick):
-        """Draw a wizard sprite (3x5)."""
+        """Draw a wizard sprite (5x7) -- bigger for better visibility."""
         wx, wy = int(wizard.x), int(wizard.y)
         # Blink briefly after blast
         if wizard.blast_cooldown > 5 and tick % 4 < 2:
             color = BLAST_COLOR
 
-        # Body (3x5): hat + robes
-        if 0 <= wx < SIZE - 2 and 0 <= wy < SIZE - 4:
-            # Hat point
-            draw.point((wx, wy), fill=color)
+        # Darker shade for hat
+        hat_color = (color[0] // 2, color[1] // 2, color[2] // 2)
+
+        # Body (5x7): pointy hat + robes -- 2x bigger
+        if 0 <= wx < SIZE - 3 and 0 <= wy < SIZE - 6:
+            # Hat point (top)
+            draw.point((wx, wy), fill=hat_color)
+            # Hat mid
+            draw.line([(wx - 1, wy + 1), (wx + 1, wy + 1)], fill=hat_color)
             # Hat brim
-            draw.line([(wx - 1, wy + 1), (wx + 1, wy + 1)], fill=color)
-            # Body
-            draw.rectangle([wx - 1, wy + 2, wx + 1, wy + 4], fill=color)
+            draw.line([(wx - 2, wy + 2), (wx + 2, wy + 2)], fill=hat_color)
+            # Face/body
+            draw.rectangle([wx - 2, wy + 3, wx + 2, wy + 5], fill=color)
+            # Robes bottom (wider)
+            draw.line([(wx - 2, wy + 6), (wx + 2, wy + 6)], fill=color)
             # Eyes (facing direction)
             eye_x = wx + wizard.facing
-            draw.point((eye_x, wy + 2), fill=(255, 255, 255))
+            draw.point((eye_x, wy + 3), fill=(255, 255, 255))
+            # Second eye
+            draw.point((eye_x, wy + 4), fill=(200, 200, 200))
 
     def _draw_mana(self, draw, wizard):
         """Draw tiny mana bar below wizard."""
         wx = int(wizard.x)
-        wy = int(wizard.y) + 6
+        wy = int(wizard.y) + 8  # Below 7px wizard
         if wy >= SIZE:
             return
         mana_pct = wizard.mana / MAX_MANA
@@ -567,7 +584,10 @@ class DeathBallGame:
 # ---------------------------------------------------------------------------
 
 def _ai_control(game, wizard, opponent):
-    """AI controls a wizard. Returns (move_dx, jump, blast, fast_fall)."""
+    """AI controls a wizard. Returns (move_dx, jump, blast, fast_fall).
+
+    Enhanced AI that actively uses double-jump to reach platforms and the ball.
+    """
     ball = game.ball
     move_dx = 0
     do_jump = False
@@ -588,53 +608,86 @@ def _ai_control(game, wizard, opponent):
     dy_ball = ball.y - wizard.y
     dist_ball = math.sqrt(dx_ball * dx_ball + dy_ball * dy_ball)
 
+    # Check if ball is on/near a platform (AI should jump up to it)
+    ball_on_platform = False
+    target_platform = None
+    for px_start, px_end, py in PLATFORMS:
+        if px_start - 3 <= ball.x <= px_end + 3 and abs(ball.y - py) < 8:
+            ball_on_platform = True
+            target_platform = (px_start, px_end, py)
+            break
+
     # --- Priority 1: Defend if ball heading toward my goal ---
     if ball_heading_to_me and abs(ball.x - my_goal_x) < 25:
         # Move between ball and goal
-        target_x = ball.x + (3 if wizard.player_id == 0 else -3)
+        target_x = ball.x + (4 if wizard.player_id == 0 else -4)
         if wizard.x < target_x - 2:
             move_dx = 1
         elif wizard.x > target_x + 2:
             move_dx = -1
-        # Jump if ball is above
-        if ball.y < wizard.y - 8 and wizard.jumps_left > 0:
+        # Jump if ball is above -- use double jump aggressively
+        if ball.y < wizard.y - 6 and wizard.jumps_left > 0:
+            do_jump = True
+        # Double-jump in air to reach higher
+        if not wizard.on_ground and ball.y < wizard.y - 4 and wizard.jumps_left > 0:
             do_jump = True
         # Blast if ball is close and fast
-        if dist_ball < 10 and ball.get_speed() > 2 and wizard.can_blast():
+        if dist_ball < 12 and ball.get_speed() > 1.5 and wizard.can_blast():
             do_blast = True
 
-    # --- Priority 2: Go for the ball when it's neutral ---
+    # --- Priority 2: Ball is on a platform - jump up to reach it ---
+    elif ball_on_platform and target_platform and ball.y < wizard.y - 5:
+        px_start, px_end, py = target_platform
+        # Move toward platform center
+        plat_cx = (px_start + px_end) / 2
+        if wizard.x < plat_cx - 3:
+            move_dx = 1
+        elif wizard.x > plat_cx + 3:
+            move_dx = -1
+        # Jump! Use double-jump to reach the platform
+        if wizard.jumps_left > 0:
+            # First jump from ground
+            if wizard.on_ground:
+                do_jump = True
+            # Double-jump when in the air and still below the platform
+            elif wizard.y > py - 2 and wizard.vy >= -1:
+                do_jump = True
+
+    # --- Priority 3: Go for the ball when it's neutral ---
     elif dist_ball > 8:
         if ball.x > wizard.x + 2:
             move_dx = 1
         elif ball.x < wizard.x - 2:
             move_dx = -1
-        # Jump to reach ball
-        if ball.y < wizard.y - 10 and wizard.jumps_left > 0:
+        # Jump to reach ball -- double jump aggressively
+        if ball.y < wizard.y - 8 and wizard.jumps_left > 0:
             do_jump = True
+        # Double-jump mid-air to get height
+        if not wizard.on_ground and ball.y < wizard.y - 4 and wizard.jumps_left > 0 and wizard.vy > 0:
+            do_jump = True  # Double-jump when starting to fall
 
-    # --- Priority 3: Attack - push ball toward opponent goal ---
+    # --- Priority 4: Attack - push ball toward opponent goal ---
     else:
         opp_goal_x = SIZE - GOAL_DEPTH if wizard.player_id == 0 else GOAL_DEPTH
         if ball.x < opp_goal_x:
             move_dx = 1 if wizard.player_id == 0 else -1
         # Blast to redirect ball toward goal
-        if (dist_ball < 8 and wizard.can_blast() and
-                abs(ball.y - (GOAL_TOP + GOAL_BOTTOM) / 2) < 15):
+        if (dist_ball < 10 and wizard.can_blast() and
+                abs(ball.y - (GOAL_TOP + GOAL_BOTTOM) / 2) < 18):
             # Only blast if it'll push ball toward opponent goal
             push_dir = ball.x - wizard.x
             if ((wizard.player_id == 0 and push_dir > 0) or
                     (wizard.player_id == 1 and push_dir < 0)):
                 do_blast = True
 
-    # Fast fall if above ball and ball is below
-    if wizard.y < ball.y - 15 and not wizard.on_ground:
+    # Fast fall if above ball and ball is below (only if far above)
+    if wizard.y < ball.y - 18 and not wizard.on_ground:
         do_fast_fall = True
 
-    # Add slight randomness (reaction delay)
-    if random.random() < 0.05:
+    # Add slight randomness (reaction delay) -- less random for better play
+    if random.random() < 0.03:
         move_dx = 0
-    if random.random() < 0.1:
+    if random.random() < 0.05:
         do_jump = False
 
     return move_dx, do_jump, do_blast, do_fast_fall
