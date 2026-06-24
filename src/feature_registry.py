@@ -50,4 +50,5 @@ FEATURE_MODULES = {
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",
+    "fish_tank": "src.display.fish_tank",
 }
