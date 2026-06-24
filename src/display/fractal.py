@@ -137,19 +137,21 @@ def _run_mandelbrot(matrix, duration=20):
     """Mandelbrot set that progressively increases iteration depth and zooms in.
 
     The fractal "unfolds" as more iterations reveal finer boundary detail,
-    and a slow zoom pulls the viewer into an interesting region.
+    and a slow zoom pulls the viewer into an interesting boundary region.
+    Stays on the edge of the set where detail is infinite.
     """
     start = time.time()
 
-    # Zoom target: Seahorse Valley
-    target_cx, target_cy = -0.745, 0.186
+    # Zoom target: a point precisely ON the boundary of the Mandelbrot set
+    # This is in the "Seahorse Valley" filament area - guaranteed to have
+    # infinite detail and never go blank (it's on the edge, not inside)
+    target_cx, target_cy = -0.7436439, 0.1318259
 
-    # Start wide, zoom in over time
-    initial_scale = 3.0
-    final_scale = 0.005
+    # Start wide, zoom in over time - but limit zoom to avoid going blank
+    initial_scale = 3.5
+    final_scale = 0.0002  # Don't zoom deeper than detail allows
 
     frame_count = 0
-    max_frames = int(duration / FRAME_INTERVAL)
 
     while time.time() - start < duration:
         if should_stop():
@@ -159,15 +161,19 @@ def _run_mandelbrot(matrix, duration=20):
         # Progress 0..1 over the duration
         t = min(1.0, (time.time() - start) / duration)
 
-        # Exponential zoom
-        scale = initial_scale * math.exp(math.log(final_scale / initial_scale) * t)
+        # Exponential zoom - smooth deceleration at end
+        eased_t = t * (2 - t)  # Ease-out so we slow down as we get deeper
+        scale = initial_scale * math.exp(math.log(final_scale / initial_scale) * eased_t)
 
-        # Increase max iterations as we zoom (reveals more detail)
-        max_iter = int(20 + t * 80)
+        # Increase max iterations proportionally with zoom depth
+        # More zoom = need more iterations to see boundary detail
+        zoom_factor = initial_scale / scale
+        max_iter = int(30 + math.log2(max(1, zoom_factor)) * 25)
+        max_iter = min(max_iter, 300)  # Cap for performance on 64x64
 
         # Center interpolates toward target
-        cx = -0.5 + (target_cx - (-0.5)) * t
-        cy = 0.0 + (target_cy - 0.0) * t
+        cx = -0.5 + (target_cx - (-0.5)) * eased_t
+        cy = 0.0 + (target_cy - 0.0) * eased_t
 
         image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
         pixels = image.load()
@@ -183,8 +189,8 @@ def _run_mandelbrot(matrix, duration=20):
                 if iters == max_iter:
                     pixels[px, py] = (0, 0, 0)
                 else:
-                    # Smooth coloring
-                    color = _depth_color(iters, max_iter, hue_offset=t * 0.3)
+                    # Smooth coloring with shifted palette as we zoom
+                    color = _depth_color(iters, max_iter, hue_offset=t * 0.5)
                     pixels[px, py] = color
 
         matrix.SetImage(image)
