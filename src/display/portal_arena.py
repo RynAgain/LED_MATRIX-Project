@@ -41,14 +41,14 @@ FPS = 20
 FRAME_DUR = 1.0 / FPS
 
 # Physics
-MOVE_SPEED = 1.5
-BULLET_SPEED = 3.0
-BULLET_DAMAGE = 25
+MOVE_SPEED = 1.2
+BULLET_SPEED = 2.2
+BULLET_DAMAGE = 34
 MAX_HP = 100
 RESPAWN_TIME = 40  # frames
-SHOOT_COOLDOWN = 6  # frames between shots
-MAX_BULLETS_PER_PLAYER = 3  # Max active bullets at once (prevents spam)
-PORTAL_COOLDOWN = 20  # frames between portal placements
+SHOOT_COOLDOWN = 12  # frames between shots (slower, more deliberate)
+MAX_BULLETS_PER_PLAYER = 2  # Max active bullets at once (prevents spam)
+PORTAL_COOLDOWN = 30  # frames between portal placements
 
 # Colors
 BG_COLOR = (5, 5, 10)
@@ -71,21 +71,22 @@ GRID_SIZE = 4  # Each grid cell = 4x4 pixels
 GRID_W = SIZE // GRID_SIZE
 GRID_H = SIZE // GRID_SIZE
 
+# Simpler arena with just a few cover blocks (less chaotic, more open)
 ARENA = [
     "################",
     "#..............#",
-    "#..##....##..#.#",
-    "#..##....##....#",
     "#..............#",
-    "#....##..##....#",
-    "#....##..##....#",
+    "#...##....##...#",
     "#..............#",
     "#..............#",
-    "#....##..##....#",
-    "#....##..##....#",
     "#..............#",
-    "#..##....##..#.#",
-    "#..##....##....#",
+    "#......##......#",
+    "#......##......#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#...##....##...#",
+    "#..............#",
     "#..............#",
     "################",
 ]
@@ -171,6 +172,7 @@ class Player:
         self.respawn_timer = 0
         self.alive = True
         self.score = 0
+        self.teleport_cooldown = 0  # Prevents re-teleport after exiting a portal
 
     def move(self, dx, dy):
         """Move player with wall collision."""
@@ -210,6 +212,8 @@ class Player:
             self.shoot_cooldown -= 1
         if self.portal_cooldown > 0:
             self.portal_cooldown -= 1
+        if self.teleport_cooldown > 0:
+            self.teleport_cooldown -= 1
         if not self.alive:
             self.respawn_timer -= 1
             if self.respawn_timer <= 0:
@@ -375,14 +379,18 @@ class PortalArenaGame:
             self.player2.x, self.player2.y = pos
 
         # Portal teleport for players (own portals only)
+        # Uses teleport_cooldown to prevent instant bounce-back
         for player in [self.player1, self.player2]:
             if not player.alive:
                 continue
+            if player.teleport_cooldown > 0:
+                continue  # Recently teleported, skip
             result = self._check_portal_teleport_entity(
                 player.x, player.y, player.player_id)
             if result:
                 player.x, player.y = result
-                # Brief invulnerability flash
+                player.teleport_cooldown = 15  # ~0.75s immunity from re-teleport
+                # Brief teleport flash
                 for _ in range(4):
                     self.particles.append(Particle(
                         player.x, player.y,
