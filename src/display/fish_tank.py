@@ -270,6 +270,167 @@ class Plant:
                             draw.point((lpx, lpy), fill=color)
 
 
+class Crab:
+    """A crab walking along the sand bottom with animated claws."""
+
+    def __init__(self):
+        self.x = random.uniform(8, WIDTH - 8)
+        self.y = float(HEIGHT - 7)  # On the sand
+        self.direction = random.choice([-1, 1])
+        self.speed = random.uniform(0.15, 0.35)
+        self.claw_phase = random.uniform(0, math.pi * 2)
+        self.color = random.choice([
+            (200, 60, 30),   # Red crab
+            (180, 100, 40),  # Orange-brown crab
+            (160, 50, 50),   # Dark red crab
+        ])
+        self.pause_timer = 0
+
+    def update(self, tick):
+        """Move crab sideways along the sand."""
+        self.claw_phase += 0.25
+
+        if self.pause_timer > 0:
+            self.pause_timer -= 1
+            return
+
+        self.x += self.speed * self.direction
+
+        # Turn around at edges
+        if self.x < 4:
+            self.direction = 1
+        elif self.x > WIDTH - 4:
+            self.direction = -1
+
+        # Occasionally pause and change direction
+        if random.random() < 0.01:
+            self.direction = -self.direction
+            self.pause_timer = random.randint(10, 30)
+
+    def draw(self, draw_ctx, tick):
+        """Draw the crab: oval body + 2 animated claws + legs."""
+        ix, iy = int(self.x), int(self.y)
+        d = self.direction
+
+        # Body (3x2 oval)
+        if 0 <= ix < WIDTH - 2 and 0 <= iy < HEIGHT - 1:
+            draw_ctx.rectangle([(ix - 1, iy), (ix + 1, iy + 1)], fill=self.color)
+
+        # Claws (animated open/close)
+        claw_open = math.sin(self.claw_phase) > 0
+        # Left claw
+        cx_l = ix - 2
+        cy_l = iy
+        if 0 <= cx_l < WIDTH and 0 <= cy_l < HEIGHT:
+            draw_ctx.point((cx_l, cy_l), fill=self.color)
+            if claw_open and 0 <= cx_l < WIDTH and 0 <= cy_l - 1 < HEIGHT:
+                draw_ctx.point((cx_l, cy_l - 1), fill=self.color)
+        # Right claw
+        cx_r = ix + 2
+        if 0 <= cx_r < WIDTH and 0 <= cy_l < HEIGHT:
+            draw_ctx.point((cx_r, cy_l), fill=self.color)
+            if claw_open and 0 <= cx_r < WIDTH and 0 <= cy_l - 1 < HEIGHT:
+                draw_ctx.point((cx_r, cy_l - 1), fill=self.color)
+
+        # Tiny eyes
+        if 0 <= ix - 1 < WIDTH and 0 <= iy - 1 < HEIGHT:
+            draw_ctx.point((ix - 1, iy - 1), fill=(255, 255, 255))
+        if 0 <= ix + 1 < WIDTH and 0 <= iy - 1 < HEIGHT:
+            draw_ctx.point((ix + 1, iy - 1), fill=(255, 255, 255))
+
+
+class Angelfish:
+    """A tall, thin angelfish that moves slowly and gracefully."""
+
+    def __init__(self):
+        self.x = random.uniform(10, WIDTH - 10)
+        self.y = random.uniform(12, HEIGHT - 18)
+        self.direction = random.choice([-1, 1])
+        self.speed = random.uniform(0.1, 0.25)  # Very slow
+        self.fin_phase = random.uniform(0, math.pi * 2)
+        self.drift_phase = random.uniform(0, math.pi * 2)
+        # Angelfish are typically striped black/white/yellow
+        self.body_color = random.choice([
+            (255, 255, 100),   # Yellow angelfish
+            (200, 200, 220),   # Silver angelfish
+            (255, 180, 50),    # Gold angelfish
+        ])
+        self.stripe_color = (20, 20, 30)
+        self.fin_color = (self.body_color[0] // 2, self.body_color[1] // 2, self.body_color[2] // 2)
+
+    def update(self, tick):
+        """Slow, graceful movement."""
+        self.fin_phase += 0.15
+        self.drift_phase += 0.02
+
+        self.x += self.speed * self.direction
+        self.y += math.sin(self.drift_phase) * 0.05
+
+        # Turn around at edges
+        if self.x < 6:
+            self.direction = 1
+        elif self.x > WIDTH - 6:
+            self.direction = -1
+
+        # Stay in water
+        if self.y < 8:
+            self.y = 8
+        elif self.y > HEIGHT - 16:
+            self.y = HEIGHT - 16
+
+    def draw(self, draw_ctx, tick):
+        """Draw angelfish: triangular profile, tall top fin and long bottom fin.
+
+        Angelfish have a round/triangular body that's taller than wide,
+        with dramatic dorsal (top) and anal (bottom) fins that make them
+        look like a triangle/arrow pointing sideways.
+        """
+        ix, iy = int(self.x), int(self.y)
+        d = self.direction
+
+        # Body (round, 3px wide x 3px tall center)
+        for dy in range(-1, 2):
+            for dx in range(0, 3):
+                px = ix + (dx - 1) * d
+                py = iy + dy
+                if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                    # Stripe pattern
+                    c = self.stripe_color if dx == 1 else self.body_color
+                    draw_ctx.point((px, py), fill=c)
+
+        # Tall dorsal fin (extends 3px above body, waves slightly)
+        fin_wave = int(math.sin(self.fin_phase) * 0.7)
+        for fy in range(1, 4):
+            fx = ix + fin_wave
+            py = iy - 1 - fy
+            if 0 <= fx < WIDTH and 0 <= py < HEIGHT:
+                alpha = 1.0 - fy / 4.0
+                c = tuple(int(v * alpha) for v in self.body_color)
+                draw_ctx.point((fx, py), fill=c)
+
+        # Long anal fin (extends 3px below body)
+        for fy in range(1, 4):
+            fx = ix - fin_wave
+            py = iy + 1 + fy
+            if 0 <= fx < WIDTH and 0 <= py < HEIGHT:
+                alpha = 1.0 - fy / 4.0
+                c = tuple(int(v * alpha) for v in self.body_color)
+                draw_ctx.point((fx, py), fill=c)
+
+        # Tail (small, behind body)
+        tail_x = ix - d * 2
+        if 0 <= tail_x < WIDTH:
+            if 0 <= iy - 1 < HEIGHT:
+                draw_ctx.point((tail_x, iy - 1), fill=self.fin_color)
+            if 0 <= iy + 1 < HEIGHT:
+                draw_ctx.point((tail_x, iy + 1), fill=self.fin_color)
+
+        # Eye (at front of body)
+        eye_x = ix + d
+        if 0 <= eye_x < WIDTH and 0 <= iy < HEIGHT:
+            draw_ctx.point((eye_x, iy), fill=(0, 0, 0))
+
+
 def _draw_background(draw):
     """Draw the tank background: water gradient + sand bottom."""
     # Water gradient (top to bottom)
@@ -301,8 +462,14 @@ def run(matrix, duration=60):
     tick = 0
 
     # Create fish
-    num_fish = random.randint(5, 8)
+    num_fish = random.randint(4, 6)
     fish_list = [Fish() for _ in range(num_fish)]
+
+    # Create angelfish (1-2)
+    angelfish_list = [Angelfish() for _ in range(random.randint(1, 2))]
+
+    # Create crabs (1-2 on the sand)
+    crab_list = [Crab() for _ in range(random.randint(1, 2))]
 
     # Create plants
     plants = []
@@ -349,11 +516,21 @@ def run(matrix, duration=60):
                 else:
                     bubbles.append(Bubble())
 
+            # Update and draw crabs (on sand, drawn before fish)
+            for crab in crab_list:
+                crab.update(tick)
+                crab.draw(draw, tick)
+
             # Update and draw fish
             for fish in fish_list:
                 fish.update(tick, fish_list)
             for fish in fish_list:
                 fish.draw(draw, tick)
+
+            # Update and draw angelfish (in front of regular fish)
+            for angel in angelfish_list:
+                angel.update(tick)
+                angel.draw(draw, tick)
 
             matrix.SetImage(image)
 

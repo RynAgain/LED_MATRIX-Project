@@ -69,9 +69,16 @@ FLOOR_Y = 63
 CEILING_Y = 0
 WALL_LEFT = 0
 WALL_RIGHT = 63
-GOAL_TOP = 12
-GOAL_BOTTOM = 52
+GOAL_TOP = 22
+GOAL_BOTTOM = 42
 GOAL_DEPTH = 2
+
+# Defensive walls: vertical walls 10px in front of each goal
+# Ball/wizards must go around these to score
+DEFENSE_WALL_LEFT_X = 10   # 10px from left wall
+DEFENSE_WALL_RIGHT_X = 53  # 10px from right wall
+DEFENSE_WALL_TOP = 18      # Wall starts slightly above goal
+DEFENSE_WALL_BOTTOM = 46   # Wall ends slightly below goal
 
 # Scoring
 WIN_SCORE = 3
@@ -171,6 +178,24 @@ class Wizard:
                 self.x = WALL_RIGHT
                 self.vx = 0
 
+        # Defensive wall collisions (vertical walls in front of goals)
+        # Left defensive wall
+        if (DEFENSE_WALL_TOP <= self.y <= DEFENSE_WALL_BOTTOM):
+            if self.vx < 0 and abs(self.x - DEFENSE_WALL_LEFT_X) < 2:
+                self.x = DEFENSE_WALL_LEFT_X + 2
+                self.vx = 0
+            elif self.vx > 0 and abs(self.x - DEFENSE_WALL_LEFT_X) < 2:
+                self.x = DEFENSE_WALL_LEFT_X - 1
+                self.vx = 0
+        # Right defensive wall
+        if (DEFENSE_WALL_TOP <= self.y <= DEFENSE_WALL_BOTTOM):
+            if self.vx > 0 and abs(self.x - DEFENSE_WALL_RIGHT_X) < 2:
+                self.x = DEFENSE_WALL_RIGHT_X - 1
+                self.vx = 0
+            elif self.vx < 0 and abs(self.x - DEFENSE_WALL_RIGHT_X) < 2:
+                self.x = DEFENSE_WALL_RIGHT_X + 2
+                self.vx = 0
+
         # Floor (wizard is 1px tall now -- tiny zoomed-out feel)
         if self.y >= FLOOR_Y - 1:
             self.y = FLOOR_Y - 1
@@ -254,6 +279,17 @@ class Ball:
         if self.x >= WALL_RIGHT - GOAL_DEPTH:
             if self.y < GOAL_TOP or self.y > GOAL_BOTTOM:
                 self.x = WALL_RIGHT - GOAL_DEPTH
+                self.vx = -abs(self.vx) * BALL_BOUNCE
+
+        # Defensive wall bounces (ball bounces off the vertical walls in front of goals)
+        if DEFENSE_WALL_TOP <= self.y <= DEFENSE_WALL_BOTTOM:
+            # Left defensive wall
+            if self.vx < 0 and abs(self.x - DEFENSE_WALL_LEFT_X) < 1.5:
+                self.x = DEFENSE_WALL_LEFT_X + 1.5
+                self.vx = abs(self.vx) * BALL_BOUNCE
+            # Right defensive wall
+            if self.vx > 0 and abs(self.x - DEFENSE_WALL_RIGHT_X) < 1.5:
+                self.x = DEFENSE_WALL_RIGHT_X - 1.5
                 self.vx = -abs(self.vx) * BALL_BOUNCE
 
         # Platform bounces
@@ -454,6 +490,12 @@ class DeathBallGame:
         # Platforms (if any)
         for px_start, px_end, py in PLATFORMS:
             draw.line([(px_start, py), (px_end, py)], fill=PLATFORM_COLOR)
+
+        # Defensive walls (vertical lines in front of goals)
+        draw.line([(DEFENSE_WALL_LEFT_X, DEFENSE_WALL_TOP),
+                   (DEFENSE_WALL_LEFT_X, DEFENSE_WALL_BOTTOM)], fill=WALL_COLOR)
+        draw.line([(DEFENSE_WALL_RIGHT_X, DEFENSE_WALL_TOP),
+                   (DEFENSE_WALL_RIGHT_X, DEFENSE_WALL_BOTTOM)], fill=WALL_COLOR)
 
         # Sudden death pulsing walls
         if self.sudden_death:

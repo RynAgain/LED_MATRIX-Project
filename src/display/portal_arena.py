@@ -243,9 +243,9 @@ class PortalArenaGame:
     """Full Portal Arena game state."""
 
     def __init__(self):
-        # Spawn positions
-        p1_pos = _grid_to_pixel(3, 3)
-        p2_pos = _grid_to_pixel(12, 12)
+        # Spawn positions (verified open spaces in the arena map)
+        p1_pos = _grid_to_pixel(2, 1)
+        p2_pos = _grid_to_pixel(13, 14)
         self.player1 = Player(p1_pos[0], p1_pos[1], 0)
         self.player2 = Player(p2_pos[0], p2_pos[1], 1)
         self.bullets = []
@@ -368,10 +368,10 @@ class PortalArenaGame:
 
         # Respawn dead players
         if not self.player1.alive and self.player1.respawn_timer <= 0:
-            pos = _grid_to_pixel(3, 3)
+            pos = _grid_to_pixel(2, 1)
             self.player1.x, self.player1.y = pos
         if not self.player2.alive and self.player2.respawn_timer <= 0:
-            pos = _grid_to_pixel(12, 12)
+            pos = _grid_to_pixel(13, 14)
             self.player2.x, self.player2.y = pos
 
         # Portal teleport for players (own portals only)
