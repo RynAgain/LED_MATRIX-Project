@@ -132,49 +132,68 @@ class Fish:
             self.vy = random.uniform(-0.1, 0.1)
 
     def draw(self, draw, tick):
-        """Draw the fish at its current position."""
+        """Draw the fish at its current position -- proper fish shape.
+
+        Shape: pointed nose -> wide middle -> narrow tail stem -> V-tail fork.
+        """
         ix = int(self.x)
         iy = int(self.y)
 
         # Tail wiggle offset
-        tail_wiggle = int(math.sin(self.tail_phase) * 1.5)
+        tail_wiggle = int(math.sin(self.tail_phase) * 1)
 
-        # Body direction
+        # Body direction (1=right, -1=left)
         d = self.direction
 
-        # Draw tail (triangle behind body)
-        tail_x = ix - d * (self.size + 1)
-        tail_y1 = iy - 2 + tail_wiggle
-        tail_y2 = iy + 2 + tail_wiggle
-        draw.line([(tail_x, tail_y1), (tail_x, tail_y2)], fill=self.fin_color)
-        if self.size > 3:
-            tail_x2 = ix - d * (self.size + 2)
-            draw.line([(tail_x2, tail_y1 - 1), (tail_x2, tail_y2 + 1)], fill=self.fin_color)
+        # Fish body profile: define height at each x-offset from center
+        # Positive offsets go toward the HEAD (facing direction)
+        # Negative offsets go toward the TAIL
+        body_len = self.size
+        half = body_len // 2
 
-        # Draw body (ellipse-ish, pixel by pixel for small sizes)
-        half_h = max(1, self.size // 3)
-        for bx in range(-self.size // 2, self.size // 2 + 1):
-            # Body height varies along length (thicker in middle)
-            t = abs(bx) / (self.size / 2 + 0.1)
-            h = int(half_h * (1 - t * 0.6))
-            px = ix + bx * d
+        # Draw body: elongated oval shape (wide middle, tapers to nose)
+        for bx_offset in range(-half, half + 1):
+            # Position along body: -1 (tail end) to +1 (nose)
+            t = bx_offset / (half + 0.1)
+
+            # Height profile: oval, widest at center, tapers both ends
+            # Nose tapers more sharply than tail
+            if t > 0:
+                # Nose side: sharp taper
+                h = max(0, int(1.5 * (1 - t * t) * (body_len / 4)))
+            else:
+                # Tail side: gentler taper (but NOT wider than middle)
+                h = max(0, int(1.5 * (1 - t * t * 0.7) * (body_len / 4)))
+
+            px = ix + bx_offset * d
             for by in range(-h, h + 1):
                 py = iy + by
                 if 0 <= px < WIDTH and 0 <= py < HEIGHT:
-                    # Use accent color for top half, main for bottom
-                    color = self.accent_color if by < 0 else self.body_color
+                    color = self.accent_color if by <= 0 else self.body_color
                     draw.point((px, py), fill=color)
 
-        # Draw dorsal fin (top fin on larger fish)
-        if self.size >= 5:
-            fin_x = ix
-            fin_y = iy - half_h - 1
-            if 0 <= fin_x < WIDTH and 0 <= fin_y < HEIGHT:
-                draw.point((fin_x, fin_y), fill=self.fin_color)
+        # Tail fork (V-shape, behind the body)
+        tail_base_x = ix - d * (half + 1)
+        # Upper fork
+        ty1 = iy - 1 + tail_wiggle
+        tx1 = tail_base_x - d
+        if 0 <= tx1 < WIDTH and 0 <= ty1 < HEIGHT:
+            draw.point((tx1, ty1), fill=self.fin_color)
+        ty1u = iy - 2 + tail_wiggle
+        tx1u = tail_base_x - d * 2
+        if 0 <= tx1u < WIDTH and 0 <= ty1u < HEIGHT:
+            draw.point((tx1u, ty1u), fill=self.fin_color)
+        # Lower fork
+        ty2 = iy + 1 + tail_wiggle
+        if 0 <= tx1 < WIDTH and 0 <= ty2 < HEIGHT:
+            draw.point((tx1, ty2), fill=self.fin_color)
+        ty2d = iy + 2 + tail_wiggle
+        if 0 <= tx1u < WIDTH and 0 <= ty2d < HEIGHT:
+            draw.point((tx1u, ty2d), fill=self.fin_color)
 
-        # Draw eye
-        eye_x = ix + d * (self.size // 2 - 1)
-        eye_y = iy - 1
+        # Eye (single bright pixel near nose)
+        eye_x = ix + d * (half - 1)
+        eye_y = iy
         if 0 <= eye_x < WIDTH and 0 <= eye_y < HEIGHT:
             draw.point((eye_x, eye_y), fill=(255, 255, 255))
 

@@ -64,14 +64,14 @@ MAX_MANA = 100
 BLAST_COST = 50
 MANA_REGEN = 2
 
-# Arena -- maximally open, thin walls, big play area
-FLOOR_Y = 62
-CEILING_Y = 1
+# Arena -- maximally open, razor-thin walls, huge play area
+FLOOR_Y = 63
+CEILING_Y = 0
 WALL_LEFT = 0
 WALL_RIGHT = 63
-GOAL_TOP = 16
-GOAL_BOTTOM = 50
-GOAL_DEPTH = 4
+GOAL_TOP = 12
+GOAL_BOTTOM = 52
+GOAL_DEPTH = 2
 
 # Scoring
 WIN_SCORE = 3
@@ -94,11 +94,8 @@ MANA_COLOR = (100, 200, 255)
 MANA_EMPTY = (40, 60, 80)
 SCORE_COLOR = (255, 255, 255)
 
-# Platforms: only 2 -- left and right elevated. Keeps arena very open.
-PLATFORMS = [
-    (8, 26, 34),    # left platform
-    (37, 55, 34),   # right platform
-]
+# Platforms: NONE -- fully open arena for maximum space feeling
+PLATFORMS = []
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +171,9 @@ class Wizard:
                 self.x = WALL_RIGHT
                 self.vx = 0
 
-        # Floor (wizard is 7px tall now)
-        if self.y >= FLOOR_Y - 7:
-            self.y = FLOOR_Y - 7
+        # Floor (wizard is 1px tall now -- tiny zoomed-out feel)
+        if self.y >= FLOOR_Y - 1:
+            self.y = FLOOR_Y - 1
             self.vy = 0
             self.on_ground = True
             self.jumps_left = 2
@@ -189,10 +186,9 @@ class Wizard:
         # Platform collisions (one-way: land on top only)
         if self.vy > 0:  # only when falling
             for px_start, px_end, py in PLATFORMS:
-                if (self.x >= px_start - 2 and self.x <= px_end + 2 and
-                        self.y >= py - 7 and self.y <= py and
-                        self.y + self.vy >= py - 7):
-                    self.y = py - 7
+                if (self.x >= px_start - 1 and self.x <= px_end + 1 and
+                        self.y >= py - 1 and self.y <= py + 1):
+                    self.y = py - 1
                     self.vy = 0
                     self.on_ground = True
                     self.jumps_left = 2
@@ -309,8 +305,8 @@ class DeathBallGame:
     """Full Death Ball game state."""
 
     def __init__(self):
-        self.wizard1 = Wizard(16, FLOOR_Y - 7, 1, 0)
-        self.wizard2 = Wizard(48, FLOOR_Y - 7, -1, 1)
+        self.wizard1 = Wizard(16, FLOOR_Y - 1, 1, 0)
+        self.wizard2 = Wizard(48, FLOOR_Y - 1, -1, 1)
         self.ball = Ball()
         self.scores = [0, 0]
         self.timer = ROUND_TIME
@@ -323,11 +319,11 @@ class DeathBallGame:
     def reset_round(self):
         """Reset positions after a goal."""
         self.wizard1.x = 16
-        self.wizard1.y = FLOOR_Y - 7
+        self.wizard1.y = FLOOR_Y - 1
         self.wizard1.vx = 0
         self.wizard1.vy = 0
         self.wizard2.x = 48
-        self.wizard2.y = FLOOR_Y - 7
+        self.wizard2.y = FLOOR_Y - 1
         self.wizard2.vx = 0
         self.wizard2.vy = 0
         self.ball.reset()
@@ -445,20 +441,19 @@ class DeathBallGame:
         draw.rectangle([SIZE - GOAL_DEPTH, GOAL_TOP, SIZE - 1, GOAL_BOTTOM],
                        fill=(g2_pulse * 4, g2_pulse, g2_pulse * 2))
 
-        # Arena walls
-        # Top/bottom
-        draw.rectangle([0, 0, SIZE - 1, CEILING_Y - 1], fill=WALL_COLOR)
-        draw.rectangle([0, FLOOR_Y, SIZE - 1, SIZE - 1], fill=FLOOR_COLOR)
-        # Left wall (except goal)
-        draw.rectangle([0, CEILING_Y, GOAL_DEPTH - 1, GOAL_TOP - 1], fill=WALL_COLOR)
-        draw.rectangle([0, GOAL_BOTTOM + 1, GOAL_DEPTH - 1, FLOOR_Y - 1], fill=WALL_COLOR)
-        # Right wall (except goal)
-        draw.rectangle([SIZE - GOAL_DEPTH, CEILING_Y, SIZE - 1, GOAL_TOP - 1], fill=WALL_COLOR)
-        draw.rectangle([SIZE - GOAL_DEPTH, GOAL_BOTTOM + 1, SIZE - 1, FLOOR_Y - 1], fill=WALL_COLOR)
+        # Arena walls -- single pixel lines only for maximum openness
+        # Floor (1px line)
+        draw.line([(0, FLOOR_Y), (SIZE - 1, FLOOR_Y)], fill=FLOOR_COLOR)
+        # Left wall (1px, except goal opening)
+        draw.line([(0, 0), (0, GOAL_TOP - 1)], fill=WALL_COLOR)
+        draw.line([(0, GOAL_BOTTOM + 1), (0, FLOOR_Y)], fill=WALL_COLOR)
+        # Right wall (1px, except goal opening)
+        draw.line([(SIZE - 1, 0), (SIZE - 1, GOAL_TOP - 1)], fill=WALL_COLOR)
+        draw.line([(SIZE - 1, GOAL_BOTTOM + 1), (SIZE - 1, FLOOR_Y)], fill=WALL_COLOR)
 
-        # Platforms
+        # Platforms (if any)
         for px_start, px_end, py in PLATFORMS:
-            draw.rectangle([px_start, py, px_end, py + 1], fill=PLATFORM_COLOR)
+            draw.line([(px_start, py), (px_end, py)], fill=PLATFORM_COLOR)
 
         # Sudden death pulsing walls
         if self.sudden_death:
@@ -473,22 +468,13 @@ class DeathBallGame:
                 color = BALL_TRAIL_COLORS[min(i, len(BALL_TRAIL_COLORS) - 1)]
                 draw.point((tx, ty), fill=color)
 
-        # Ball (bigger 2x2 with glow)
+        # Ball (single bright pixel -- zoomed out feel)
         bx, by = int(self.ball.x), int(self.ball.y)
         speed = self.ball.get_speed()
-        # Ball brightness increases with speed
-        bright = min(255, int(180 + speed * 15))
+        bright = min(255, int(200 + speed * 10))
         ball_c = (bright, int(bright * 0.86), int(bright * 0.2))
-        glow_c = (bright // 4, int(bright * 0.2), int(bright * 0.05))
-        if 0 <= bx < SIZE - 2 and 0 <= by < SIZE - 2:
-            # Glow (5x5)
-            for dx in range(-2, 3):
-                for dy in range(-2, 3):
-                    gx, gy = bx + dx, by + dy
-                    if 0 <= gx < SIZE and 0 <= gy < SIZE and (abs(dx) + abs(dy)) > 1:
-                        draw.point((gx, gy), fill=glow_c)
-            # Core (3x3)
-            draw.rectangle([bx - 1, by - 1, bx + 1, by + 1], fill=ball_c)
+        if 0 <= bx < SIZE and 0 <= by < SIZE:
+            draw.point((bx, by), fill=ball_c)
 
         # Wizards
         self._draw_wizard(draw, self.wizard1, P1_COLOR, tick)
@@ -534,37 +520,25 @@ class DeathBallGame:
         return image
 
     def _draw_wizard(self, draw, wizard, color, tick):
-        """Draw a wizard sprite (5x7) -- bigger for better visibility."""
+        """Draw a wizard sprite as 2 wide x 1 tall pixel (tiny, zoomed-out feel)."""
         wx, wy = int(wizard.x), int(wizard.y)
         # Blink briefly after blast
         if wizard.blast_cooldown > 5 and tick % 4 < 2:
             color = BLAST_COLOR
 
-        # Darker shade for hat
-        hat_color = (color[0] // 2, color[1] // 2, color[2] // 2)
-
-        # Body (5x7): pointy hat + robes -- 2x bigger
-        if 0 <= wx < SIZE - 3 and 0 <= wy < SIZE - 6:
-            # Hat point (top)
-            draw.point((wx, wy), fill=hat_color)
-            # Hat mid
-            draw.line([(wx - 1, wy + 1), (wx + 1, wy + 1)], fill=hat_color)
-            # Hat brim
-            draw.line([(wx - 2, wy + 2), (wx + 2, wy + 2)], fill=hat_color)
-            # Face/body
-            draw.rectangle([wx - 2, wy + 3, wx + 2, wy + 5], fill=color)
-            # Robes bottom (wider)
-            draw.line([(wx - 2, wy + 6), (wx + 2, wy + 6)], fill=color)
-            # Eyes (facing direction)
+        # Tiny 2x1 body -- gives the arena a massive feel
+        if 0 <= wx < SIZE - 1 and 0 <= wy < SIZE:
+            draw.point((wx, wy), fill=color)
+            draw.point((wx + 1, wy), fill=color)
+            # Facing dot (shows direction)
             eye_x = wx + wizard.facing
-            draw.point((eye_x, wy + 3), fill=(255, 255, 255))
-            # Second eye
-            draw.point((eye_x, wy + 4), fill=(200, 200, 200))
+            if 0 <= eye_x < SIZE and 0 <= wy - 1 < SIZE:
+                draw.point((eye_x, wy - 1), fill=(255, 255, 255))
 
     def _draw_mana(self, draw, wizard):
-        """Draw tiny mana bar below wizard."""
+        """Draw tiny mana bar below wizard (1px below the 1px wizard)."""
         wx = int(wizard.x)
-        wy = int(wizard.y) + 8  # Below 7px wizard
+        wy = int(wizard.y) + 2  # Just below tiny wizard
         if wy >= SIZE:
             return
         mana_pct = wizard.mana / MAX_MANA
