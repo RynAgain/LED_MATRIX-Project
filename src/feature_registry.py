@@ -53,4 +53,5 @@ FEATURE_MODULES = {
     "fish_tank": "src.display.fish_tank",
     "icy_tower": "src.display.icy_tower",
     "moon_tracker": "src.display.moon_tracker",
+    "portal_arena": "src.display.portal_arena",
 }
