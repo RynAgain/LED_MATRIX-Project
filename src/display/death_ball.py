@@ -64,14 +64,14 @@ MAX_MANA = 100
 BLAST_COST = 50
 MANA_REGEN = 2
 
-# Arena (scaled for bigger feel)
-FLOOR_Y = 60
-CEILING_Y = 2
-WALL_LEFT = 1
-WALL_RIGHT = 62
-GOAL_TOP = 18
-GOAL_BOTTOM = 48
-GOAL_DEPTH = 6
+# Arena -- maximally open, thin walls, big play area
+FLOOR_Y = 62
+CEILING_Y = 1
+WALL_LEFT = 0
+WALL_RIGHT = 63
+GOAL_TOP = 16
+GOAL_BOTTOM = 50
+GOAL_DEPTH = 4
 
 # Scoring
 WIN_SCORE = 3
@@ -79,9 +79,9 @@ ROUND_TIME = 60 * FPS  # 60 seconds in frames
 
 # Colors
 BG_COLOR = (0, 0, 0)
-WALL_COLOR = (40, 40, 60)
-FLOOR_COLOR = (50, 50, 70)
-PLATFORM_COLOR = (70, 60, 100)
+WALL_COLOR = (30, 30, 50)
+FLOOR_COLOR = (40, 40, 60)
+PLATFORM_COLOR = (60, 50, 90)
 P1_COLOR = (80, 150, 255)
 P2_COLOR = (255, 80, 150)
 BALL_COLOR = (255, 220, 50)
@@ -94,12 +94,10 @@ MANA_COLOR = (100, 200, 255)
 MANA_EMPTY = (40, 60, 80)
 SCORE_COLOR = (255, 255, 255)
 
-# Platforms: (x_start, x_end, y) -- wider and more spaced for bigger feel
+# Platforms: only 2 -- left and right elevated. Keeps arena very open.
 PLATFORMS = [
-    (18, 45, 42),   # center low (wide)
-    (4, 22, 28),    # upper-left (wide)
-    (41, 59, 28),   # upper-right (wide)
-    (22, 41, 14),   # top center (wide)
+    (8, 26, 34),    # left platform
+    (37, 55, 34),   # right platform
 ]
 
 
@@ -775,10 +773,10 @@ def _run_interactive(matrix, controller, start_time):
                 game.wizard1.fast_fall()
 
         for ev in events:
-            if ev.event_type == EventType.PRESSED:
+            if ev.type is EventType.PRESSED:
                 if ev.button in (Button.UP, Button.A):
                     game.wizard1.jump()
-                elif ev.button == Button.B:
+                elif ev.button is Button.B:
                     game.magic_blast(game.wizard1)
 
         game.wizard1.move(move_dx)

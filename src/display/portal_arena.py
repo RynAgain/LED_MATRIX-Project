@@ -731,10 +731,10 @@ def _run_interactive(matrix, controller, start_time):
             dx, dy = float(d[0]), float(d[1])
 
         for ev in events:
-            if ev.event_type == EventType.PRESSED:
-                if ev.button == Button.A:
+            if ev.type is EventType.PRESSED:
+                if ev.button is Button.A:
                     game.shoot(game.player1)
-                elif ev.button == Button.B:
+                elif ev.button is Button.B:
                     game.place_portal(game.player1)
 
         game.player1.move(dx, dy)

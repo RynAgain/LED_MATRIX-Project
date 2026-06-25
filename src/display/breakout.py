@@ -755,7 +755,7 @@ def _run_interactive(matrix, controller, start_time):
             game.move_paddle(d[0] * move_speed)
 
         for ev in events:
-            if ev.event_type == EventType.PRESSED:
+            if ev.type is EventType.PRESSED:
                 if ev.button in (Button.A, Button.UP):
                     game.launch_ball()
 
