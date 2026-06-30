@@ -230,6 +230,11 @@
       "name": "death_ball",
       "type": "game",
       "enabled": true
+    },
+    {
+      "name": "rubiks_cube",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

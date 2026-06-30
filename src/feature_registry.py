@@ -54,4 +54,5 @@ FEATURE_MODULES = {
     "icy_tower": "src.display.icy_tower",
     "moon_tracker": "src.display.moon_tracker",
     "portal_arena": "src.display.portal_arena",
+    "rubiks_cube": "src.display.rubiks_cube",
 }
