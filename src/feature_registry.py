@@ -55,4 +55,5 @@ FEATURE_MODULES = {
     "moon_tracker": "src.display.moon_tracker",
     "portal_arena": "src.display.portal_arena",
     "rubiks_cube": "src.display.rubiks_cube",
+    "super_breakout": "src.display.super_breakout",
 }

@@ -235,6 +235,11 @@
       "name": "rubiks_cube",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "super_breakout",
+      "type": "game",
+      "enabled": true
     }
   ]
 }
