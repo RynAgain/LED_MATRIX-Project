@@ -178,6 +178,26 @@ WALLS = [
 # Game objects
 # ---------------------------------------------------------------------------
 
+class Particle:
+    """Visual spark/particle effect."""
+    __slots__ = ('x', 'y', 'vx', 'vy', 'color', 'life')
+
+    def __init__(self, x, y, vx, vy, color, life=8):
+        self.x = float(x)
+        self.y = float(y)
+        self.vx = vx
+        self.vy = vy
+        self.color = color
+        self.life = life
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.05  # Slight gravity on sparks
+        self.life -= 1
+        return self.life > 0
+
+
 class Ball:
     def __init__(self):
         self.x = 0.0
@@ -186,6 +206,8 @@ class Ball:
         self.vy = 0.0
         self.active = False
         self.in_plunger = False
+        self.trail = []  # List of (x, y) recent positions
+        self.trail_max = 6
 
     def reset_to_plunger(self):
         self.x = float(PLUNGER_LANE_X)
@@ -219,6 +241,10 @@ class Ball:
         for _ in range(steps):
             self.x += step_x
             self.y += step_y
+        # Record trail position
+        self.trail.append((self.x, self.y))
+        if len(self.trail) > self.trail_max:
+            self.trail.pop(0)
 
     def is_drained(self):
         return self.y > DRAIN_Y and abs(self.x - PF_W / 2) < 40
@@ -301,6 +327,7 @@ class PinballGame:
         self.tick = 0
         self.game_over = False
         self.ball_save_timer = 0
+        self.particles = []  # Visual spark effects
         self.ball.reset_to_plunger()
 
     def _collide_walls(self):
@@ -355,6 +382,13 @@ class PinballGame:
                 b.y = by + ny * (br + BALL_RADIUS + 2)
                 self.score += BUMPER_PTS * self.bonus_mult
                 self.bumper_flash[i] = 8
+                # Spawn sparks
+                for _ in range(4):
+                    self.particles.append(Particle(
+                        b.x, b.y,
+                        random.uniform(-2, 2), random.uniform(-2, 2),
+                        BUMPER_FLASH, life=10
+                    ))
 
     def _collide_slingshots(self):
         b = self.ball
@@ -375,6 +409,12 @@ class PinballGame:
                 b.y += sl["ny"] * 6
                 self.score += SLING_PTS * self.bonus_mult
                 self.sling_flash[i] = 6
+                for _ in range(3):
+                    self.particles.append(Particle(
+                        b.x, b.y,
+                        random.uniform(-1.5, 1.5), random.uniform(-2, 0),
+                        SLING_FLASH, life=8
+                    ))
 
     def _collide_targets(self):
         b = self.ball
@@ -446,6 +486,9 @@ class PinballGame:
         if self.spinner_spinning > 0:
             self.spinner_angle += 0.5
             self.spinner_spinning -= 1
+
+        # Update particles
+        self.particles = [p for p in self.particles if p.update()]
 
         # Camera follows ball on BOTH X and Y with aggressive tracking
         if self.ball.active:
@@ -588,6 +631,16 @@ class PinballGame:
                 bar_h = int(pwr_pct * 20)
                 draw.rectangle([(p_sx + 4, p_bot - bar_h), (p_sx + 5, p_bot)], fill=POWER_COLOR)
 
+        # Ball trail (fading dots behind ball)
+        if self.ball.active and self.ball.trail:
+            trail_colors = [(180, 180, 190), (130, 130, 140), (80, 80, 90),
+                            (50, 50, 60), (30, 30, 40), (15, 15, 20)]
+            for i, (tx, ty) in enumerate(self.ball.trail):
+                t_sx, t_sy = sx(tx), sy(ty)
+                if 0 <= t_sx < DISPLAY_W and 0 <= t_sy < DISPLAY_H:
+                    ci = min(i, len(trail_colors) - 1)
+                    draw.point((t_sx, t_sy), fill=trail_colors[ci])
+
         # Ball
         if self.ball.active:
             b_sx, b_sy = sx(self.ball.x), sy(self.ball.y)
@@ -595,6 +648,14 @@ class PinballGame:
                 draw.ellipse([(b_sx - BALL_RADIUS, b_sy - BALL_RADIUS),
                               (b_sx + BALL_RADIUS, b_sy + BALL_RADIUS)], fill=BALL_COLOR)
                 draw.point((b_sx - 1, b_sy - 1), fill=BALL_SHINE)
+
+        # Particles (sparks from bumpers/slings)
+        for p in self.particles:
+            p_sx, p_sy = sx(p.x), sy(p.y)
+            if 0 <= p_sx < DISPLAY_W and 0 <= p_sy < DISPLAY_H:
+                alpha = p.life / 10.0
+                c = (int(p.color[0] * alpha), int(p.color[1] * alpha), int(p.color[2] * alpha))
+                draw.point((p_sx, p_sy), fill=c)
 
         # HUD
         score_s = str(self.score)
