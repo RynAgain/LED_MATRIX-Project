@@ -56,4 +56,5 @@ FEATURE_MODULES = {
     "portal_arena": "src.display.portal_arena",
     "rubiks_cube": "src.display.rubiks_cube",
     "super_breakout": "src.display.super_breakout",
+    "pinball": "src.display.pinball",
 }
