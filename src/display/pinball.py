@@ -201,6 +201,7 @@ class Ball:
         self.in_plunger = False
 
     def update(self):
+        """Update with substep physics to prevent tunneling through walls."""
         if not self.active or self.in_plunger:
             return
         self.vy += GRAVITY
@@ -211,8 +212,13 @@ class Ball:
             s = BALL_MAX_SPEED / speed
             self.vx *= s
             self.vy *= s
-        self.x += self.vx
-        self.y += self.vy
+        # Substep: move in increments of max 2px to prevent tunneling
+        steps = max(1, int(math.ceil(speed / 2.0)))
+        step_x = self.vx / steps
+        step_y = self.vy / steps
+        for _ in range(steps):
+            self.x += step_x
+            self.y += step_y
 
     def is_drained(self):
         return self.y > DRAIN_Y and abs(self.x - PF_W / 2) < 40
@@ -441,14 +447,33 @@ class PinballGame:
             self.spinner_angle += 0.5
             self.spinner_spinning -= 1
 
-        # Camera follows ball on BOTH X and Y
+        # Camera follows ball on BOTH X and Y with aggressive tracking
         if self.ball.active:
             target_cx = self.ball.x - DISPLAY_W / 2
             target_cy = self.ball.y - DISPLAY_H / 2
             target_cx = max(0, min(PF_W - DISPLAY_W, target_cx))
             target_cy = max(0, min(PF_H - DISPLAY_H, target_cy))
-            self.cam_x += (target_cx - self.cam_x) * 0.12
-            self.cam_y += (target_cy - self.cam_y) * 0.12
+            # Faster lerp + minimum catch-up speed ensures ball stays in view
+            dx = target_cx - self.cam_x
+            dy = target_cy - self.cam_y
+            # Lerp 25% per frame, but also enforce minimum speed of 2px/frame
+            move_x = dx * 0.25
+            move_y = dy * 0.25
+            if abs(dx) > 2:
+                move_x = max(abs(move_x), 2.0) * (1 if dx > 0 else -1)
+            if abs(dy) > 2:
+                move_y = max(abs(move_y), 2.0) * (1 if dy > 0 else -1)
+            # If ball is near edge of viewport, snap harder
+            ball_screen_x = self.ball.x - self.cam_x
+            ball_screen_y = self.ball.y - self.cam_y
+            if ball_screen_x < 10 or ball_screen_x > DISPLAY_W - 10:
+                move_x = dx * 0.5
+            if ball_screen_y < 10 or ball_screen_y > DISPLAY_H - 10:
+                move_y = dy * 0.5
+            self.cam_x += move_x
+            self.cam_y += move_y
+            self.cam_x = max(0, min(PF_W - DISPLAY_W, self.cam_x))
+            self.cam_y = max(0, min(PF_H - DISPLAY_H, self.cam_y))
 
     def charge_plunger(self):
         if self.ball.in_plunger:
