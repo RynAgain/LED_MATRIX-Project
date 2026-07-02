@@ -240,6 +240,31 @@
       "name": "super_breakout",
       "type": "game",
       "enabled": true
+    },
+    {
+      "name": "fish_tank",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "icy_tower",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "moon_tracker",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "portal_arena",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "pinball",
+      "type": "game",
+      "enabled": true
     }
   ]
 }
