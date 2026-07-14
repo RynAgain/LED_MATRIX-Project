@@ -58,6 +58,15 @@ OFF_COLOR = (255, 80, 80)
 HINT_COLOR = (100, 100, 110)
 
 
+def _get_playable_names():
+    """Get the set of playable game names for type detection."""
+    try:
+        from src.app_state import PLAYABLE_GAMES
+        return PLAYABLE_GAMES
+    except ImportError:
+        return set()
+
+
 class CarouselScreen:
     """Interactive carousel configuration screen.
 
@@ -80,13 +89,30 @@ class CarouselScreen:
         self._dirty = False
         self._controller: Any = None
 
-        # Build the feature list from the sequence.
+        # Build the feature list from the sequence + auto-discover missing features
+        # from the registry so ALL available features appear in the carousel screen.
         self.features: List[dict] = []
+        seen_names = set()
         for entry in self.config.get("sequence", []):
+            name = entry.get("name", "unknown")
             self.features.append({
-                "name": entry.get("name", "unknown"),
+                "name": name,
                 "enabled": bool(entry.get("enabled", False)),
             })
+            seen_names.add(name)
+
+        # Add any registered features not yet in the config sequence
+        # (they appear at the end as disabled, so users can discover and toggle them)
+        try:
+            from src.feature_registry import FEATURE_MODULES
+            for name in sorted(FEATURE_MODULES.keys()):
+                if name not in seen_names and name != "youtube_stream":
+                    self.features.append({
+                        "name": name,
+                        "enabled": False,
+                    })
+        except ImportError:
+            pass
 
     def attach_controller(self, controller) -> None:
         """Set the controller this screen polls in :meth:`run`."""
@@ -116,10 +142,21 @@ class CarouselScreen:
             full_config = {}
 
         sequence = full_config.get("sequence", [])
-        # Update only the enabled field, matched by index.
-        for i, feat in enumerate(self.features):
-            if i < len(sequence):
-                sequence[i]["enabled"] = feat["enabled"]
+        # Build a name->index map for existing entries
+        existing_names = {entry.get("name"): i for i, entry in enumerate(sequence)}
+
+        for feat in self.features:
+            name = feat["name"]
+            if name in existing_names:
+                # Update existing entry
+                sequence[existing_names[name]]["enabled"] = feat["enabled"]
+            else:
+                # Append new feature discovered from registry
+                sequence.append({
+                    "name": name,
+                    "type": "game" if name in _get_playable_names() else "effect",
+                    "enabled": feat["enabled"],
+                })
 
         full_config["sequence"] = sequence
 
