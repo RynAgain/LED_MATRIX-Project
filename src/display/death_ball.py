@@ -388,7 +388,12 @@ class DeathBallGame:
         return False
 
     def magic_blast(self, wizard):
-        """Wizard uses magic blast to push ball away."""
+        """Wizard uses magic blast to push ball and opponent away.
+
+        The blast pushes:
+        - The ball (away from caster)
+        - The opponent wizard (away from caster, but NOT the caster themselves)
+        """
         if not wizard.can_blast():
             return False
         wizard.mana -= BLAST_COST
@@ -398,11 +403,23 @@ class DeathBallGame:
         dx = self.ball.x - wizard.x
         dy = self.ball.y - wizard.y
         dist = max(1, math.sqrt(dx * dx + dy * dy))
-        # Normalize and apply blast power
         push_x = (dx / dist) * BLAST_POWER * self.ball.speed_mult
         push_y = (dy / dist) * BLAST_POWER * self.ball.speed_mult
         self.ball.vx += push_x
         self.ball.vy += push_y
+
+        # Push opponent wizard away (not the caster)
+        opponent = self.wizard2 if wizard.player_id == 0 else self.wizard1
+        opp_dx = opponent.x - wizard.x
+        opp_dy = opponent.y - wizard.y
+        opp_dist = math.sqrt(opp_dx * opp_dx + opp_dy * opp_dy)
+        if opp_dist < 20:  # Only affects opponent within blast radius
+            if opp_dist < 1:
+                opp_dist = 1
+            # Push force decreases with distance
+            push_strength = BLAST_POWER * 0.8 * (1.0 - opp_dist / 20.0)
+            opponent.vx += (opp_dx / opp_dist) * push_strength
+            opponent.vy += (opp_dy / opp_dist) * push_strength - 1.5  # Slight upward launch
 
         # Blast particles (expanding ring)
         for i in range(8):
