@@ -25,8 +25,8 @@ Controls (INTERACTIVE):
 - LEFT: left flipper
 - RIGHT: right flipper
 - A (hold/release): plunger
-- UP: nudge up
-- B: nudge left
+- UP: nudge up  (edge-triggered; max 3 per ball before TILT)
+- B: nudge left (edge-triggered; counts toward tilt limit)
 - Start+Select: quit
 """
 
@@ -34,6 +34,7 @@ import random
 import logging
 import time
 import math
+from collections import deque
 from PIL import Image, ImageDraw
 from src.display._shared import should_stop, show_banner, safe_rumble
 from src.display._fonts import _draw_text, _text_width
@@ -142,6 +143,13 @@ ROLLOVERS_TOP = [(44 + i * 16, 40) for i in range(4)]
 ROLLOVERS_MID = [(35 + i * 20, 280) for i in range(4)]
 ROLLOVERS_BOT = [(45 + i * 12, FLIP_Y - 55) for i in range(3)]
 ALL_ROLLOVERS = ROLLOVERS_TOP + ROLLOVERS_MID + ROLLOVERS_BOT
+ROLLOVER_GROUPS       = [ROLLOVERS_TOP, ROLLOVERS_MID, ROLLOVERS_BOT]
+ROLLOVER_GROUP_STARTS = [0, len(ROLLOVERS_TOP),
+                         len(ROLLOVERS_TOP) + len(ROLLOVERS_MID)]
+ROLLOVER_GROUP_BONUS  = 3000   # awarded when an entire lane group is lit
+
+TILT_LIMIT   = 3       # max nudges per ball before TILT kills the flippers
+ORBIT_WINDOW = FPS * 4  # ticks to complete an orbit shot after entry
 
 # Spinner
 SPINNER_POS = (64, 70)
@@ -206,8 +214,7 @@ class Ball:
         self.vy = 0.0
         self.active = False
         self.in_plunger = False
-        self.trail = []  # List of (x, y) recent positions
-        self.trail_max = 6
+        self.trail = deque(maxlen=6)  # motion-blur trail; deque evicts oldest automatically
 
     def reset_to_plunger(self):
         self.x = float(PLUNGER_LANE_X)
@@ -216,14 +223,20 @@ class Ball:
         self.vy = 0.0
         self.active = True
         self.in_plunger = True
+        self.trail.clear()
 
     def launch(self, power):
         self.vy = -power
         self.vx = random.uniform(-0.2, 0.2)
         self.in_plunger = False
 
-    def update(self):
-        """Update with substep physics to prevent tunneling through walls."""
+    def update(self, collide_fn=None):
+        """Update with substep physics; invoke collide_fn after each 2px sub-step.
+
+        Passing _step_collide from PinballGame means wall + flipper checks
+        run every sub-step, preventing the ball from tunnelling through thin
+        geometry at high speed.
+        """
         if not self.active or self.in_plunger:
             return
         self.vy += GRAVITY
@@ -234,20 +247,24 @@ class Ball:
             s = BALL_MAX_SPEED / speed
             self.vx *= s
             self.vy *= s
-        # Substep: move in increments of max 2px to prevent tunneling
+        # Substep: move <=2px per step; run collision callback each step so
+        # fast balls cannot tunnel through walls or flippers between frames.
         steps = max(1, int(math.ceil(speed / 2.0)))
         step_x = self.vx / steps
         step_y = self.vy / steps
         for _ in range(steps):
             self.x += step_x
             self.y += step_y
-        # Record trail position
+            if collide_fn is not None:
+                collide_fn()
+        # One trail point per frame (deque maxlen handles eviction)
         self.trail.append((self.x, self.y))
-        if len(self.trail) > self.trail_max:
-            self.trail.pop(0)
 
     def is_drained(self):
-        return self.y > DRAIN_Y and abs(self.x - PF_W / 2) < 40
+        # Drain anywhere below DRAIN_Y. The previous x-range guard missed
+        # balls falling down the outlane gutters (x < 24), causing a
+        # permanent soft-lock where the ball fell off-screen forever.
+        return self.y > DRAIN_Y
 
 
 class Flipper:
@@ -328,6 +345,15 @@ class PinballGame:
         self.game_over = False
         self.ball_save_timer = 0
         self.particles = []  # Visual spark effects
+        # --- Tilt ---
+        self.nudge_count = 0   # per-ball nudge counter (resets on drain)
+        self.tilt = False
+        self.tilt_timer = 0
+        # --- Orbit ---
+        self.orbit_active = False
+        self.orbit_timer = 0
+        self.orbit_entry_side = None  # 'L' or 'R'
+        self.orbit_flash = 0          # display frames for completion banner
         self.ball.reset_to_plunger()
 
     def _collide_walls(self):
@@ -437,6 +463,15 @@ class PinballGame:
                 if not self.rollover_states[i]:
                     self.rollover_states[i] = True
                     self.score += ROLLOVER_PTS * self.bonus_mult
+                    # Group-completion bonus + reset so the group can be re-lit
+                    for g, start in enumerate(ROLLOVER_GROUP_STARTS):
+                        g_len = len(ROLLOVER_GROUPS[g])
+                        if start <= i < start + g_len:
+                            if all(self.rollover_states[start:start + g_len]):
+                                self.score += ROLLOVER_GROUP_BONUS * self.bonus_mult
+                                for k in range(start, start + g_len):
+                                    self.rollover_states[k] = False
+                            break
 
     def _collide_spinner(self):
         b = self.ball
@@ -445,23 +480,93 @@ class PinballGame:
             self.spinner_spinning = 20
             self.score += SPINNER_PTS * self.bonus_mult
 
+    def _step_collide(self):
+        """Per-substep wall + flipper collision (invoked from Ball.update callback).
+
+        Only walls and flippers need per-substep checking. Bumpers/slings/
+        targets/rollovers/spinner are large enough to detect per-frame.
+        """
+        self._collide_walls()
+        self.flip_l.hit_ball(self.ball)
+        self.flip_r.hit_ball(self.ball)
+
+    def _collide_orbit(self):
+        """Detect and score an orbit shot: ball traverses the top loop.
+
+        Starts when the ball crosses either orbit marker with enough lateral
+        speed; scores when it exits through the opposite marker within
+        ORBIT_WINDOW ticks.
+        """
+        b = self.ball
+        ex, ey = ORBIT_ENTRY_L
+        rx, ry = ORBIT_EXIT_R
+        if not self.orbit_active:
+            if abs(b.x - ex) < 10 and abs(b.y - ey) < 15 and b.vx > 1.0:
+                self.orbit_active = True
+                self.orbit_timer = ORBIT_WINDOW
+                self.orbit_entry_side = 'L'
+            elif abs(b.x - rx) < 10 and abs(b.y - ry) < 15 and b.vx < -1.0:
+                self.orbit_active = True
+                self.orbit_timer = ORBIT_WINDOW
+                self.orbit_entry_side = 'R'
+        else:
+            self.orbit_timer -= 1
+            if self.orbit_timer <= 0:
+                self.orbit_active = False
+                return
+            if (self.orbit_entry_side == 'L'
+                    and abs(b.x - rx) < 10 and abs(b.y - ry) < 15):
+                self.score += ORBIT_PTS * self.bonus_mult
+                self.orbit_flash = 25
+                self.orbit_active = False
+                for _ in range(8):
+                    self.particles.append(Particle(
+                        rx, ry,
+                        random.uniform(-3, 3), random.uniform(-3, 0),
+                        (180, 100, 255), life=18))
+            elif (self.orbit_entry_side == 'R'
+                    and abs(b.x - ex) < 10 and abs(b.y - ey) < 15):
+                self.score += ORBIT_PTS * self.bonus_mult
+                self.orbit_flash = 25
+                self.orbit_active = False
+                for _ in range(8):
+                    self.particles.append(Particle(
+                        ex, ey,
+                        random.uniform(-3, 3), random.uniform(-3, 0),
+                        (180, 100, 255), life=18))
+
     def update(self, flip_l=False, flip_r=False):
         self.tick += 1
+
+        # Tilt: kill flip inputs and count down the penalty window
+        if self.tilt:
+            self.tilt_timer -= 1
+            if self.tilt_timer <= 0:
+                self.tilt = False
+                self.nudge_count = 0
+            flip_l = flip_r = False  # flippers dead during tilt
+
+        if self.orbit_flash > 0:
+            self.orbit_flash -= 1
+
         self.flip_l.set_active(flip_l)
         self.flip_r.set_active(flip_r)
         self.flip_l.update()
         self.flip_r.update()
-        self.ball.update()
+
+        # Walls + flippers run inside every 2px sub-step (via callback).
+        # Bumpers/slings/targets/rollovers/spinner stay per-frame.
+        collide_fn = (self._step_collide
+                      if (self.ball.active and not self.ball.in_plunger) else None)
+        self.ball.update(collide_fn)
 
         if self.ball.active and not self.ball.in_plunger:
-            self._collide_walls()
             self._collide_bumpers()
             self._collide_slingshots()
             self._collide_targets()
             self._collide_rollovers()
             self._collide_spinner()
-            self.flip_l.hit_ball(self.ball)
-            self.flip_r.hit_ball(self.ball)
+            self._collide_orbit()
 
             if self.ball.is_drained():
                 if self.ball_save_timer > 0:
@@ -474,6 +579,9 @@ class PinballGame:
                     else:
                         self.ball.reset_to_plunger()
                         self.ball_save_timer = FPS * 3
+                        self.nudge_count = 0
+                        self.tilt = False
+                        self.tilt_timer = 0
 
         if self.ball_save_timer > 0:
             self.ball_save_timer -= 1
@@ -531,9 +639,17 @@ class PinballGame:
         self.plunger_charging = False
 
     def nudge(self, dx, dy):
-        if self.ball.active and not self.ball.in_plunger:
-            self.ball.vx += dx * NUDGE_POWER
-            self.ball.vy += dy * NUDGE_POWER
+        """Apply a nudge impulse; counts toward the per-ball TILT limit."""
+        if self.tilt or not self.ball.active or self.ball.in_plunger:
+            return
+        self.nudge_count += 1
+        if self.nudge_count >= TILT_LIMIT:
+            self.tilt = True
+            self.tilt_timer = FPS * 3
+            logger.debug("Pinball TILT after %d nudges", self.nudge_count)
+            return
+        self.ball.vx += dx * NUDGE_POWER
+        self.ball.vy += dy * NUDGE_POWER
 
     def draw(self):
         image = Image.new("RGB", (DISPLAY_W, DISPLAY_H), PLAYFIELD_DARK)
@@ -607,11 +723,12 @@ class PinballGame:
             draw.line([(sx(sp_x) - ddx, sy(sp_y) - ddy),
                        (sx(sp_x) + ddx, sy(sp_y) + ddy)], fill=SPINNER_COLOR)
 
-        # Orbit arrows
+        # Orbit arrows (bright purple while an orbit is in flight)
+        _orbit_c = (180, 100, 255) if self.orbit_active else ORBIT_COLOR
         for ox, oy in [ORBIT_ENTRY_L, ORBIT_EXIT_R]:
             if vis(ox, oy):
                 draw.polygon([(sx(ox), sy(oy) - 3), (sx(ox) - 2, sy(oy) + 2),
-                              (sx(ox) + 2, sy(oy) + 2)], fill=ORBIT_COLOR)
+                              (sx(ox) + 2, sy(oy) + 2)], fill=_orbit_c)
 
         # Flippers
         for flip in [self.flip_l, self.flip_r]:
@@ -675,6 +792,22 @@ class PinballGame:
             _draw_text(draw, "SAVE", DISPLAY_W - 22, DISPLAY_H - 8,
                        (100, 255, 100), scale=1, spacing=0)
 
+        # TILT indicator: flashing red banner when nudge limit exceeded
+        if self.tilt and self.tick % 6 < 4:
+            tw = _text_width("TILT", scale=1, spacing=0)
+            draw.rectangle([(DISPLAY_W // 2 - tw // 2 - 1, 24),
+                             (DISPLAY_W // 2 + tw // 2 + 1, 33)], fill=(80, 0, 0))
+            _draw_text(draw, "TILT", DISPLAY_W // 2 - tw // 2, 25,
+                       (255, 60, 60), scale=1, spacing=0)
+
+        # ORBIT! flash on completion (fades over 25 frames)
+        if self.orbit_flash > 0:
+            alpha = self.orbit_flash / 25.0
+            c = (int(180 * alpha), int(100 * alpha), int(255 * alpha))
+            tw = _text_width("ORBIT!", scale=1, spacing=0)
+            _draw_text(draw, "ORBIT!", DISPLAY_W // 2 - tw // 2, 12,
+                       c, scale=1, spacing=0)
+
         return image
 
 
@@ -686,6 +819,9 @@ def _run_demo(matrix, duration, start_time):
     game = PinballGame()
     game.plunger_power = PLUNGER_MAX * 0.85
     game.release_plunger()
+
+    stall_frames = 0
+    STALL_LIMIT = FPS * 2  # frames at near-zero speed before recovery impulse
 
     while time.time() - start_time < duration:
         if should_stop():
@@ -702,6 +838,19 @@ def _run_demo(matrix, duration, start_time):
                     fr = True
                 if abs(b.x - PF_W / 2) < 15:
                     fl = fr = True
+
+        # Stall guard: nudge the ball if it has barely moved for 2 seconds
+        # so the demo doesn't freeze on a pocket.
+        if b.active and not b.in_plunger:
+            speed_sq = b.vx ** 2 + b.vy ** 2
+            if speed_sq < 0.02:
+                stall_frames += 1
+                if stall_frames >= STALL_LIMIT:
+                    b.vx += random.uniform(-1.2, 1.2)
+                    b.vy += random.uniform(-1.5, -0.5)
+                    stall_frames = 0
+            else:
+                stall_frames = 0
 
         game.update(fl, fr)
 
@@ -743,23 +892,24 @@ def _run_interactive(matrix, controller, start_time):
             return
 
         fl, fr = False, False
+        # L/R flippers use held direction for analog feel
         d = controller.get_direction()
         if d:
             if d[0] < 0:
                 fl = True
             if d[0] > 0:
                 fr = True
-            if d[1] < 0:
-                game.nudge(0, -1)
-            if d[1] > 0:
-                game.nudge(0, 1)
 
         for ev in events:
             if ev.type is EventType.PRESSED:
                 if ev.button is Button.A:
                     a_held = True
                 elif ev.button is Button.B:
+                    # Edge-triggered: one nudge per press, counted toward tilt
                     game.nudge(-1, 0)
+                elif ev.button is Button.UP:
+                    # Edge-triggered: one nudge per press, counted toward tilt
+                    game.nudge(0, -1)
                 elif ev.button is Button.LEFT:
                     fl = True
                 elif ev.button is Button.RIGHT:
