@@ -270,7 +270,8 @@ class DemoCarousel:
     """
 
     def __init__(self, matrix, config: dict, shutdown_event: threading.Event,
-                 menu_requested: Optional[Callable[[], bool]] = None):
+                 menu_requested: Optional[Callable[[], bool]] = None,
+                 can_restart: Optional[Callable[[], bool]] = None):
         """
         :param matrix: the shared RGBMatrix (or simulator / proxy).
         :param config: the current parsed ``config.json`` dict.
@@ -283,6 +284,10 @@ class DemoCarousel:
         self.config = config or {}
         self._shutdown = shutdown_event
         self._menu_requested = menu_requested or (lambda: False)
+        # Gate for the auto-updater's service restart: the state machine
+        # passes "only while IDLE" so an update never kills an active
+        # menu/game session. Standalone carousel defaults to always-OK.
+        self._can_restart = can_restart or (lambda: True)
         self._update_thread: Optional[threading.Thread] = None
         self._refresh_enabled()
 
@@ -404,6 +409,12 @@ class DemoCarousel:
                 from src.updater.auto_update import AutoUpdater
                 updater = AutoUpdater()
                 if updater.fetch_remote() and updater.has_updates():
+                    if not self._can_restart():
+                        # User is in the menu or a game -- applying the
+                        # update would restart the service under them.
+                        # Defer; the next idle cycle will retry.
+                        logger.info("Update available but user is active; deferring")
+                        return
                     logger.info("Update available at end of demo cycle, applying...")
                     updater.pull_updates()
                     updater.install_dependencies()
@@ -483,7 +494,17 @@ class AppStateMachine:
         self._carousel = DemoCarousel(
             matrix, self.config, self._shutdown,
             menu_requested=self._menu_requested.is_set,
+            can_restart=self._safe_to_restart,
         )
+
+    def _safe_to_restart(self) -> bool:
+        """True only when an auto-update service restart won't interrupt the user.
+
+        IDLE with no pending menu request means the user is just watching the
+        demo carousel; restarting then costs nothing. In MENU/IN_GAME a
+        restart would kill the session mid-interaction.
+        """
+        return self.mode is AppMode.IDLE and not self._menu_requested.is_set()
 
     def _default_menu(self) -> "MenuController":
         """Construct the default Phase-3 :class:`MenuSystem`.

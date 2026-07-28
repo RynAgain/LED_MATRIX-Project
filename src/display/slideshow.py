@@ -88,6 +88,9 @@ def run(matrix, duration=60):
             while time.time() - img_start < show_time and time.time() - start_time < duration:
                 if should_stop():
                     break
+                # Re-push the frame so the watchdog's frame heartbeat
+                # sees activity during long holds (cheap at 64x64).
+                matrix.SetImage(current_img)
                 time.sleep(0.5)
 
             idx += 1

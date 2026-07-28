@@ -8,6 +8,7 @@ Designed to run as a separate systemd service/timer.
 import json
 import subprocess
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -765,9 +766,10 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(
+            logging.handlers.RotatingFileHandler(
                 os.path.join(PROJECT_ROOT, "logs", "updater.log"),
-                mode="a"
+                maxBytes=1_000_000,
+                backupCount=3
             )
         ]
     )

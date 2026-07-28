@@ -15,6 +15,7 @@ plumbing.
 import json
 import importlib
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -71,6 +72,7 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
     timeout = max(duration * 2, 60)  # At least 60 seconds, or 2x duration
 
     thread = threading.Thread(target=feature_callable, daemon=True)
+    _mark_frame()  # reset heartbeat so frames from the previous feature do not count
     thread.start()
 
     # Instead of blocking on thread.join(timeout), poll in short intervals
@@ -78,12 +80,22 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
     # responsive on Windows and collecting keyboard events for the controller).
     _PUMP_INTERVAL = 0.05  # 50ms = 20 pumps/sec — responsive without busy-waiting
     deadline = time.time() + timeout
-    while thread.is_alive() and time.time() < deadline:
+    hung_reason = None
+    while thread.is_alive():
+        if time.time() >= deadline:
+            hung_reason = "exceeded %ds watchdog timeout" % timeout
+            break
+        # Heartbeat check: a feature that stops pushing frames is deadlocked or
+        # stalled even if its duration has not elapsed. This is the only hang
+        # detection that works for games, which run with a 24h duration.
+        if time.monotonic() - _last_frame_ts[0] > _FRAME_HANG_TIMEOUT:
+            hung_reason = "no frame for %ds (heartbeat)" % _FRAME_HANG_TIMEOUT
+            break
         _pump_main_thread_events()
         thread.join(timeout=_PUMP_INTERVAL)
 
     if thread.is_alive():
-        logger.warning("Watchdog: %s hung after %ds, forcing stop", feature_name, timeout)
+        logger.warning("Watchdog: %s hung (%s), forcing stop", feature_name, hung_reason)
         request_stop()
         # Give it 5 more seconds after stop request, still pumping events.
         kill_deadline = time.time() + 5
@@ -91,7 +103,9 @@ def _run_feature_with_watchdog(feature_callable, duration, feature_name):
             _pump_main_thread_events()
             thread.join(timeout=_PUMP_INTERVAL)
         if thread.is_alive():
-            logger.error("Watchdog: %s did not respond to stop request", feature_name)
+            logger.error("Watchdog: %s did not respond to stop request; "
+                         "abandoning thread (tracked as zombie)", feature_name)
+            _zombie_threads.append((thread, feature_name))
         return False
     return True
 
@@ -127,6 +141,56 @@ if PROJECT_ROOT not in sys.path:
 
 # Flag for graceful shutdown (thread-safe Event instead of bare bool)
 _shutdown = threading.Event()
+
+# --- Feature-thread hang handling -------------------------------------------
+# Python threads cannot be killed. When the watchdog abandons a hung feature
+# thread it is recorded here; if it is STILL alive when the next feature is
+# about to start, it would race the new feature on the shared matrix and keep
+# running once clear_stop() resets the shared stop flag. In that case we exit
+# so systemd (Restart=always) gives us a clean process instead of a corrupted
+# one.
+_zombie_threads = []
+
+# Monotonic timestamp of the last frame pushed to the matrix (SetImage or
+# SwapOnVSync via _SafeMatrixProxy). Used by the watchdog to detect features
+# that are alive but deadlocked/stalled, independent of their duration.
+_last_frame_ts = [0.0]  # single-element list: atomic-enough mutable holder
+
+# Seconds without a frame before a running feature is considered hung.
+# Generous enough for slow network fetches at feature start and slideshow
+# holds, but catches deadlocked games in about a minute instead of never
+# (games run with a 24h duration, so the 2x-duration timeout is useless).
+_FRAME_HANG_TIMEOUT = 60
+
+
+def _mark_frame():
+    """Record that a frame reached the matrix (called by _SafeMatrixProxy)."""
+    _last_frame_ts[0] = time.monotonic()
+
+
+def _reap_zombies_or_die(next_feature_name, matrix=None):
+    """Drop finished zombie threads; exit if any abandoned thread is still alive.
+
+    Exiting is deliberate: a live zombie shares the matrix and the global stop
+    flag with the next feature, which produces garbled frames and threads that
+    never stop. A clean systemd restart is strictly better.
+    """
+    global _zombie_threads
+    _zombie_threads = [(t, n) for (t, n) in _zombie_threads if t.is_alive()]
+    if not _zombie_threads:
+        return
+    names = [n for _, n in _zombie_threads]
+    logger.critical(
+        "Abandoned feature thread(s) %s still alive before starting %r; "
+        "exiting for a clean service restart (systemd Restart=always)",
+        names, next_feature_name,
+    )
+    if matrix is not None:
+        try:
+            matrix.Clear()
+        except Exception:  # noqa: BLE001
+            pass
+    sys.exit(1)
 
 
 def signal_handler(signum, frame):
@@ -264,7 +328,9 @@ def _create_simulator_matrix(options=None):
 
     matrix = SimRGBMatrix(options=options)
     logger.info("Using LED Matrix Simulator (pygame window)")
-    return matrix
+    # Wrap in the same proxy as the real matrix so the frame heartbeat
+    # (watchdog hang detection) works identically in dev.
+    return _SafeMatrixProxy(matrix)
 
 
 class _SafeMatrixProxy:
@@ -282,10 +348,15 @@ class _SafeMatrixProxy:
         object.__setattr__(self, '_matrix', matrix)
 
     def SetImage(self, image, offset_x=0, offset_y=0, unsafe=True):
+        _mark_frame()  # heartbeat for the watchdog hang detector
         try:
             self._matrix.SetImage(image, offset_x, offset_y, unsafe)
         except OverflowError:
             self._matrix.SetImage(image, offset_x, offset_y, unsafe=False)
+
+    def SwapOnVSync(self, *args, **kwargs):
+        _mark_frame()  # heartbeat for the watchdog hang detector
+        return self._matrix.SwapOnVSync(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._matrix, name)
@@ -435,6 +506,9 @@ def run_feature(feature_name, matrix, duration, controller=None):
     if not module_path:
         logger.warning("Unknown feature: %s", feature_name)
         return False
+
+    # Refuse to start on top of a live abandoned thread (see _reap_zombies_or_die)
+    _reap_zombies_or_die(feature_name, matrix)
 
     try:
         logger.info("Starting feature: %s (duration: %ds)", feature_name, duration)
@@ -702,9 +776,10 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(
+            logging.handlers.RotatingFileHandler(
                 os.path.join(log_dir, "display.log"),
-                mode="a"
+                maxBytes=1_000_000,
+                backupCount=3
             )
         ]
     )

@@ -355,3 +355,14 @@
 - [x] **[LOW] Dead villager AI branch** -- `src/display/living_world/villager_ai.py:956-960`. Remove acknowledged dead code.
 - [x] **[LOW] Bow search range is identical** -- `src/display/living_world/villager_ai.py:1229` `20 if v.has_bow else 20`. Fix to differentiate.
 - [x] **[LOW] Lumber deducted before building completes** -- `src/display/living_world/villager_ai.py:924-926`. Defer deduction or refund on interruption.
+
+## Stability Hardening (2026-07-28 review)
+
+- [x] Fix `barricade.py` syntax error (stray `j` before module docstring broke import)
+- [x] Log rotation: `RotatingFileHandler` (1MB x 3) for `display.log` and `updater.log` -- prevents SD-card fill
+- [x] Zombie feature-thread handling: abandoned watchdog threads are tracked; if one is still alive when the next feature starts, exit(1) for a clean systemd restart instead of racing on the shared matrix / cleared stop flag
+- [x] Frame-heartbeat hang detection: `_SafeMatrixProxy` timestamps `SetImage`/`SwapOnVSync`; watchdog force-stops any feature with no frame for 60s (previously a deadlocked game went undetected for 48h)
+- [x] Simulator matrix wrapped in `_SafeMatrixProxy` so heartbeat works in dev too
+- [x] Slideshow re-pushes held frames every 0.5s so long holds don't trip the heartbeat
+- [x] Auto-update restart gated on IDLE: updater defers pull/restart while user is in menu or game
+- [x] Removed stale web-panel remnants from `logs/` (`command.json`, `status.json`, `display.pid`)
