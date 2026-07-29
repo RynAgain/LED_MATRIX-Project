@@ -56,6 +56,9 @@ BALL_RADIUS = 2
 BALL_FRICTION = 0.998
 BALL_MAX_SPEED = 9.0
 FLIPPER_POWER = 7.5
+FLIP_UP_SPEED = 0.45     # rad/frame during the up-stroke (snappy)
+FLIP_DOWN_SPEED = 0.18   # rad/frame returning to rest
+WALL_RESTITUTION = 0.62  # normal-bounce energy retained off walls
 BUMPER_POWER = 5.0
 SLINGSHOT_POWER = 4.0
 PLUNGER_MAX = 9.0
@@ -282,11 +285,14 @@ class Flipper:
         self.active = state
 
     def update(self):
+        # Constant angular speed (not a lerp) so omega stays strong through
+        # the whole stroke -- hits near the end of travel still have power.
         target = self.up_angle if self.active else self.rest_angle
         diff = target - self.angle
-        speed = 0.4 if self.active else 0.2
-        self.omega = diff * speed
-        self.angle += self.omega
+        max_step = FLIP_UP_SPEED if self.active else FLIP_DOWN_SPEED
+        step = max(-max_step, min(max_step, diff))
+        self.omega = step
+        self.angle += step
 
     def get_tip(self):
         return (self.px + FLIP_LENGTH * math.cos(self.angle),
@@ -307,14 +313,37 @@ class Flipper:
                 dist = 0.5
             nx = (ball.x - cx) / dist
             ny = (ball.y - cy) / dist
-            flip_contrib = abs(self.omega) * t * FLIP_LENGTH * 1.5
-            power = max(flip_contrib, 2.0)
-            if self.active:
-                power = max(power, FLIPPER_POWER * 0.8)
-            ball.vx = nx * power * 0.7
-            ball.vy = ny * power - 2.0
-            ball.x = cx + nx * (BALL_RADIUS + 5)
-            ball.y = cy + ny * (BALL_RADIUS + 5)
+            # Surface velocity of the flipper at the contact point:
+            # v = omega x r, perpendicular to the arm, scaled by distance
+            # from the pivot. This is what actually launches the ball.
+            arm = t * FLIP_LENGTH
+            sv_x = -arm * self.omega * math.sin(self.angle)
+            sv_y = arm * self.omega * math.cos(self.angle)
+            # Reflect the ball's velocity relative to the moving surface
+            # (preserves incoming momentum instead of overwriting it).
+            rvx = ball.vx - sv_x
+            rvy = ball.vy - sv_y
+            dot = rvx * nx + rvy * ny
+            if dot < 0:
+                rvx -= 2 * dot * nx * 0.85
+                rvy -= 2 * dot * ny * 0.85
+            ball.vx = rvx + sv_x * 1.6
+            ball.vy = rvy + sv_y * 1.6
+            # An active up-stroke guarantees a solid minimum launch, with a
+            # power gradient: tip hits (t~1) are stronger than base hits.
+            # Only when the contact normal faces upward -- a ball caught on
+            # the underside of the arm just gets the reflection.
+            if self.active and abs(self.omega) > 0.05 and ny < 0:
+                power = FLIPPER_POWER * (0.55 + 0.45 * t)
+                launch = ball.vx * nx + ball.vy * ny
+                if launch < power:
+                    ball.vx += nx * (power - launch)
+                    ball.vy += ny * (power - launch)
+            # Only push the ball out when actually penetrating; keeping the
+            # correction small lets it cradle on a raised flipper smoothly.
+            if dist < BALL_RADIUS + 2.5:
+                ball.x = cx + nx * (BALL_RADIUS + 2.5)
+                ball.y = cy + ny * (BALL_RADIUS + 2.5)
             return True
         return False
 
@@ -388,10 +417,15 @@ class PinballGame:
                 nx, ny = (b.x - cx) / dist, (b.y - cy) / dist
                 dot = b.vx * nx + b.vy * ny
                 if dot < 0:
-                    b.vx -= 2 * dot * nx * 0.7
-                    b.vy -= 2 * dot * ny * 0.7
-                    b.x = cx + nx * (BALL_RADIUS + 3)
-                    b.y = cy + ny * (BALL_RADIUS + 3)
+                    # Split velocity into normal + tangential parts: bounce
+                    # the normal part with restitution, lightly damp the
+                    # tangential part so the ball rolls along walls naturally.
+                    tvx = b.vx - dot * nx
+                    tvy = b.vy - dot * ny
+                    b.vx = tvx * 0.96 - dot * nx * WALL_RESTITUTION
+                    b.vy = tvy * 0.96 - dot * ny * WALL_RESTITUTION
+                    b.x = cx + nx * (BALL_RADIUS + 2)
+                    b.y = cy + ny * (BALL_RADIUS + 2)
 
     def _collide_bumpers(self):
         b = self.ball
@@ -402,8 +436,13 @@ class PinballGame:
                 if dist < 1:
                     dist = 1
                 nx, ny = dx / dist, dy / dist
-                b.vx = nx * BUMPER_POWER
-                b.vy = ny * BUMPER_POWER
+                # Kick scales slightly with incoming speed and deflects a
+                # touch randomly -- pop bumpers feel alive, not scripted.
+                spd = math.sqrt(b.vx ** 2 + b.vy ** 2)
+                kick = BUMPER_POWER + min(2.0, spd * 0.25)
+                ang = math.atan2(ny, nx) + random.uniform(-0.18, 0.18)
+                b.vx = math.cos(ang) * kick
+                b.vy = math.sin(ang) * kick
                 b.x = bx + nx * (br + BALL_RADIUS + 2)
                 b.y = by + ny * (br + BALL_RADIUS + 2)
                 self.score += BUMPER_PTS * self.bonus_mult
@@ -428,7 +467,8 @@ class PinballGame:
             cx = p1[0] + t * dx
             cy = p1[1] + t * dy
             dist = math.sqrt((b.x - cx) ** 2 + (b.y - cy) ** 2)
-            if dist < BALL_RADIUS + 5:
+            approaching = (b.vx * sl["nx"] + b.vy * sl["ny"]) < 0
+            if dist < BALL_RADIUS + 5 and approaching and self.sling_flash[i] == 0:
                 b.vx += sl["nx"] * SLINGSHOT_POWER
                 b.vy += sl["ny"] * SLINGSHOT_POWER
                 b.x += sl["nx"] * 6
@@ -600,8 +640,12 @@ class PinballGame:
 
         # Camera follows ball on BOTH X and Y with aggressive tracking
         if self.ball.active:
-            target_cx = self.ball.x - DISPLAY_W / 2
-            target_cy = self.ball.y - DISPLAY_H / 2
+            # Look-ahead: bias the camera toward the direction of travel so
+            # the player sees where the ball is going, not where it has been.
+            look_x = max(-12.0, min(12.0, self.ball.vx * 3.0))
+            look_y = max(-16.0, min(16.0, self.ball.vy * 3.0))
+            target_cx = self.ball.x + look_x - DISPLAY_W / 2
+            target_cy = self.ball.y + look_y - DISPLAY_H / 2
             target_cx = max(0, min(PF_W - DISPLAY_W, target_cx))
             target_cy = max(0, min(PF_H - DISPLAY_H, target_cy))
             # Faster lerp + minimum catch-up speed ensures ball stays in view
@@ -656,6 +700,15 @@ class PinballGame:
         draw = ImageDraw.Draw(image)
         cx, cy = int(self.cam_x), int(self.cam_y)
 
+        # Depth gradient: jungle green fades darker toward the drain, giving
+        # the tall playfield a sense of depth as the camera scrolls.
+        for band in range(0, DISPLAY_H, 8):
+            shade = max(0.0, 1.0 - (cy + band) / float(PF_H))
+            draw.rectangle([(0, band), (DISPLAY_W - 1, band + 7)],
+                           fill=(int(3 + 9 * shade),
+                                 int(13 + 23 * shade),
+                                 int(5 + 11 * shade)))
+
         def sx(x):
             return int(x - cx)
 
@@ -683,21 +736,41 @@ class PinballGame:
 
         # Bumpers
         for i, (bx, by, br) in enumerate(BUMPERS):
-            if vis(bx, by, br + 5):
+            if vis(bx, by, br + 12):
                 s_x, s_y = sx(bx), sy(by)
-                flash = self.bumper_flash[i] > 0
+                flash = self.bumper_flash[i]
+                if flash > 0:
+                    # Expanding shockwave ring that fades as it grows
+                    ring_r = br + (8 - flash) + 1
+                    a = flash / 8.0
+                    draw.ellipse([(s_x - ring_r, s_y - ring_r),
+                                  (s_x + ring_r, s_y + ring_r)],
+                                 outline=(int(255 * a), int(220 * a),
+                                          int(90 * a)))
                 draw.ellipse([(s_x - br, s_y - br), (s_x + br, s_y + br)],
                              outline=BUMPER_FLASH if flash else BUMPER_RING)
                 cr = br - 3
                 draw.ellipse([(s_x - cr, s_y - cr), (s_x + cr, s_y + cr)],
                              fill=BUMPER_FLASH if flash else BUMPER_CAP)
+                # Specular highlight on the cap dome
+                draw.point((s_x - 2, s_y - 2),
+                           fill=(255, 255, 255) if flash else (255, 170, 170))
 
         # Slingshots
         for i, sl in enumerate(SLINGSHOTS):
             p1, p2 = sl["p1"], sl["p2"]
             if vis(p1[0], p1[1]) or vis(p2[0], p2[1]):
-                c = SLING_FLASH if self.sling_flash[i] > 0 else SLING_COLOR
-                draw.line([(sx(p1[0]), sy(p1[1])), (sx(p2[0]), sy(p2[1]))], fill=c, width=2)
+                flashing = self.sling_flash[i] > 0
+                c = SLING_FLASH if flashing else SLING_COLOR
+                # Filled kicker triangle: rubber face + apex tucked inward
+                # (opposite the kick normal), like a real slingshot body.
+                apex_x = (p1[0] + p2[0]) / 2 - sl["nx"] * 5
+                apex_y = (p1[1] + p2[1]) / 2 - sl["ny"] * 5
+                draw.polygon([(sx(p1[0]), sy(p1[1])),
+                              (sx(p2[0]), sy(p2[1])),
+                              (sx(apex_x), sy(apex_y))],
+                             fill=(90, 210, 115) if flashing else (18, 85, 38),
+                             outline=c)
 
         # Targets
         for i, (tx, ty, tw, th) in enumerate(ALL_TARGETS):
@@ -709,10 +782,18 @@ class PinballGame:
         # Rollovers
         for i, (rx, ry) in enumerate(ALL_ROLLOVERS):
             if vis(rx, ry):
-                c = ROLLOVER_ON if self.rollover_states[i] else ROLLOVER_OFF
-                draw.ellipse([(sx(rx) - 3, sy(ry) - 3), (sx(rx) + 3, sy(ry) + 3)], outline=c)
                 if self.rollover_states[i]:
+                    # Lit lamp: filled and gently pulsing
+                    pulse = 0.7 + 0.3 * math.sin(self.tick * 0.3 + i)
+                    c = (int(100 * pulse), int(200 * pulse), int(255 * pulse))
+                    draw.ellipse([(sx(rx) - 3, sy(ry) - 3),
+                                  (sx(rx) + 3, sy(ry) + 3)],
+                                 fill=(15, 45, 75), outline=c)
                     draw.point((sx(rx), sy(ry)), fill=c)
+                else:
+                    draw.ellipse([(sx(rx) - 3, sy(ry) - 3),
+                                  (sx(rx) + 3, sy(ry) + 3)],
+                                 outline=ROLLOVER_OFF)
 
         # Spinner
         sp_x, sp_y = SPINNER_POS
@@ -734,8 +815,18 @@ class PinballGame:
         for flip in [self.flip_l, self.flip_r]:
             if vis(flip.px, flip.py, 25):
                 tip = flip.get_tip()
-                draw.line([(sx(flip.px), sy(flip.py)), (sx(tip[0]), sy(tip[1]))],
-                          fill=FLIPPER_COLOR, width=3)
+                # Tapered wedge: thick at the pivot, thin at the tip
+                pxn = -math.sin(flip.angle)
+                pyn = math.cos(flip.angle)
+                draw.polygon([
+                    (sx(flip.px + pxn * 2), sy(flip.py + pyn * 2)),
+                    (sx(tip[0] + pxn), sy(tip[1] + pyn)),
+                    (sx(tip[0] - pxn), sy(tip[1] - pyn)),
+                    (sx(flip.px - pxn * 2), sy(flip.py - pyn * 2)),
+                ], fill=FLIPPER_COLOR)
+                draw.ellipse([(sx(flip.px) - 2, sy(flip.py) - 2),
+                              (sx(flip.px) + 2, sy(flip.py) + 2)],
+                             fill=(150, 150, 185), outline=FLIPPER_COLOR)
 
         # Plunger
         if vis(PLUNGER_LANE_X, PF_H - 50):
@@ -762,6 +853,14 @@ class PinballGame:
         if self.ball.active:
             b_sx, b_sy = sx(self.ball.x), sy(self.ball.y)
             if -5 < b_sx < DISPLAY_W + 5 and -5 < b_sy < DISPLAY_H + 5:
+                spd = math.sqrt(self.ball.vx ** 2 + self.ball.vy ** 2)
+                if spd > 4.5:
+                    # Faint halo when the ball is really moving
+                    g = min(1.0, (spd - 4.5) / 4.0)
+                    draw.ellipse([(b_sx - BALL_RADIUS - 1, b_sy - BALL_RADIUS - 1),
+                                  (b_sx + BALL_RADIUS + 1, b_sy + BALL_RADIUS + 1)],
+                                 outline=(30 + int(70 * g), 30 + int(70 * g),
+                                          35 + int(85 * g)))
                 draw.ellipse([(b_sx - BALL_RADIUS, b_sy - BALL_RADIUS),
                               (b_sx + BALL_RADIUS, b_sy + BALL_RADIUS)], fill=BALL_COLOR)
                 draw.point((b_sx - 1, b_sy - 1), fill=BALL_SHINE)
@@ -778,6 +877,7 @@ class PinballGame:
         score_s = str(self.score)
         sw = _text_width(score_s, scale=1, spacing=1)
         draw.rectangle([(0, 0), (sw + 3, 8)], fill=(0, 0, 0))
+        draw.line([(0, 9), (sw + 3, 9)], fill=(90, 70, 20))
         _draw_text(draw, score_s, 2, 1, SCORE_COLOR, scale=1, spacing=1)
 
         for i in range(self.balls_left):

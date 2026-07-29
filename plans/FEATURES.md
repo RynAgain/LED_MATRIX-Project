@@ -47,7 +47,7 @@
 
 ## Display Features (36 modes)
 
-### Games (9)
+### Games (10)
 - [x] Tic Tac Toe (AI vs AI)
 - [x] Snake (autonomous AI)
 - [x] Pong (AI vs AI)
@@ -57,6 +57,7 @@
 - [x] Space Invaders (classic arcade shooter)
 - [x] Tanks (artillery combat)
 - [x] Tetris (AI-driven falling blocks)
+- [x] Pinball (Lost World-style scrolling table, 128x500 playfield)
 
 ### Original Displays (1 video + 2 utility)
 - [x] Time Display (clock)
@@ -366,3 +367,26 @@
 - [x] Slideshow re-pushes held frames every 0.5s so long holds don't trip the heartbeat
 - [x] Auto-update restart gated on IDLE: updater defers pull/restart while user is in menu or game
 - [x] Removed stale web-panel remnants from `logs/` (`command.json`, `status.json`, `display.pid`)
+
+## Pinball Overhaul (2026-07-29)
+
+Gameplay fixes (commit 42a6c37):
+- [x] Drain detection covers outlanes (soft-lock fix)
+- [x] Per-substep wall/flipper collision (no tunneling at high speed)
+- [x] TILT mechanic: 3 nudges per ball kills flippers for 3s
+- [x] Orbit shot implemented (entry/exit markers, 2000 pts, purple FX)
+- [x] Rollover lane groups reset + 3000-pt completion bonus
+- [x] Demo stall guard (random impulse after 2s near-zero speed)
+
+Look & feel + physics polish:
+- [x] Momentum-preserving flipper hits: ball velocity reflected off the moving surface, real omega x r surface velocity added; tip hits harder than base; cradling on a raised flipper works
+- [x] Constant-angular-speed flipper stroke (omega stays strong through full travel)
+- [x] Wall bounces split into normal restitution (0.62) + damped tangential roll
+- [x] Bumper kick scales with incoming speed + slight random deflection
+- [x] Slingshots fire only on approach, with cooldown (no double-triggers)
+- [x] Camera look-ahead biases view toward ball travel direction
+- [x] Depth-gradient playfield background (fades darker toward drain)
+- [x] Expanding shockwave ring on bumper hits + specular cap highlights
+- [x] Slingshots drawn as filled kicker triangles
+- [x] Flippers rendered as tapered wedges with pivot posts
+- [x] Ball speed halo, pulsing lit rollover lamps, HUD score underline
