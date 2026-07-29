@@ -383,19 +383,44 @@ class PinballGame:
         self.orbit_timer = 0
         self.orbit_entry_side = None  # 'L' or 'R'
         self.orbit_flash = 0          # display frames for completion banner
+        # Static playfield (gradient + walls + rails + drain) rendered once;
+        # draw() crops the 64x64 viewport instead of redrawing ~30 primitives
+        # per frame -- keeps the Pi comfortably inside the 33ms frame budget.
+        self._bg = self._render_static_bg()
         self.ball.reset_to_plunger()
+
+    @staticmethod
+    def _render_static_bg():
+        bg = Image.new("RGB", (PF_W, PF_H), PLAYFIELD_DARK)
+        d = ImageDraw.Draw(bg)
+        # Depth gradient: jungle green fades darker toward the drain
+        for band in range(0, PF_H, 8):
+            shade = max(0.0, 1.0 - band / float(PF_H))
+            d.rectangle([(0, band), (PF_W - 1, band + 7)],
+                        fill=(int(3 + 9 * shade),
+                              int(13 + 23 * shade),
+                              int(5 + 11 * shade)))
+        for x1, y1, x2, y2 in WALLS:
+            d.line([(x1, y1), (x2, y2)], fill=WALL_COLOR)
+        d.line([(WALL_L, WALL_TOP), (WALL_L, PF_H - 1)], fill=RAIL_COLOR)
+        d.line([(WALL_R, WALL_TOP), (WALL_R, PF_H - 1)], fill=RAIL_COLOR)
+        d.rectangle([(WALL_L, DRAIN_Y), (WALL_R, DRAIN_Y + 3)], fill=DRAIN_COLOR)
+        return bg
 
     def _collide_walls(self):
         b = self.ball
         if b.x < WALL_L + BALL_RADIUS:
             b.x = WALL_L + BALL_RADIUS
-            b.vx = abs(b.vx) * 0.75
+            if b.vx < 0:
+                b.vx = -b.vx * WALL_RESTITUTION
         if b.x > WALL_R - BALL_RADIUS:
             b.x = WALL_R - BALL_RADIUS
-            b.vx = -abs(b.vx) * 0.75
+            if b.vx > 0:
+                b.vx = -b.vx * WALL_RESTITUTION
         if b.y < WALL_TOP + BALL_RADIUS:
             b.y = WALL_TOP + BALL_RADIUS
-            b.vy = abs(b.vy) * 0.75
+            if b.vy < 0:
+                b.vy = -b.vy * WALL_RESTITUTION
         if b.in_plunger:
             b.x = PLUNGER_LANE_X
             b.vx = 0
@@ -403,6 +428,12 @@ class PinballGame:
             b.x = PF_W - 20 - BALL_RADIUS
             b.vx = -abs(b.vx) * 0.5
 
+        # Resolve only the DEEPEST penetrating segment. Resolving every
+        # overlapping segment in one pass fights itself at corners where
+        # two walls meet, causing jitter and phantom deflections.
+        contact_r = BALL_RADIUS + 1.5
+        best = None
+        best_depth = 0.0
         for x1, y1, x2, y2 in WALLS:
             dx, dy = x2 - x1, y2 - y1
             seg_sq = dx * dx + dy * dy
@@ -410,22 +441,32 @@ class PinballGame:
                 continue
             t = max(0, min(1, ((b.x - x1) * dx + (b.y - y1) * dy) / seg_sq))
             cx, cy = x1 + t * dx, y1 + t * dy
-            dist = math.sqrt((b.x - cx) ** 2 + (b.y - cy) ** 2)
-            if dist < BALL_RADIUS + 2:
-                if dist < 0.3:
-                    dist = 0.3
-                nx, ny = (b.x - cx) / dist, (b.y - cy) / dist
-                dot = b.vx * nx + b.vy * ny
-                if dot < 0:
-                    # Split velocity into normal + tangential parts: bounce
-                    # the normal part with restitution, lightly damp the
-                    # tangential part so the ball rolls along walls naturally.
-                    tvx = b.vx - dot * nx
-                    tvy = b.vy - dot * ny
-                    b.vx = tvx * 0.96 - dot * nx * WALL_RESTITUTION
-                    b.vy = tvy * 0.96 - dot * ny * WALL_RESTITUTION
-                    b.x = cx + nx * (BALL_RADIUS + 2)
-                    b.y = cy + ny * (BALL_RADIUS + 2)
+            ddx, ddy = b.x - cx, b.y - cy
+            dist_sq = ddx * ddx + ddy * ddy
+            if dist_sq >= contact_r * contact_r:
+                continue
+            dist = math.sqrt(dist_sq) if dist_sq > 0.09 else 0.3
+            depth = contact_r - dist
+            if depth > best_depth:
+                best_depth = depth
+                best = (cx, cy, (b.x - cx) / dist, (b.y - cy) / dist)
+        if best is not None:
+            cx, cy, nx, ny = best
+            dot = b.vx * nx + b.vy * ny
+            if dot < -0.6:
+                # Real bounce: reflect the normal part with restitution,
+                # lightly damp the tangential part.
+                tvx = b.vx - dot * nx
+                tvy = b.vy - dot * ny
+                b.vx = tvx * 0.96 - dot * nx * WALL_RESTITUTION
+                b.vy = tvy * 0.96 - dot * ny * WALL_RESTITUTION
+            elif dot < 0:
+                # Grazing/rolling contact: cancel the normal component only
+                # so the ball rolls along the wall instead of micro-bouncing.
+                b.vx -= dot * nx
+                b.vy -= dot * ny
+            b.x = cx + nx * contact_r
+            b.y = cy + ny * contact_r
 
     def _collide_bumpers(self):
         b = self.ball
@@ -696,18 +737,12 @@ class PinballGame:
         self.ball.vy += dy * NUDGE_POWER
 
     def draw(self):
-        image = Image.new("RGB", (DISPLAY_W, DISPLAY_H), PLAYFIELD_DARK)
+        cx = max(0, min(PF_W - DISPLAY_W, int(self.cam_x)))
+        cy = max(0, min(PF_H - DISPLAY_H, int(self.cam_y)))
+        # Static layer (gradient/walls/rails/drain) is pre-rendered; a single
+        # crop replaces ~30 primitive calls per frame.
+        image = self._bg.crop((cx, cy, cx + DISPLAY_W, cy + DISPLAY_H))
         draw = ImageDraw.Draw(image)
-        cx, cy = int(self.cam_x), int(self.cam_y)
-
-        # Depth gradient: jungle green fades darker toward the drain, giving
-        # the tall playfield a sense of depth as the camera scrolls.
-        for band in range(0, DISPLAY_H, 8):
-            shade = max(0.0, 1.0 - (cy + band) / float(PF_H))
-            draw.rectangle([(0, band), (DISPLAY_W - 1, band + 7)],
-                           fill=(int(3 + 9 * shade),
-                                 int(13 + 23 * shade),
-                                 int(5 + 11 * shade)))
 
         def sx(x):
             return int(x - cx)
@@ -717,22 +752,6 @@ class PinballGame:
 
         def vis(x, y, m=15):
             return -m < sx(x) < DISPLAY_W + m and -m < sy(y) < DISPLAY_H + m
-
-        # Walls
-        for x1, y1, x2, y2 in WALLS:
-            if vis(x1, y1) or vis(x2, y2):
-                draw.line([(sx(x1), sy(y1)), (sx(x2), sy(y2))], fill=WALL_COLOR)
-
-        # Rails
-        draw.line([(sx(WALL_L), max(0, sy(WALL_TOP))),
-                   (sx(WALL_L), min(DISPLAY_H - 1, sy(PF_H)))], fill=RAIL_COLOR)
-        draw.line([(sx(WALL_R), max(0, sy(WALL_TOP))),
-                   (sx(WALL_R), min(DISPLAY_H - 1, sy(PF_H)))], fill=RAIL_COLOR)
-
-        # Drain
-        if vis(64, DRAIN_Y):
-            draw.rectangle([(sx(WALL_L), sy(DRAIN_Y)),
-                            (sx(WALL_R), sy(DRAIN_Y) + 3)], fill=DRAIN_COLOR)
 
         # Bumpers
         for i, (bx, by, br) in enumerate(BUMPERS):

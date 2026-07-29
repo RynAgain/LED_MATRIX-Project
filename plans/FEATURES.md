@@ -390,3 +390,9 @@ Look & feel + physics polish:
 - [x] Slingshots drawn as filled kicker triangles
 - [x] Flippers rendered as tapered wedges with pivot posts
 - [x] Ball speed halo, pulsing lit rollover lamps, HUD score underline
+
+Performance + collision quality (playtest feedback):
+- [x] Static playfield (gradient/walls/rails/drain) pre-rendered once to a 128x500 image; draw() crops the viewport -- ~90 -> ~15 draw calls/frame
+- [x] Wall collision resolves only the deepest-penetrating segment (no corner fighting/jitter)
+- [x] Rolling contact mode: grazing hits cancel normal velocity instead of micro-bouncing
+- [x] Boundary clamps use shared WALL_RESTITUTION, only bounce when moving inward
