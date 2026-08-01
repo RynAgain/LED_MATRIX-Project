@@ -61,7 +61,7 @@ FLIP_DOWN_SPEED = 0.18   # rad/frame returning to rest
 WALL_RESTITUTION = 0.62  # normal-bounce energy retained off walls
 BUMPER_POWER = 5.0
 SLINGSHOT_POWER = 4.0
-PLUNGER_MAX = 9.0
+PLUNGER_MAX = 11.5  # must exceed ~9.8 to climb the full plunger lane
 NUDGE_POWER = 1.5
 
 # --- Scoring ---
@@ -167,14 +167,12 @@ WALLS = [
     (WALL_R, WALL_TOP, WALL_R, PF_H),
     (WALL_L, WALL_TOP, WALL_R, WALL_TOP),
     (22, PF_H - 90, 22, PF_H - 40),
-    (PF_W - 22, PF_H - 90, PF_W - 22, PF_H - 40),
     (32, PF_H - 90, 22, PF_H - 50),
-    (PF_W - 32, PF_H - 90, PF_W - 22, PF_H - 50),
+    (PF_W - 32, PF_H - 90, PF_W - 20, PF_H - 50),
     (PF_W - 20, 60, PF_W - 20, PF_H - 10),
     (15, 50, 15, 110),
-    (PF_W - 15, 50, PF_W - 15, 110),
     (15, 50, 30, 20),
-    (PF_W - 15, 50, PF_W - 30, 20),
+    (PF_W - 8, 60, PF_W - 30, 20),
     (30, 20, PF_W - 30, 20),
     (50, 240, 50, 300),
     (78, 240, 78, 300),
@@ -246,10 +244,14 @@ class Ball:
         self.vx *= BALL_FRICTION
         self.vy *= BALL_FRICTION
         speed = math.sqrt(self.vx ** 2 + self.vy ** 2)
-        if speed > BALL_MAX_SPEED:
+        # Speed cap, except in the plunger lane: the launch needs ~10+ to
+        # climb the full lane, and gravity bleeds it back under the cap
+        # before the ball reaches the playfield anyway.
+        if speed > BALL_MAX_SPEED and self.x < PF_W - 20:
             s = BALL_MAX_SPEED / speed
             self.vx *= s
             self.vy *= s
+            speed = BALL_MAX_SPEED
         # Substep: move <=2px per step; run collision callback each step so
         # fast balls cannot tunnel through walls or flippers between frames.
         steps = max(1, int(math.ceil(speed / 2.0)))
@@ -383,6 +385,9 @@ class PinballGame:
         self.orbit_timer = 0
         self.orbit_entry_side = None  # 'L' or 'R'
         self.orbit_flash = 0          # display frames for completion banner
+        # Previous substep position, used by the swept wall-crossing test
+        self._sub_px = None
+        self._sub_py = None
         # Static playfield (gradient + walls + rails + drain) rendered once;
         # draw() crops the 64x64 viewport instead of redrawing ~30 primitives
         # per frame -- keeps the Pi comfortably inside the 33ms frame budget.
@@ -424,33 +429,39 @@ class PinballGame:
         if b.in_plunger:
             b.x = PLUNGER_LANE_X
             b.vx = 0
-        if not b.in_plunger and b.x > PF_W - 20 and b.y > PLUNGER_GATE_Y:
-            b.x = PF_W - 20 - BALL_RADIUS
-            b.vx = -abs(b.vx) * 0.5
+        # NOTE: no artificial lane clamp here. The old clamp teleported every
+        # freshly launched ball from x=114 to x=106 -- straight through the
+        # lane wall (the main source of visible clipping). The wall at
+        # x = PF_W - 20 already keeps playfield balls out of the lane.
+        elif (b.x > PF_W - 20 and b.y > PF_H - 62 and b.vy > 0):
+            # Weak launch fell back down the lane: re-dock on the plunger
+            b.reset_to_plunger()
 
         # Resolve only the DEEPEST penetrating segment. Resolving every
         # overlapping segment in one pass fights itself at corners where
         # two walls meet, causing jitter and phantom deflections.
         contact_r = BALL_RADIUS + 1.5
-        best = None
-        best_depth = 0.0
-        for x1, y1, x2, y2 in WALLS:
-            dx, dy = x2 - x1, y2 - y1
-            seg_sq = dx * dx + dy * dy
-            if seg_sq < 1:
-                continue
-            t = max(0, min(1, ((b.x - x1) * dx + (b.y - y1) * dy) / seg_sq))
-            cx, cy = x1 + t * dx, y1 + t * dy
-            ddx, ddy = b.x - cx, b.y - cy
-            dist_sq = ddx * ddx + ddy * ddy
-            if dist_sq >= contact_r * contact_r:
-                continue
-            dist = math.sqrt(dist_sq) if dist_sq > 0.09 else 0.3
-            depth = contact_r - dist
-            if depth > best_depth:
-                best_depth = depth
-                best = (cx, cy, (b.x - cx) / dist, (b.y - cy) / dist)
-        if best is not None:
+        for _resolve_pass in range(3):
+            best = None
+            best_depth = 0.0
+            for x1, y1, x2, y2 in WALLS:
+                dx, dy = x2 - x1, y2 - y1
+                seg_sq = dx * dx + dy * dy
+                if seg_sq < 1:
+                    continue
+                t = max(0, min(1, ((b.x - x1) * dx + (b.y - y1) * dy) / seg_sq))
+                cx, cy = x1 + t * dx, y1 + t * dy
+                ddx, ddy = b.x - cx, b.y - cy
+                dist_sq = ddx * ddx + ddy * ddy
+                if dist_sq >= contact_r * contact_r:
+                    continue
+                dist = math.sqrt(dist_sq) if dist_sq > 0.09 else 0.3
+                depth = contact_r - dist
+                if depth > best_depth:
+                    best_depth = depth
+                    best = (cx, cy, (b.x - cx) / dist, (b.y - cy) / dist)
+            if best is None:
+                break
             cx, cy, nx, ny = best
             dot = b.vx * nx + b.vy * ny
             if dot < -0.6:
@@ -509,11 +520,22 @@ class PinballGame:
             cy = p1[1] + t * dy
             dist = math.sqrt((b.x - cx) ** 2 + (b.y - cy) ** 2)
             approaching = (b.vx * sl["nx"] + b.vy * sl["ny"]) < 0
-            if dist < BALL_RADIUS + 5 and approaching and self.sling_flash[i] == 0:
+            # Only the FRONT (rubber) face kicks. Side test uses a cross
+            # product against the sling LINE, not (ball - closest)/dist,
+            # which is numerically noisy when the ball sits on the line
+            # and could fire the kick backward through the sling.
+            side = dx * (b.y - p1[1]) - dy * (b.x - p1[0])
+            front_sign = dx * sl["ny"] - dy * sl["nx"]
+            in_front = side * front_sign > 0
+            if (dist < BALL_RADIUS + 5 and approaching and in_front
+                    and self.sling_flash[i] == 0):
                 b.vx += sl["nx"] * SLINGSHOT_POWER
                 b.vy += sl["ny"] * SLINGSHOT_POWER
-                b.x += sl["nx"] * 6
-                b.y += sl["ny"] * 6
+                # Deterministic push-out along the KICK normal from the
+                # closest point: always lands on the front face regardless
+                # of how close to the line the contact was.
+                b.x = cx + sl["nx"] * (BALL_RADIUS + 5)
+                b.y = cy + sl["ny"] * (BALL_RADIUS + 5)
                 self.score += SLING_PTS * self.bonus_mult
                 self.sling_flash[i] = 6
                 for _ in range(3):
@@ -567,9 +589,54 @@ class PinballGame:
         Only walls and flippers need per-substep checking. Bumpers/slings/
         targets/rollovers/spinner are large enough to detect per-frame.
         """
+        self._swept_wall_check()
         self._collide_walls()
         self.flip_l.hit_ball(self.ball)
         self.flip_r.hit_ball(self.ball)
+        # Record post-resolution position: always a valid, non-penetrating
+        # spot, so the next swept test starts from safe ground.
+        self._sub_px = self.ball.x
+        self._sub_py = self.ball.y
+
+    def _swept_wall_check(self):
+        """Catch true wall crossings the distance test can miss.
+
+        If the path from the previous substep position to the current one
+        intersects a wall segment, the ball is snapped back to the contact
+        point on the side it came from and its normal velocity reflected.
+        Without this, a positional correction (flipper/sling push-out) can
+        land the ball past a wall centerline, after which the distance
+        check resolves it to the WRONG side -- visible as clipping.
+        """
+        b = self.ball
+        px, py = self._sub_px, self._sub_py
+        if px is None:
+            return
+        mx, my = b.x - px, b.y - py
+        if mx * mx + my * my < 1e-6:
+            return
+        for x1, y1, x2, y2 in WALLS:
+            wx, wy = x2 - x1, y2 - y1
+            denom = mx * wy - my * wx
+            if abs(denom) < 1e-9:
+                continue
+            s = ((x1 - px) * wy - (y1 - py) * wx) / denom
+            u = ((x1 - px) * my - (y1 - py) * mx) / denom
+            if 0.0 <= s <= 1.0 and 0.0 <= u <= 1.0:
+                ix = px + s * mx
+                iy = py + s * my
+                wlen = math.sqrt(wx * wx + wy * wy)
+                nx, ny = wy / wlen, -wx / wlen
+                # Normal must point back toward where the ball came from
+                if (px - ix) * nx + (py - iy) * ny < 0:
+                    nx, ny = -nx, -ny
+                b.x = ix + nx * (BALL_RADIUS + 1.5)
+                b.y = iy + ny * (BALL_RADIUS + 1.5)
+                dot = b.vx * nx + b.vy * ny
+                if dot < 0:
+                    b.vx -= (1 + WALL_RESTITUTION) * dot * nx
+                    b.vy -= (1 + WALL_RESTITUTION) * dot * ny
+                return
 
     def _collide_orbit(self):
         """Detect and score an orbit shot: ball traverses the top loop.
@@ -639,6 +706,8 @@ class PinballGame:
         # Bumpers/slings/targets/rollovers/spinner stay per-frame.
         collide_fn = (self._step_collide
                       if (self.ball.active and not self.ball.in_plunger) else None)
+        self._sub_px = self.ball.x
+        self._sub_py = self.ball.y
         self.ball.update(collide_fn)
 
         if self.ball.active and not self.ball.in_plunger:
@@ -648,6 +717,9 @@ class PinballGame:
             self._collide_rollovers()
             self._collide_spinner()
             self._collide_orbit()
+            # Bumper/sling push-outs happen AFTER the substep wall checks;
+            # one more wall pass fixes any penetration they introduced.
+            self._collide_walls()
 
             if self.ball.is_drained():
                 if self.ball_save_timer > 0:
@@ -936,7 +1008,7 @@ class PinballGame:
 
 def _run_demo(matrix, duration, start_time):
     game = PinballGame()
-    game.plunger_power = PLUNGER_MAX * 0.85
+    game.plunger_power = PLUNGER_MAX * 0.95
     game.release_plunger()
 
     stall_frames = 0
@@ -974,14 +1046,14 @@ def _run_demo(matrix, duration, start_time):
         game.update(fl, fr)
 
         if b.in_plunger:
-            game.plunger_power = PLUNGER_MAX * random.uniform(0.7, 0.95)
+            game.plunger_power = PLUNGER_MAX * random.uniform(0.88, 1.0)
             game.release_plunger()
 
         if game.game_over:
             show_banner(matrix, ["GAME OVER", f"{game.score}"],
                         color=SCORE_COLOR, hold=2.0)
             game = PinballGame()
-            game.plunger_power = PLUNGER_MAX * 0.85
+            game.plunger_power = PLUNGER_MAX * 0.95
             game.release_plunger()
 
         matrix.SetImage(game.draw())

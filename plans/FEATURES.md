@@ -396,3 +396,12 @@ Performance + collision quality (playtest feedback):
 - [x] Wall collision resolves only the deepest-penetrating segment (no corner fighting/jitter)
 - [x] Rolling contact mode: grazing hits cancel normal velocity instead of micro-bouncing
 - [x] Boundary clamps use shared WALL_RESTITUTION, only bounce when moving inward
+
+Clipping elimination (2026-08-01, playtest feedback):
+- [x] Removed plunger-lane clamp that teleported every launched ball through the lane wall (the main clipping source -- it was accidentally acting as the launch mechanism)
+- [x] Lane geometry made actually traversable: launch arch diagonal extended to the rail, 5px dead corridor wall removed, 2px dead channel merged into lane wall
+- [x] PLUNGER_MAX raised to 11.5 (lane climb needs ~9.8); speed cap exempted in lane; weak launches fall back and re-dock on the plunger
+- [x] Swept line-crossing test per substep catches true wall crossings the distance check misses
+- [x] Wall resolution iterates up to 3 passes (acute wedges can't leave residual penetration)
+- [x] Sling kicks: front-face-only via robust cross-product side test; deterministic push-out along kick normal
+- [x] Verified: 120,000-frame sim across 10 seeds, zero wall-overlap frames, full gameplay (launches, slings, drains, complete games)
