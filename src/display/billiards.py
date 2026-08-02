@@ -1,7 +1,7 @@
 """
 Billiards -- AI-driven pool simulation on 64x64 LED matrix.
 
-Uses canvas.SetPixel directly and CreateFrameCanvas/SwapOnVSync.
+Uses PIL pre-rendered background + SetImage (ported from SetPixel).
 
 Features:
 - Rich green felt background
@@ -76,8 +76,8 @@ class Ball:
         self.is_cue = (color_idx == 0)
         self.pocketed = False
 
-    def draw(self, canvas):
-        """Draw ball with shadow effect."""
+    def draw(self, pixels):
+        """Draw ball onto PIL pixel accessor with shadow."""
         ix, iy = int(self.x), int(self.y)
 
         # Shadow (1 pixel offset down-right)
@@ -87,14 +87,14 @@ class Ball:
                 for dy in range(-1, 2):
                     sx, sy = ix + dx + 1, iy + dy + 1
                     if BORDER_WIDTH < sx < WIDTH - BORDER_WIDTH and BORDER_WIDTH < sy < HEIGHT - BORDER_WIDTH:
-                        canvas.SetPixel(sx, sy, *SHADOW_COLOR)
+                        pixels[sx, sy] = SHADOW_COLOR
         else:
             # Regular ball shadow: 2x2
             for dx in range(2):
                 for dy in range(2):
                     sx, sy = ix + dx + 1, iy + dy + 1
                     if BORDER_WIDTH < sx < WIDTH - BORDER_WIDTH and BORDER_WIDTH < sy < HEIGHT - BORDER_WIDTH:
-                        canvas.SetPixel(sx, sy, *SHADOW_COLOR)
+                        pixels[sx, sy] = SHADOW_COLOR
 
         # Ball itself
         r, g, b = self.color
@@ -106,9 +106,9 @@ class Ball:
                     if BORDER_WIDTH < bx < WIDTH - BORDER_WIDTH and BORDER_WIDTH < by < HEIGHT - BORDER_WIDTH:
                         # Brighter at center
                         if dx == 0 and dy == 0:
-                            canvas.SetPixel(bx, by, 255, 255, 255)
+                            pixels[bx, by] = (255, 255, 255)
                         else:
-                            canvas.SetPixel(bx, by, 200, 200, 200)
+                            pixels[bx, by] = (200, 200, 200)
         else:
             # Regular ball: 2x2 with highlight
             for dx in range(2):
@@ -120,9 +120,9 @@ class Ball:
                             hr = min(255, int(r * 1.3))
                             hg = min(255, int(g * 1.3))
                             hb = min(255, int(b * 1.3))
-                            canvas.SetPixel(bx, by, hr, hg, hb)
+                            pixels[bx, by] = (hr, hg, hb)
                         else:
-                            canvas.SetPixel(bx, by, r, g, b)
+                            pixels[bx, by] = (r, g, b)
 
     def move(self):
         self.x += self.vx
@@ -199,41 +199,23 @@ class Ball:
         self.vy = 0.0
 
 
-def _draw_felt(canvas):
-    """Fill the table with green felt color."""
-    for x in range(BORDER_WIDTH, WIDTH - BORDER_WIDTH):
-        for y in range(BORDER_WIDTH, HEIGHT - BORDER_WIDTH):
-            canvas.SetPixel(x, y, *FELT_GREEN)
-
-
-def _draw_borders(canvas):
-    """Draw wood-colored table borders."""
-    for x in range(WIDTH):
-        for t in range(BORDER_WIDTH):
-            # Top border
-            canvas.SetPixel(x, t, *BORDER_BROWN if t > 0 else BORDER_HIGHLIGHT)
-            # Bottom border
-            canvas.SetPixel(x, HEIGHT - 1 - t, *BORDER_BROWN if t > 0 else BORDER_HIGHLIGHT)
-    for y in range(HEIGHT):
-        for t in range(BORDER_WIDTH):
-            # Left border
-            canvas.SetPixel(t, y, *BORDER_BROWN if t > 0 else BORDER_HIGHLIGHT)
-            # Right border
-            canvas.SetPixel(WIDTH - 1 - t, y, *BORDER_BROWN if t > 0 else BORDER_HIGHLIGHT)
-
-
-def _draw_pockets(canvas, pockets):
-    """Draw dark circular pocket indicators."""
+def _render_static_bg(pockets):
+    """Pre-render table (felt + borders + pockets) to a PIL Image once."""
+    bg = Image.new("RGB", (WIDTH, HEIGHT), FELT_GREEN)
+    draw = ImageDraw.Draw(bg)
+    for t in range(BORDER_WIDTH):
+        c = BORDER_HIGHLIGHT if t == 0 else BORDER_BROWN
+        draw.line([(0, t), (WIDTH-1, t)], fill=c)
+        draw.line([(0, HEIGHT-1-t), (WIDTH-1, HEIGHT-1-t)], fill=c)
+        draw.line([(t, 0), (t, HEIGHT-1)], fill=c)
+        draw.line([(WIDTH-1-t, 0), (WIDTH-1-t, HEIGHT-1)], fill=c)
     for px, py in pockets:
-        for dx in range(-POCKET_RADIUS, POCKET_RADIUS + 1):
-            for dy in range(-POCKET_RADIUS, POCKET_RADIUS + 1):
-                if dx * dx + dy * dy <= POCKET_RADIUS * POCKET_RADIUS:
-                    sx, sy = px + dx, py + dy
-                    if 0 <= sx < WIDTH and 0 <= sy < HEIGHT:
-                        canvas.SetPixel(sx, sy, *POCKET_COLOR)
+        draw.ellipse([(px-POCKET_RADIUS, py-POCKET_RADIUS),
+                      (px+POCKET_RADIUS, py+POCKET_RADIUS)], fill=POCKET_COLOR)
+    return bg
 
 
-def _draw_cue_stick(canvas, cue_ball, target_angle, strength):
+def _draw_cue_stick(draw, cue_ball, target_angle, strength):
     """Draw a brief cue stick line behind the cue ball."""
     cx, cy = int(cue_ball.x), int(cue_ball.y)
     # Stick extends behind the ball (opposite of shot direction)
@@ -247,7 +229,7 @@ def _draw_cue_stick(canvas, cue_ball, target_angle, strength):
             r = int(CUE_STICK_COLOR[0] * fade)
             g = int(CUE_STICK_COLOR[1] * fade)
             b = int(CUE_STICK_COLOR[2] * fade)
-            canvas.SetPixel(sx, sy, r, g, b)
+            draw.point((sx, sy), fill=(r, g, b))
 
 
 def ai_play(balls, pockets):
@@ -301,7 +283,6 @@ def ai_play(balls, pockets):
 
 def main(matrix, _deadline=None):
     """Run one billiards game."""
-    canvas = matrix.CreateFrameCanvas()
 
     # Place balls in a triangle rack formation
     cx, cy = WIDTH // 2, HEIGHT // 2
@@ -332,6 +313,8 @@ def main(matrix, _deadline=None):
         (WIDTH // 2, HEIGHT - BORDER_WIDTH - 1),               # bottom-center
     ]
 
+    _bg = _render_static_bg(pockets)
+
     shot_count = 0
     first_shot = True
     running = True
@@ -342,11 +325,8 @@ def main(matrix, _deadline=None):
         if should_stop():
             break
 
-        # Fill background
-        canvas.Fill(*BLACK)
-        _draw_felt(canvas)
-        _draw_borders(canvas)
-        _draw_pockets(canvas, pockets)
+        image = _bg.copy()
+        pixels = image.load()
 
         # Check cue ball in pocket -> reset position
         if balls[0].is_in_pocket(pockets):
@@ -374,7 +354,7 @@ def main(matrix, _deadline=None):
 
         # Draw all balls
         for ball in balls:
-            ball.draw(canvas)
+            ball.draw(pixels)
 
         # Check if all balls stopped
         if not any(ball.is_moving() for ball in balls):
@@ -392,10 +372,10 @@ def main(matrix, _deadline=None):
                         _draw_borders(canvas)
                         _draw_pockets(canvas, pockets)
                         for ball in balls:
-                            ball.draw(canvas)
+                            ball.draw(pixels)
                         pull_back = 1.0 + (5 - anim_frame) * 0.5  # Pull back then strike
-                        _draw_cue_stick(canvas, balls[0], shot_angle, pull_back)
-                        canvas = matrix.SwapOnVSync(canvas)
+                        _draw_cue_stick(ImageDraw.Draw(frame), balls[0], shot_angle, pull_back)
+                        matrix.SetImage(frame)
                         if _deadline is not None and time.time() >= _deadline:
                             return
                         if not interruptible_sleep(0.04): return
@@ -410,7 +390,7 @@ def main(matrix, _deadline=None):
         if shot_count >= MAX_SHOTS:
             running = False
 
-        canvas = matrix.SwapOnVSync(canvas)
+        matrix.SetImage(image)
 
 
 def run(matrix, duration=60):

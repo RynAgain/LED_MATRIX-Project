@@ -592,10 +592,19 @@ def _update_caravans(caravans, heights, world, villagers, sim_tick):
                 caravan.timer = CARAVAN_TRADE_DURATION
             else:
                 caravan.x += caravan.direction * CARAVAN_SPEED
-                # Skip water columns
+                # Skip water: try jumping ahead up to 5 cols; if too wide, trade early
                 nc = _clamp(int(round(caravan.x)), 0, WORLD_WIDTH - 1)
                 if world[heights[nc]][nc] == WATER:
-                    caravan.x -= caravan.direction * CARAVAN_SPEED  # back up
+                    skipped = False
+                    for skip in range(1, 6):
+                        test_c = _clamp(nc + caravan.direction * skip, 0, WORLD_WIDTH - 1)
+                        if world[heights[test_c]][test_c] != WATER:
+                            caravan.x = float(test_c)
+                            skipped = True
+                            break
+                    if not skipped:
+                        caravan.state = "trading"
+                        caravan.timer = CARAVAN_TRADE_DURATION
 
         elif caravan.state == "trading":
             caravan.timer -= 1

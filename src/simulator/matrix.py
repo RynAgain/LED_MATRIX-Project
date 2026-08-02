@@ -227,10 +227,11 @@ class _SimulatorWindow:
         for y in range(MATRIX_SIZE):
             for x in range(MATRIX_SIZE):
                 r, g, b = snapshot[y][x]
+                # Gamma ~2.2 approximates hardware PWM (linear was too bright in darks)
                 color = (
-                    int(r * bright_factor),
-                    int(g * bright_factor),
-                    int(b * bright_factor),
+                    int(((r / 255.0) ** 2.2 * bright_factor) * 255),
+                    int(((g / 255.0) ** 2.2 * bright_factor) * 255),
+                    int(((b / 255.0) ** 2.2 * bright_factor) * 255),
                 )
                 rect = pygame.Rect(
                     PIXEL_GAP + x * cell,

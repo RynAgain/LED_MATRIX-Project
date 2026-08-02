@@ -67,6 +67,7 @@ from .lighting import (
     _apply_watchtower_light, _apply_torch_post_light,
 )
 from .persistence import save_world, load_world, delete_save, restore_entities
+from .world_api import write_live_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -415,12 +416,12 @@ def run(matrix, duration=900):
             _apply_torch_post_light(pixels, torch_posts, ambient, camera_x)
             matrix.SetImage(image)
             # --- Live snapshot for web UI (every ~3s) ---
-            from .world_api import write_live_snapshot
-            write_live_snapshot(
-                villagers=villagers, structures=structures, trees=trees,
-                farms=farms, animals=animals, heights=heights,
-                weather=weather, camera_x=camera_x, sim_tick=sim_tick,
-            )
+            if sim_tick % 54 == 0:  # ~3s at 18fps
+                write_live_snapshot(
+                    villagers=villagers, structures=structures, trees=trees,
+                    farms=farms, animals=animals, heights=heights,
+                    weather=weather, camera_x=camera_x, sim_tick=sim_tick,
+                )
             # --- Check for web UI commands (non-disruptive, throttled) ---
             lw_cmd = None
             if sim_tick % 30 == 0:

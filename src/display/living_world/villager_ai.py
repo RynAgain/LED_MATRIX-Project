@@ -478,7 +478,12 @@ def _handle_villager_aging(villagers, structures, farms=None):
 def _respawn_if_empty(villagers, heights, world, structures):
     if len(villagers) > 0: return
     vc = _get_valley_cols(world); sp = 0
-    center = WORLD_WIDTH // 2
+    # Prefer spawning near existing structures
+    if structures:
+        center = int(sum(s.x for s in structures) / len(structures))
+        center = max(20, min(WORLD_WIDTH - 20, center))
+    else:
+        center = WORLD_WIDTH // 2
     for _ in range(50):
         if sp >= 2: break
         col = random.randint(center - 20, center + 20)

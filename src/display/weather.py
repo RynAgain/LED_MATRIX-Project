@@ -74,7 +74,7 @@ ANIM_RAIN = 2
 ANIM_SNOW = 3
 ANIM_STORM = 4
 ANIM_FOG = 5
-ANIM_HELL = 6  # >90F clear or >100F any weather: burning city
+ANIM_HELL = 6  # >=90F clear or >=100F any weather: burning city
 
 def _code_to_anim(code, temp=None):
     """Map WMO weather code to animation type.
