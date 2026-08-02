@@ -45,9 +45,7 @@ def _sd_notify(state):
     except Exception:
         pass
 
-# Features that require internet connectivity
-INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
-                     "video_player", "github_stats"}
+from src.feature_registry import INTERNET_FEATURES
 
 
 def _check_internet(timeout=3):

@@ -58,3 +58,9 @@ FEATURE_MODULES = {
     "super_breakout": "src.display.super_breakout",
     "pinball": "src.display.pinball",
 }
+
+
+# Features that require internet connectivity (canonical location).
+# Imported by main.py and app_state.py.
+INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
+                     "video_player", "github_stats"}

@@ -49,9 +49,9 @@ def run(matrix, duration=60):
         img = Image.new("RGB", (WIDTH, HEIGHT), (10, 10, 20))
         from PIL import ImageDraw
         draw = ImageDraw.Draw(img)
-        draw.text((4, 25), "No images", fill=(100, 100, 100))
-        draw.text((2, 37), "Upload via", fill=(80, 80, 80))
-        draw.text((6, 49), "web panel", fill=(80, 80, 80))
+        draw.text((4, 25), "No images", fill=(100, 100, 100), font=ImageFont.load_default())
+        draw.text((2, 37), "Upload via", fill=(80, 80, 80), font=ImageFont.load_default())
+        draw.text((6, 49), "web panel", fill=(80, 80, 80), font=ImageFont.load_default())
 
         while time.time() - start_time < duration:
             if should_stop():

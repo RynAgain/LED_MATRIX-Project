@@ -14,6 +14,7 @@ Design:
 
 import math
 import time
+import threading
 import logging
 from PIL import Image, ImageDraw
 from src.display._fonts import FONT_5X7, _draw_char, _draw_text, _text_width
@@ -256,7 +257,6 @@ def show_loading_ring(matrix, status_func, done_event):
         status_func: Callable returning (str, str) tuple for status text.
         done_event: threading.Event -- animation stops when set.
     """
-    import threading
     ring_radius = 14
     ring_cx, ring_cy = CENTER, 18
     arc_length = 1.8  # radians of visible arc (~100 degrees)

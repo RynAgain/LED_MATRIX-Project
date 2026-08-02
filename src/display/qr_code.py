@@ -76,7 +76,8 @@ def _generate_qr_image(content, size=64):
         
         # Random data dots to look QR-like
         import random
-        random.seed(hash(content))
+        import hashlib
+        random.seed(int(hashlib.md5(content.encode()).hexdigest(), 16))
         for dy in range(14, size - 4):
             for dx in range(14, size - 4):
                 if random.random() > 0.5:

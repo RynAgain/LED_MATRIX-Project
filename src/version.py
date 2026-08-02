@@ -9,8 +9,11 @@ _VERSION_FILE = os.path.join(_PROJECT_ROOT, "VERSION")
 _FALLBACK_VERSION = "1.0.0"
 
 
+_cached_version = None
+
+
 def get_version() -> str:
-    """Return the project version string.
+    """Return the project version string (cached after first call).
 
     Resolution order:
     1. Git describe (tag-based, e.g. "v1.2.3" or "v1.2.3-5-gabc1234")
@@ -21,22 +24,30 @@ def get_version() -> str:
     This ensures a version is always available even after `git reset --hard`,
     on deployments that strip the .git directory, or on systems without git.
     """
+    global _cached_version
+    if _cached_version is not None:
+        return _cached_version
+
     # Try git describe (tag-based version)
     version = _try_git_describe()
     if version:
+        _cached_version = version
         return version
 
     # Try git short hash
     version = _try_git_hash()
     if version:
+        _cached_version = version
         return version
 
     # Try VERSION file (written during deploy/install)
     version = _try_version_file()
     if version:
+        _cached_version = version
         return version
 
     # Ultimate fallback
+    _cached_version = _FALLBACK_VERSION
     return _FALLBACK_VERSION
 
 

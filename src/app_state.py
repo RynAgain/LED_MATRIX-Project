@@ -234,13 +234,7 @@ class PlaceholderMenu:
 # ---------------------------------------------------------------------------
 # Demo carousel (CONTROLLER_OVERHAUL.md §3.4) -- reuses src/main.py helpers
 # ---------------------------------------------------------------------------
-# Features that require internet connectivity. Mirrors src/main.INTERNET_FEATURES
-# but kept local so this module does not force a hard import cycle at definition
-# time; the values are identical (validated by tests).
-INTERNET_FEATURES = {
-    "bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
-    "video_player", "github_stats",
-}
+from src.feature_registry import INTERNET_FEATURES
 
 
 class DemoCarousel:
@@ -666,6 +660,15 @@ class AppStateMachine:
 
         Per the §5 playability contract, ``run_feature`` forwards the controller
         to the game; the game returns on ``wants_quit(controller)`` or game-over.
+        """
+        self._poll_lock.acquire()  # own controller while in game
+        try:
+            self.__run_game_inner()
+        finally:
+            self._poll_lock.release()
+
+    def __run_game_inner(self):
+        """
         On return we always go back to MENU. (Game modules themselves are
         extended in Phase 5; here we just wire the launch + return transition.)
 
