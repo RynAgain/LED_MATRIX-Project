@@ -136,4 +136,8 @@ Post-fix audit (`392ff0e`) caught and corrected 4 defects introduced by the fix 
 3. stock_ticker.py — `_ensure_quote` read `now` from enclosing scope before the render loop defined it, killing the background fetch thread; dead `_prefetch_window` removed
 4. app_state.py — `_run_menu` could leak `_poll_lock` if `menu.run` raised; now try/finally
 
+Independent auditor (second pass) confirmed the 4 fixes above and caught 2 more, fixed in `35794dd`:
+5. slideshow.py — `ImageFont` used in the no-images fallback but never imported (NameError on fresh install)
+6. app_state.py — P2-12 config-reload try/except was claimed by `96c4439` but never actually added; now wrapped with keep-last-good
+
 Verification: `python -m compileall -q src/` clean; `tests/test_review_coverage.py` 4/4; `tests/test_pinball_sim.py` 16/16; all touched modules import clean under the mocked-PIL harness.
