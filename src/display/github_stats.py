@@ -9,6 +9,7 @@ import time
 import json
 import os
 import logging
+import threading
 import requests
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
@@ -168,12 +169,29 @@ def run(matrix, duration=60):
     username = config.get("username", "RynAgain")
     
     # Fetch data once
-    contributions = _fetch_contributions(username)
-    
+    # Fetch in background so we can show a loading frame immediately
+    contributions = {}
+    _fetch_done = threading.Event()
+
+    def _bg_fetch():
+        nonlocal contributions
+        contributions = _fetch_contributions(username)
+        _fetch_done.set()
+
+    threading.Thread(target=_bg_fetch, daemon=True).start()
+
     try:
         while time.time() - start_time < duration:
             if should_stop():
                 break
+            if not _fetch_done.is_set():
+                # Show loading placeholder until data arrives
+                from src.display._fonts import _draw_text
+                loading = Image.new("RGB", (64, 64), (0, 0, 0))
+                _draw_text(ImageDraw.Draw(loading), "LOADING", 10, 28, (60, 80, 60))
+                matrix.SetImage(loading)
+                _fetch_done.wait(timeout=0.5)
+                continue
             image = _render_stats(username, contributions)
             matrix.SetImage(image)
             time.sleep(2)

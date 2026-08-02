@@ -16,6 +16,7 @@ import math
 import json
 import os
 import logging
+import threading
 import requests
 from PIL import Image, ImageDraw
 from src.display._fonts import _draw_text, _text_width
@@ -52,6 +53,73 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 # Minimum market cap in USD (1 billion)
 MIN_MARKET_CAP = 1_000_000_000
+
+# Batch quote endpoint for fetching many symbols at once
+BATCH_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols}"
+
+# S&P 500 constituents (approximate, ordered roughly by market cap).
+# Used to build the "top N by market cap" universe.
+SP500_SYMBOLS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "BRK-B", "LLY", "AVGO",
+    "JPM", "TSLA", "UNH", "XOM", "V", "MA", "PG", "COST", "JNJ", "HD",
+    "ABBV", "WMT", "NFLX", "BAC", "CRM", "MRK", "CVX", "KO", "ORCL", "AMD",
+    "PEP", "TMO", "ACN", "LIN", "CSCO", "MCD", "ADBE", "ABT", "WFC", "DHR",
+    "PM", "TXN", "GE", "QCOM", "ISRG", "INTU", "CAT", "IBM", "NEE", "AMGN",
+    "AMAT", "DIS", "VZ", "BKNG", "PFE", "T", "UBER", "RTX", "HON", "UNP",
+    "LOW", "SPGI", "SYK", "GS", "BLK", "ELV", "SCHW", "PLD", "MDLZ", "ADP",
+    "DE", "TJX", "GILD", "CB", "MMC", "BMY", "VRTX", "LRCX", "ADI", "SLB",
+    "PANW", "AXP", "CME", "FI", "CI", "REGN", "MO", "ETN", "KLAC", "SNPS",
+    "SO", "BSX", "CDNS", "EQIX", "DUK", "ICE", "BDX", "MU", "NOC", "SHW",
+    "MCK", "PH", "CMG", "PNC", "ITW", "CL", "APD", "USB", "PYPL", "GD",
+    "TGT", "MMM", "MSI", "CTAS", "EMR", "ORLY", "NXPI", "CEG", "TDG", "MCO",
+    "EOG", "AJG", "WELL", "HCA", "AFL", "CARR", "WMB", "OKE", "AIG", "SPG",
+    "ROP", "PSA", "TFC", "NSC", "KMB", "SRE", "FDX", "DLR", "MPC", "GM",
+    "AZO", "HUM", "F", "COR", "ALL", "AEP", "D", "FAST", "ROST", "CPRT",
+]
+
+
+def _fetch_top_market_cap(count=100, min_cap_billions=1):
+    """Fetch the top N S&P 500 companies by market cap.
+
+    Batch-fetches quotes for the S&P 500 universe, filters by minimum
+    market cap, sorts by market cap descending, and returns the top N.
+
+    Returns list of dicts with symbol/change_pct/market_cap/industry,
+    sorted by market cap (largest first).
+    """
+    min_cap = min_cap_billions * 1_000_000_000
+    entries = {}
+
+    batch_size = 25
+    for i in range(0, len(SP500_SYMBOLS), batch_size):
+        batch = SP500_SYMBOLS[i:i + batch_size]
+        symbols_str = ",".join(batch)
+        try:
+            url = BATCH_QUOTE_URL.format(symbols=symbols_str)
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("quoteResponse", {}).get("result", [])
+            for q in results:
+                market_cap = q.get("marketCap", 0) or 0
+                if market_cap < min_cap:
+                    continue
+                symbol = q.get("symbol", "")
+                change_pct = q.get("regularMarketChangePercent", 0) or 0
+                industry = q.get("industry", "") or q.get("sector", "") or "N/A"
+                entries[symbol] = {
+                    "symbol": symbol,
+                    "change_pct": change_pct,
+                    "abs_change_pct": abs(change_pct),
+                    "market_cap": market_cap,
+                    "industry": industry,
+                }
+        except Exception as e:
+            logger.warning("Failed to fetch market cap batch %s: %s", symbols_str[:30], e)
+        time.sleep(0.2)
+
+    ranked = sorted(entries.values(), key=lambda x: x["market_cap"], reverse=True)
+    return ranked[:count]
 
 
 def _load_config():
@@ -429,10 +497,10 @@ def _render_loading():
     text = "LOADING"
     tw = _text_width(text, scale=1)
     _draw_text(draw, text, (WIDTH - tw) // 2, 12, LABEL_COLOR, scale=1)
-    text2 = "TOP MOVERS"
+    text2 = "TOP 100"
     tw2 = _text_width(text2, scale=1)
     _draw_text(draw, text2, (WIDTH - tw2) // 2, 24, INDUSTRY_COLOR, scale=1)
-    text3 = ">$1B CAP"
+    text3 = "SP500 CAP"
     tw3 = _text_width(text3, scale=1)
     _draw_text(draw, text3, (WIDTH - tw3) // 2, 36, LABEL_COLOR, scale=1)
     return image
@@ -444,6 +512,7 @@ def run(matrix, duration=60):
     config = _load_config()
     mode = config.get("mode", "top_movers")
     top_count = config.get("top_movers_count", 5)
+    top_cap_count = config.get("top_market_cap_count", 100)
     min_cap_billions = config.get("min_market_cap_billions", 1)
 
     quotes = {}
@@ -460,6 +529,89 @@ def run(matrix, duration=60):
     current_img = None
     next_img = None
 
+    # How many stocks to keep loaded ahead of the current one. We only
+    # fetch detailed quotes for the current stock plus this many upcoming
+    # stocks, rather than loading all symbols up front.
+    prefetch_window = 3
+
+    def _ensure_quote(sym):
+        """Lazily fetch a detailed quote (price + sparkline) for one symbol.
+
+        Skips work if we already have a fresh quote cached. Returns True if
+        a usable quote is available afterwards.
+        """
+        cached = quotes.get(sym)
+        if cached and (now - cached.get("_fetched_at", 0) <= 120):
+            return True
+        q = _fetch_quote(sym)
+        if q:
+            if sym not in industries or industries[sym] == "N/A":
+                industries[sym] = _fetch_industry(sym)
+            q["industry"] = industries.get(sym, "N/A")
+            q["_fetched_at"] = now
+            quotes[sym] = q
+            return True
+        return sym in quotes
+
+    def _prefetch_window(idx):
+        """Ensure the current stock and the next few are loaded."""
+        if not symbols:
+            return
+        for offset in range(prefetch_window + 1):
+            _ensure_quote(symbols[(idx + offset) % len(symbols)])
+
+    # --- Background fetch thread: universe refresh + quote prefetch ---
+    _fetch_lock = threading.Lock()
+    _fetch_due = threading.Event()
+    _fetch_due.set()  # trigger initial fetch immediately
+
+    def _bg_fetch_loop():
+        nonlocal symbols, last_fetch
+        while not should_stop() and time.time() - start_time < duration:
+            _fetch_due.wait(timeout=5)
+            _fetch_due.clear()
+            now = time.time()
+            if now - last_fetch > 120 or not symbols:
+                new_symbols = None
+                if mode == "top_market_cap":
+                    ranked = _fetch_top_market_cap(
+                        count=top_cap_count, min_cap_billions=min_cap_billions
+                    )
+                    if ranked:
+                        new_symbols = [m["symbol"] for m in ranked]
+                        with _fetch_lock:
+                            for m in ranked:
+                                industries[m["symbol"]] = m.get("industry", "N/A")
+                    else:
+                        new_symbols = SP500_SYMBOLS[:top_cap_count]
+                elif mode == "top_movers":
+                    movers = _fetch_top_movers(count=top_count, min_cap_billions=min_cap_billions)
+                    if movers:
+                        new_symbols = [m["symbol"] for m in movers]
+                        with _fetch_lock:
+                            for m in movers:
+                                industries[m["symbol"]] = m.get("industry", "N/A")
+                    else:
+                        new_symbols = config.get("symbols", ["AMZN", "AAPL", "GOOGL", "MSFT", "NVDA"])
+                else:
+                    new_symbols = config.get("symbols", ["AMZN"])
+                if new_symbols:
+                    with _fetch_lock:
+                        symbols = new_symbols
+                last_fetch = now
+            # Prefetch quotes for the current window
+            with _fetch_lock:
+                cur_syms = list(symbols) if symbols else []
+                cur_idx = sym_idx
+            for offset in range(prefetch_window + 1):
+                if should_stop():
+                    break
+                if cur_syms:
+                    _ensure_quote(cur_syms[(cur_idx + offset) % len(cur_syms)])
+
+    _bg_thread = threading.Thread(target=_bg_fetch_loop, daemon=True)
+    _bg_thread.start()
+
     try:
         # Show loading screen while fetching
         matrix.SetImage(_render_loading())
@@ -471,36 +623,14 @@ def run(matrix, duration=60):
             tick += 1
             now = time.time()
 
-            # Fetch data every 120 seconds (movers change less frequently)
-            if now - last_fetch > 120 or not quotes:
-                if mode == "top_movers":
-                    movers = _fetch_top_movers(count=top_count, min_cap_billions=min_cap_billions)
-                    if movers:
-                        symbols = [m["symbol"] for m in movers]
-                        # Store industry info from screener results
-                        for m in movers:
-                            industries[m["symbol"]] = m.get("industry", "N/A")
-                    else:
-                        # Fallback to configured symbols
-                        symbols = config.get("symbols", ["AMZN", "AAPL", "GOOGL", "MSFT", "NVDA"])
-                else:
-                    symbols = config.get("symbols", ["AMZN"])
-
-                # Fetch detailed quotes for each symbol
-                for sym in symbols:
-                    q = _fetch_quote(sym)
-                    if q:
-                        # Add industry info
-                        if sym not in industries or industries[sym] == "N/A":
-                            industries[sym] = _fetch_industry(sym)
-                        q["industry"] = industries.get(sym, "N/A")
-                        quotes[sym] = q
-
-                last_fetch = now
+            # Signal background thread to check for refresh
+            if now - last_fetch > 120:
+                _fetch_due.set()
 
             if not quotes:
                 matrix.SetImage(_render_loading())
-                time.sleep(1)
+                if not interruptible_sleep(1):
+                    break
                 continue
 
             # Check if it's time to switch stocks
@@ -508,7 +638,7 @@ def run(matrix, duration=60):
                 sym_idx = (sym_idx + 1) % len(symbols)
                 current_sym = symbols[sym_idx]
                 if current_sym in quotes:
-                    rank = sym_idx + 1 if mode == "top_movers" else None
+                    rank = sym_idx + 1 if mode in ("top_movers", "top_market_cap") else None
                     next_img = _render_stock(quotes[current_sym], tick, rank=rank)
                     if current_img is not None:
                         transitioning = True
@@ -534,7 +664,7 @@ def run(matrix, duration=60):
                 # Re-render current stock (for animations)
                 current_sym = symbols[sym_idx % len(symbols)]
                 if current_sym in quotes:
-                    rank = sym_idx + 1 if mode == "top_movers" else None
+                    rank = sym_idx + 1 if mode in ("top_movers", "top_market_cap") else None
                     current_img = _render_stock(quotes[current_sym], tick, rank=rank)
                 matrix.SetImage(current_img)
 

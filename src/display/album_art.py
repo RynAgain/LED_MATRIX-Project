@@ -13,6 +13,7 @@ matrix display without scaling overhead).
 import io
 import json
 import logging
+import threading
 import os
 import random
 import time
@@ -195,6 +196,25 @@ def run(matrix, duration=60):
         if current_img is None:
             current_img = _create_error_frame(search_terms[current_idx])
 
+    # --- Background prefetch for next album art ---
+    _prefetched_img = None
+    _prefetch_lock = threading.Lock()
+
+    def _start_prefetch(idx):
+        nonlocal _prefetched_img
+        def _worker():
+            nonlocal _prefetched_img
+            img = _fetch_album_art(search_terms[idx])
+            if img is None:
+                img = _create_error_frame(search_terms[idx])
+            with _prefetch_lock:
+                _prefetched_img = img
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # Kick off prefetch for the second image while showing the first
+    if len(search_terms) > 1:
+        _start_prefetch(1)
+
     try:
         while time.time() - start_time < duration:
             if should_stop():
@@ -204,20 +224,20 @@ def run(matrix, duration=60):
 
             # Check if it's time to switch to next album
             if not transitioning and (now - last_switch) >= display_seconds:
-                # Start transition to next image
-                current_idx = (current_idx + 1) % len(search_terms)
-                next_img = _fetch_album_art(search_terms[current_idx])
-                if next_img is None:
-                    next_img = _create_error_frame(search_terms[current_idx])
-
-                if transition == "fade":
-                    transitioning = True
-                    transition_start = now
-                else:
-                    # Instant switch
-                    current_img = next_img
-                    next_img = None
-                    last_switch = now
+                # Use pre-fetched image if available; otherwise keep showing current
+                if _prefetched_img is not None:
+                    current_idx = (current_idx + 1) % len(search_terms)
+                    next_img = _prefetched_img
+                    _prefetched_img = None
+                    if transition == "fade":
+                        transitioning = True
+                        transition_start = now
+                    else:
+                        current_img = next_img
+                        next_img = None
+                        last_switch = now
+                    # Kick off prefetch for the one after
+                    _start_prefetch((current_idx + 1) % len(search_terms))
 
             # Handle fade transition
             if transitioning:
