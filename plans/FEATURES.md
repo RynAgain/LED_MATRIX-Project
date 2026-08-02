@@ -405,3 +405,15 @@ Clipping elimination (2026-08-01, playtest feedback):
 - [x] Wall resolution iterates up to 3 passes (acute wedges can't leave residual penetration)
 - [x] Sling kicks: front-face-only via robust cross-product side test; deterministic push-out along kick normal
 - [x] Verified: 120,000-frame sim across 10 seeds, zero wall-overlap frames, full gameplay (launches, slings, drains, complete games)
+
+Feature batch: multiball, kickback, bonus, haptics (2026-08-01):
+- [x] Multiball: game refactored to a balls list (balls[0] = primary/plunger ball); all collision paths take a ball param; per-ball swept-collision anchors; camera follows the field ball nearest the drain; nudge affects every field ball
+- [x] Lock saucer at (26,162): capture two balls (re-dock + 1000 pts + bonus units), third entry releases 3-ball MULTIBALL; 1s debounce; pulsing pink ring with locked-ball pips
+- [x] 2x scoring during multiball (score_mult = bonus_mult x 2); drained multiball balls are removed without consuming balls_left; "MULTIBALL OVER" banner on the last
+- [x] Left-outlane kickback: armed at game start, fires the ball back up the lane once, re-armed by completing the bottom rollover group; pulsing yellow lane indicator
+- [x] End-of-ball bonus: units accrue per ball (+1 rollover, +2 target, +5 orbit/lock), paid out as units x 100 x bonus_mult on a real drain; multiplier resets each ball
+- [x] Controller rumble driven by per-frame impact strength (bumpers, slings, flipper hits, lock, multiball, kickback, tilt, drains)
+- [x] Generic fading event banner (LOCK / MULTIBALL / BONUS / KICKBACK ARMED / TILT)
+- [x] Flipper exit-speed cap (1.5x game speed cap): per-substep contact was re-adding surface velocity, pumping balls to 30-45 px/frame teleports (found by the new test suite)
+- [x] Headless test suite `tests/test_pinball_sim.py`: 16 tests -- seeded no-clipping/OOB/speed sims, gameplay-alive, flipper impulse + passive no-energy-gain, swept wall test, kickback, lock/multiball lifecycle, bonus tally, ball save, tilt, haptics
+- [x] Verified: 60,000-frame soak across 10 seeds -- zero overlaps, zero out-of-bounds, zero speed violations, 171 launches, 21 games, high score 248,950
