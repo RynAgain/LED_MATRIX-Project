@@ -24,6 +24,11 @@ def _fast_sin(x):
     return _SIN_TABLE[idx]
 
 
+# Precomputed distance-from-center table (avoids sqrt per pixel per frame)
+_DIST_TABLE = [[math.sqrt((x - 32)**2 + (y - 32)**2) * 0.15
+                for x in range(WIDTH)] for y in range(HEIGHT)]
+
+
 def _plasma_color(value):
     """Convert a plasma value (0-1) to RGB using smooth color cycling."""
     r = int((_fast_sin(value * _TWO_PI) * 0.5 + 0.5) * 255)
@@ -52,7 +57,7 @@ def run(matrix, duration=60):
                     v1 = _fast_sin(x * 0.1 + t)
                     v2 = _fast_sin(y * 0.1 + t * 0.7)
                     v3 = _fast_sin((x + y) * 0.1 + t * 0.5)
-                    v4 = _fast_sin(math.sqrt((x - 32)**2 + (y - 32)**2) * 0.15 + t * 1.2)
+                    v4 = _fast_sin(_DIST_TABLE[y][x] + t * 1.2)
                     
                     value = (v1 + v2 + v3 + v4) / 4.0  # -1 to 1
                     value = (value + 1) / 2.0  # 0 to 1

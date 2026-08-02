@@ -283,6 +283,8 @@ def _project(vertices, scale=SCALE):
 # Main entry point
 # ---------------------------------------------------------------------------
 
+_shape_cache = {}  # name -> (normalised_vertices, edges, color)
+
 def run(matrix, duration=60):
     """Run the wireframe polygon display."""
     cfg = _load_config()
@@ -314,10 +316,11 @@ def run(matrix, duration=60):
             shape_idx = int(elapsed / shape_duration) % len(active)
 
             name, shape_fn = active[shape_idx]
-            vertices, edges, color = shape_fn()
-
-            # -- Normalise so every shape has the same bounding radius --
-            vertices = _normalise(vertices)
+            # Cache normalized geometry (shape_fn + _normalise are pure)
+            if name not in _shape_cache:
+                v, e, c = shape_fn()
+                _shape_cache[name] = (_normalise(v), e, c)
+            vertices, edges, color = _shape_cache[name]
 
             rotated = _rotate(vertices, ax, ay, az)
             projected = _project(rotated)

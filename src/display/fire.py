@@ -55,19 +55,20 @@ def run(matrix, duration=60):
             for x in range(WIDTH):
                 heat[HEIGHT][x] = random.randint(160, 255) if random.random() > 0.3 else random.randint(0, 100)
             
-            # Propagate heat upward
+            # Propagate heat upward (pre-generate cooling per row to cut
+            # 4096 random.uniform calls down to 64 random.choices calls)
             for y in range(0, HEIGHT):
+                cool_row = [random.uniform(0.5, 3.0) for _ in range(WIDTH)]
+                row_below = heat[y + 1]
+                row_below2 = heat[min(y + 2, HEIGHT)]
+                row_out = heat[y]
                 for x in range(WIDTH):
-                    # Average of surrounding pixels from row below
-                    left = heat[y + 1][(x - 1) % WIDTH]
-                    center = heat[y + 1][x]
-                    right = heat[y + 1][(x + 1) % WIDTH]
-                    below = heat[min(y + 2, HEIGHT)][x] if y + 2 <= HEIGHT else center
-                    
-                    avg = (left + center + right + below) / 4.0
-                    # Cool as it rises
-                    cooling = random.uniform(0.5, 3.0)
-                    heat[y][x] = max(0, min(255, int(avg - cooling)))
+                    left = row_below[(x - 1) % WIDTH]
+                    center = row_below[x]
+                    right = row_below[(x + 1) % WIDTH]
+                    below = row_below2[x]
+                    avg = (left + center + right + below) * 0.25
+                    row_out[x] = max(0, min(255, int(avg - cool_row[x])))
             
             # Render to image
             image = Image.new("RGB", (WIDTH, HEIGHT))

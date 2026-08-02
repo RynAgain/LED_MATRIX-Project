@@ -5,6 +5,8 @@ import time
 import random
 import logging
 from PIL import Image, ImageDraw, ImageFont
+
+_DEFAULT_FONT = ImageFont.load_default()
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -223,7 +225,7 @@ def run(matrix, duration=60):
 
             # Score
             try:
-                font = ImageFont.load_default()
+                font = _DEFAULT_FONT
                 draw.text((1, 0), str(score), fill=(80, 80, 80), font=font)
             except Exception:
                 pass

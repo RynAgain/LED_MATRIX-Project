@@ -231,6 +231,8 @@ def run(matrix, duration=60):
     scores = [0, 0]
     
     try:
+        _cached_star_rng = random.Random(99)
+        _cached_font = ImageFont.load_default()
         while time.time() - start_time < duration:
             if should_stop():
                 break
@@ -240,7 +242,7 @@ def run(matrix, duration=60):
             draw = ImageDraw.Draw(image)
             
             # Stars
-            _star_rng = random.Random(99)
+            _star_rng = _cached_star_rng
             for _ in range(15):
                 draw.point((_star_rng.randint(0, WIDTH-1), _star_rng.randint(0, 20)), fill=(30, 30, 50))
             
@@ -338,7 +340,7 @@ def run(matrix, duration=60):
             
             # Score display
             try:
-                font = ImageFont.load_default()
+                font = _cached_font
                 draw.text((1, 0), str(scores[0]), fill=(100, 100, 255), font=font)
                 draw.text((WIDTH - 8, 0), str(scores[1]), fill=(255, 100, 100), font=font)
             except Exception:

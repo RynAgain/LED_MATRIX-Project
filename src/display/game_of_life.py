@@ -31,19 +31,19 @@ def _count_neighbors(grid, x, y):
     return count
 
 
-def _next_generation(grid):
-    """Compute the next generation."""
-    new_grid = [[0] * WIDTH for _ in range(HEIGHT)]
+def _next_generation(grid, buf=None):
+    """Compute the next generation into buf (avoids per-frame allocation)."""
+    if buf is None:
+        buf = [[0] * WIDTH for _ in range(HEIGHT)]
     for y in range(HEIGHT):
+        row = buf[y]
         for x in range(WIDTH):
             neighbors = _count_neighbors(grid, x, y)
             if grid[y][x]:
-                # Alive: survive with 2 or 3 neighbors
-                new_grid[y][x] = 1 if neighbors in (2, 3) else 0
+                row[x] = 1 if neighbors in (2, 3) else 0
             else:
-                # Dead: born with exactly 3 neighbors
-                new_grid[y][x] = 1 if neighbors == 3 else 0
-    return new_grid
+                row[x] = 1 if neighbors == 3 else 0
+    return buf
 
 
 def _grid_to_image(grid, age_map):
@@ -70,6 +70,7 @@ def run(matrix, duration=60):
     """Run the Game of Life for the specified duration."""
     start_time = time.time()
     grid = _random_grid(0.35)
+    _buf = [[0] * WIDTH for _ in range(HEIGHT)]
     age_map = [[0] * WIDTH for _ in range(HEIGHT)]
     stale_count = 0
     prev_alive = -1
@@ -84,8 +85,8 @@ def run(matrix, duration=60):
             image = _grid_to_image(grid, age_map)
             matrix.SetImage(image)
             
-            # Update
-            new_grid = _next_generation(grid)
+            # Update (double-buffer: swap grid <-> buf to avoid allocation)
+            new_grid = _next_generation(grid, _buf)
             
             # Update age map
             for y in range(HEIGHT):
@@ -112,7 +113,7 @@ def run(matrix, duration=60):
                     age_map[y][x] = 0
                 stale_count = 0
             
-            grid = new_grid
+            grid, _buf = new_grid, grid
             
             elapsed = time.time() - frame_start
             sleep_time = FRAME_INTERVAL - elapsed
