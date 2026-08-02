@@ -47,7 +47,7 @@ def run(matrix, duration=60):
     if not image_paths:
         # No images - show a placeholder
         img = Image.new("RGB", (WIDTH, HEIGHT), (10, 10, 20))
-        from PIL import ImageDraw
+        from PIL import ImageDraw, ImageFont
         draw = ImageDraw.Draw(img)
         draw.text((4, 25), "No images", fill=(100, 100, 100), font=ImageFont.load_default())
         draw.text((2, 37), "Upload via", fill=(80, 80, 80), font=ImageFont.load_default())

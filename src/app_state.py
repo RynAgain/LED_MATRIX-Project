@@ -346,7 +346,10 @@ class DemoCarousel:
 
         # Between-cycle config reload + schedule application (unchanged logic).
         if not self._shutdown.is_set():
-            self.config = load_config()
+            try:
+                self.config = load_config()
+            except Exception:  # noqa: BLE001 - keep last-good config (P2-12)
+                logger.warning("Config reload failed; keeping previous config", exc_info=True)
             self._refresh_enabled()
 
             schedule_override = _check_schedule()
