@@ -65,12 +65,15 @@ def run(matrix, duration=60):
     logger = logging.getLogger(__name__)
     start_time = time.time()
     try:
+        last_price = None
         while time.time() - start_time < duration:
             if should_stop():
                 break
             price = fetch_bitcoin_price()
             if price:
-                display_bitcoin_price_on_matrix(matrix, price)
+                last_price = price
+            if last_price:
+                display_bitcoin_price_on_matrix(matrix, last_price)
             # Sleep in small increments to allow timely exit
             sleep_end = time.time() + 10
             while time.time() < sleep_end and time.time() - start_time < duration:

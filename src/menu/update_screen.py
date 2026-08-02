@@ -38,6 +38,12 @@ INFO_COLOR = (150, 150, 160)
 
 def run_force_update(matrix) -> None:
     """Pull latest code from GitHub and restart the display service.
+    try:
+        import json as _j
+        _cfgp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "config.json")
+        _branch = _j.load(open(_cfgp)).get("github_branch", "main")
+    except Exception:
+        _branch = "main"
 
     Steps:
     1. Show "UPDATING..." on the matrix
@@ -104,7 +110,7 @@ def run_force_update(matrix) -> None:
             # Hard reset to remote (guaranteed to sync regardless of local state)
             _show_message(matrix, "UPDATING...", TEXT_COLOR)
             reset_result = subprocess.run(
-                ["git", "reset", "--hard", "origin/main"],
+                ["git", "reset", "--hard", f"origin/{_branch}"],
                 cwd=work_dir,
                 capture_output=True, text=True, timeout=15
             )
@@ -166,7 +172,7 @@ def _try_hard_reset(matrix, work_dir) -> bool:
         )
         # Hard reset
         result = subprocess.run(
-            ["git", "reset", "--hard", "origin/main"],
+            ["git", "reset", "--hard", f"origin/{_branch}"],
             cwd=work_dir,
             capture_output=True, text=True, timeout=15
         )

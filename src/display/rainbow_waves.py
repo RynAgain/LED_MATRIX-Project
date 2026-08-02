@@ -6,33 +6,12 @@ import math
 import logging
 from PIL import Image
 from src.display._shared import should_stop
+from src.display._utils import _hsv_to_rgb
 
 logger = logging.getLogger(__name__)
 
 WIDTH, HEIGHT = 64, 64
 FRAME_INTERVAL = 1.0 / 30
-
-
-def _hsv_to_rgb(h, s, v):
-    """Convert HSV (0-1 range) to RGB (0-255 range)."""
-    if s == 0:
-        r = g = b = int(v * 255)
-        return (r, g, b)
-    
-    h = h % 1.0
-    i = int(h * 6)
-    f = h * 6 - i
-    p = int(v * (1 - s) * 255)
-    q = int(v * (1 - s * f) * 255)
-    t = int(v * (1 - s * (1 - f)) * 255)
-    v = int(v * 255)
-    
-    if i == 0: return (v, t, p)
-    elif i == 1: return (q, v, p)
-    elif i == 2: return (p, v, t)
-    elif i == 3: return (p, q, v)
-    elif i == 4: return (t, p, v)
-    else: return (v, p, q)
 
 
 # Different wave patterns

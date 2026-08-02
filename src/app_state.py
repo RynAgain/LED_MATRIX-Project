@@ -484,6 +484,7 @@ class AppStateMachine:
         # Set by the background input thread when START is pressed during IDLE.
         self._menu_requested = threading.Event()
         self._input_poll_interval = 1.0 / input_poll_hz if input_poll_hz > 0 else 0.05
+        self._poll_lock = threading.Lock()  # prevents watcher+foreground polling race
         self._input_thread: Optional[threading.Thread] = None
 
         # Debounce tracking for START button: monotonic timestamp of the last
@@ -547,10 +548,15 @@ class AppStateMachine:
             # the event buffer and reset directional held-state, causing the
             # game/menu to miss D-pad/analog stick input.
             if self.mode is AppMode.IDLE:
-                try:
-                    events = self.controller.poll_events()
-                except Exception:  # noqa: BLE001 - never let the watcher die
-                    events = []
+                if not self._poll_lock.acquire(blocking=False):
+                    events = []  # foreground owns controller right now
+                else:
+                    try:
+                        events = self.controller.poll_events()
+                    except Exception:  # noqa: BLE001 - never let the watcher die
+                        events = []
+                    finally:
+                        self._poll_lock.release()
 
                 if self.controller.is_quitting():
                     self._shutdown.set()
@@ -604,6 +610,7 @@ class AppStateMachine:
 
     def _run_menu(self) -> None:
         """MENU: delegate to the (placeholder or real) menu, then transition."""
+        self._poll_lock.acquire()  # own controller while in menu/game
         clear_stop()
         if hasattr(self.menu, "set_config"):
             try:
@@ -630,6 +637,7 @@ class AppStateMachine:
         else:  # RESUME (or anything unexpected) -> back to the demo carousel.
             self.mode = AppMode.IDLE
             self._last_idle_entry_time = time.monotonic()
+        self._poll_lock.release()
 
     def _run_demo(self, name: str) -> None:
         """Run a feature in demo mode (no controller) for its configured duration.

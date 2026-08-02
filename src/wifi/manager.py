@@ -243,23 +243,10 @@ class WiFiManager:
                 return True
             else:
                 logger.warning("Connectivity check returned unexpected content: %s", content[:100])
-                portal = self.detect_captive_portal()
-                if portal['detected']:
-                    portal_url = portal['portal_url'] or 'unknown'
-                    logger.warning(
-                        "Connected to WiFi but behind a captive portal at %s. Manual login may be required.",
-                        portal_url
-                    )
+                # Captive portal detection deferred to caller (adds 10-20s per check)
                 return False
         except Exception as e:
             logger.debug("No internet connectivity: %s", e)
-            portal = self.detect_captive_portal()
-            if portal['detected']:
-                portal_url = portal['portal_url'] or 'unknown'
-                logger.warning(
-                    "Connected to WiFi but behind a captive portal at %s. Manual login may be required.",
-                    portal_url
-                )
             return False
 
     def detect_captive_portal(self):

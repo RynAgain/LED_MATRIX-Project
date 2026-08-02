@@ -7,6 +7,7 @@ import random
 import logging
 from PIL import Image
 from src.display._shared import should_stop
+from src.display._utils import _hsv_to_rgb
 
 logger = logging.getLogger(__name__)
 
@@ -42,25 +43,6 @@ class Blob:
         self.vy = max(-0.8, min(0.8, self.vy))
         # Slowly shift hue
         self.hue = (self.hue + 0.001) % 1.0
-
-
-def _hsv_to_rgb(h, s=1.0, v=1.0):
-    if s == 0:
-        c = int(v * 255)
-        return (c, c, c)
-    h = h % 1.0
-    i = int(h * 6)
-    f = h * 6 - i
-    p = int(v * (1 - s) * 255)
-    q = int(v * (1 - s * f) * 255)
-    t = int(v * (1 - s * (1 - f)) * 255)
-    v = int(v * 255)
-    if i == 0: return (v, t, p)
-    elif i == 1: return (q, v, p)
-    elif i == 2: return (p, v, t)
-    elif i == 3: return (p, q, v)
-    elif i == 4: return (t, p, v)
-    else: return (v, p, q)
 
 
 def run(matrix, duration=60):
