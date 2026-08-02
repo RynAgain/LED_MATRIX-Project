@@ -169,7 +169,7 @@ def _run_mandelbrot(matrix, duration=20):
         # More zoom = need more iterations to see boundary detail
         zoom_factor = initial_scale / scale
         max_iter = int(30 + math.log2(max(1, zoom_factor)) * 25)
-        max_iter = min(max_iter, 300)  # Cap for performance on 64x64
+        max_iter = min(max_iter, 80)  # 64x64 needs no more; 300 = ~1fps on Pi  # Cap for performance on 64x64
 
         # Center interpolates toward target
         cx = -0.5 + (target_cx - (-0.5)) * eased_t

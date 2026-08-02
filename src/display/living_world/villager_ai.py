@@ -109,7 +109,7 @@ def _find_nearest_fire(villager, trees, grass_fires, villagers):
                 best_dist = d
                 best = t
     # Check grass fires
-    if grass_fires is not None:
+    if grass_fires:
         for gf in grass_fires:
             if id(gf) not in targeted:
                 d = abs(gf.x - vx)
@@ -1494,7 +1494,7 @@ def _handle_idle(v, heights, world, trees, structures, lumber_items, flowers,
     return False
 
 
-def _update_villagers(villagers, heights, world, trees, structures, lumber_items, flowers, path_wear, day_phase, sim_tick, weather=None, grass_fires=None, farms=None, animals=None):
+def _update_villagers(villagers, heights, world, trees, structures, lumber_items, flowers, path_wear, day_phase, sim_tick, weather=None, grass_fires=(), farms=None, animals=None):
     if farms is None:
         farms = []
     if animals is None:

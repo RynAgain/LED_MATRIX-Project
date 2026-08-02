@@ -340,15 +340,19 @@ class RubiksCube:
 
         quads = self.get_sticker_quads()
 
-        # Transform all quads by current rotation
+        # Transform all quads by current rotation (trig precomputed once)
+        cx, sx = math.cos(self.rot_x), math.sin(self.rot_x)
+        cy, sy = math.cos(self.rot_y), math.sin(self.rot_y)
+        cz, sz = math.cos(self.rot_z), math.sin(self.rot_z)
         transformed = []
         for corners, color in quads:
             rotated_corners = []
             for p in corners:
-                p = _rotate_x(p, self.rot_x)
-                p = _rotate_y(p, self.rot_y)
-                p = _rotate_z(p, self.rot_z)
-                rotated_corners.append(p)
+                x, y, z = p
+                y, z = y * cx - z * sx, y * sx + z * cx
+                x, z = x * cy + z * sy, -x * sy + z * cy
+                x, y = x * cz - y * sz, x * sz + y * cz
+                rotated_corners.append((x, y, z))
 
             # Back-face culling: only draw faces pointing toward camera
             # Normal = cross product of two edges

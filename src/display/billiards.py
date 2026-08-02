@@ -398,7 +398,7 @@ def main(matrix, _deadline=None):
                         canvas = matrix.SwapOnVSync(canvas)
                         if _deadline is not None and time.time() >= _deadline:
                             return
-                        time.sleep(0.04)
+                        if not interruptible_sleep(0.04): return
 
                 shot_count += 1
                 first_shot = False
@@ -427,7 +427,7 @@ def run(matrix, duration=60):
             if should_stop():
                 break
             main(matrix, _deadline=deadline)
-            time.sleep(1)
+            if not interruptible_sleep(1): return
     except Exception as e:
         logger.error("Error in billiards: %s", e, exc_info=True)
     finally:
