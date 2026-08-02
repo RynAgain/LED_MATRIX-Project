@@ -52,8 +52,7 @@ class TestPersistenceRoundtrip:
     def test_save_load_roundtrip(self):
         from src.display.living_world.persistence import save_world, load_world, restore_entities
         from src.display.living_world.constants import WORLD_WIDTH, DISPLAY_HEIGHT, GRASS, AIR
-        from src.display.living_world.entities import Villager, Tree, Flower
-        from src.display.living_world.weather import Weather
+        from src.display.living_world.entities import Villager, Tree, Flower, Weather
 
         # Build minimal world state
         heights = [DISPLAY_HEIGHT - 10] * WORLD_WIDTH
@@ -63,7 +62,7 @@ class TestPersistenceRoundtrip:
 
         villagers = [Villager(50, heights[50])]
         villagers[0].name = "TestVillager"
-        trees = [Tree(30, heights[30] - 1)]
+        trees = [Tree(30, heights[30], 0.5, 7, 3, 0)]
         flowers = [Flower(40, heights[40], (255, 100, 100))]
         weather = Weather()
         structures = []
@@ -85,7 +84,10 @@ class TestPersistenceRoundtrip:
                     villagers=villagers, structures=structures, trees=trees,
                     farms=farms, animals=animals, flowers=flowers,
                     lumber_items=lumber_items, heights=heights, world=world,
-                    weather=weather, stars=stars, camera_x=50, sim_tick=100,
+                    weather=weather, clouds=[], birds=[], shooting_stars=[],
+                    fireflies=[], smoke_particles=[], fish_jumps=[],
+                    rain_drops=[], grass_fires=[],
+                    stars=stars, camera_x=50, sim_tick=100,
                     path_wear=path_wear, torch_posts=torch_posts,
                     start_time=time.time() - 120.0,
                 )
@@ -135,7 +137,7 @@ class TestReproduction:
             villagers.append(v)
 
         pop_before = len(villagers)
-        _handle_reproduction(villagers, heights, world)
+        _handle_reproduction(villagers, heights, world, [], 100)
         # Should NOT have grown past MAX_VILLAGERS
         assert len(villagers) <= MAX_VILLAGERS, f"population grew to {len(villagers)}"
 

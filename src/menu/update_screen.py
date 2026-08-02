@@ -36,14 +36,22 @@ ERR_COLOR = (255, 80, 80)
 INFO_COLOR = (150, 150, 160)
 
 
-def run_force_update(matrix) -> None:
-    """Pull latest code from GitHub and restart the display service.
+def _get_branch() -> str:
+    """Read the update branch from config/config.json (fallback: main)."""
     try:
         import json as _j
-        _cfgp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "config.json")
-        _branch = _j.load(open(_cfgp)).get("github_branch", "main")
-    except Exception:
-        _branch = "main"
+        _cfgp = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "config", "config.json",
+        )
+        with open(_cfgp) as _f:
+            return _j.load(_f).get("github_branch", "main")
+    except Exception:  # noqa: BLE001 - any config problem falls back to main
+        return "main"
+
+
+def run_force_update(matrix) -> None:
+    """Pull latest code from GitHub and restart the display service.
 
     Steps:
     1. Show "UPDATING..." on the matrix
@@ -97,8 +105,9 @@ def run_force_update(matrix) -> None:
                 pass
 
         # Fetch latest from origin
+        _branch = _get_branch()
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
+            ["git", "fetch", "origin", _branch],
             cwd=work_dir,
             capture_output=True, text=True, timeout=60
         )
@@ -164,9 +173,10 @@ def _try_hard_reset(matrix, work_dir) -> bool:
     """
     _show_message(matrix, "RESETTING..", TEXT_COLOR)
     try:
+        _branch = _get_branch()
         # Fetch
         subprocess.run(
-            ["git", "fetch", "origin", "main"],
+            ["git", "fetch", "origin", _branch],
             cwd=work_dir,
             capture_output=True, text=True, timeout=30
         )

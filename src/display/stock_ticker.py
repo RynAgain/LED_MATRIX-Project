@@ -540,6 +540,7 @@ def run(matrix, duration=60):
         Skips work if we already have a fresh quote cached. Returns True if
         a usable quote is available afterwards.
         """
+        now = time.time()
         cached = quotes.get(sym)
         if cached and (now - cached.get("_fetched_at", 0) <= 120):
             return True
@@ -552,13 +553,6 @@ def run(matrix, duration=60):
             quotes[sym] = q
             return True
         return sym in quotes
-
-    def _prefetch_window(idx):
-        """Ensure the current stock and the next few are loaded."""
-        if not symbols:
-            return
-        for offset in range(prefetch_window + 1):
-            _ensure_quote(symbols[(idx + offset) % len(symbols)])
 
     # --- Background fetch thread: universe refresh + quote prefetch ---
     _fetch_lock = threading.Lock()

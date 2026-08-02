@@ -23,6 +23,7 @@ except ImportError:
 
 import logging
 import math
+from PIL import Image, ImageDraw
 from src.display._shared import should_stop, interruptible_sleep
 import random
 import time
@@ -367,12 +368,10 @@ def main(matrix, _deadline=None):
                     for anim_frame in range(6):
                         if should_stop():
                             return
-                        canvas.Fill(*BLACK)
-                        _draw_felt(canvas)
-                        _draw_borders(canvas)
-                        _draw_pockets(canvas, pockets)
+                        frame = _bg.copy()
+                        fp = frame.load()
                         for ball in balls:
-                            ball.draw(pixels)
+                            ball.draw(fp)
                         pull_back = 1.0 + (5 - anim_frame) * 0.5  # Pull back then strike
                         _draw_cue_stick(ImageDraw.Draw(frame), balls[0], shot_angle, pull_back)
                         matrix.SetImage(frame)

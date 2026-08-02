@@ -605,6 +605,12 @@ class AppStateMachine:
     def _run_menu(self) -> None:
         """MENU: delegate to the (placeholder or real) menu, then transition."""
         self._poll_lock.acquire()  # own controller while in menu/game
+        try:
+            self.__run_menu_inner()
+        finally:
+            self._poll_lock.release()
+
+    def __run_menu_inner(self) -> None:
         clear_stop()
         if hasattr(self.menu, "set_config"):
             try:
@@ -631,7 +637,6 @@ class AppStateMachine:
         else:  # RESUME (or anything unexpected) -> back to the demo carousel.
             self.mode = AppMode.IDLE
             self._last_idle_entry_time = time.monotonic()
-        self._poll_lock.release()
 
     def _run_demo(self, name: str) -> None:
         """Run a feature in demo mode (no controller) for its configured duration.
