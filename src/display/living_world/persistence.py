@@ -1,5 +1,6 @@
 """Save / restore world state to JSON for persistence across restarts."""
 
+import time
 import json
 import os
 import logging
@@ -51,6 +52,7 @@ def save_world(*, villagers, structures, trees, farms, heights, world,
         data = {
             "version": 1,
             "sim_tick": sim_tick,
+        "elapsed": time.time() - start_time if start_time else 0.0,
             "camera_x": camera_x,
             "heights": heights,
             "world": world,

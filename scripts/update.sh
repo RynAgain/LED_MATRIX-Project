@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # LED Matrix Project - Update Script
 # Called by led-matrix-updater.timer OR manually.
 # Strategy: git fetch + reset --hard (always works regardless of local state).
@@ -168,23 +169,10 @@ fi
 if [ "$SERVICES_CHANGED" = true ]; then
     log "Service/script files changed, re-installing..."
     ACTUAL_USER="${SUDO_USER:-$(whoami)}"
-    ACTUAL_HOME=$(eval echo "~$ACTUAL_USER")
+    ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
 
-    for SVC_FILE in led-matrix.service led-matrix-updater.service led-matrix-updater.timer; do
-        SRC="$PROJECT_ROOT/services/$SVC_FILE"
-        DST="/etc/systemd/system/$SVC_FILE"
-        if [ -f "$SRC" ]; then
-            sudo cp "$SRC" "$DST"
-            sudo sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" "$DST"
-            sudo sed -i "s|User=ryn|User=$ACTUAL_USER|g" "$DST"
-            sudo sed -i "s|Group=ryn|Group=$ACTUAL_USER|g" "$DST"
-            sudo sed -i "s|HOME=/home/ryn|HOME=$ACTUAL_HOME|g" "$DST"
-            log "Updated $SVC_FILE"
-        fi
-    done
-
-    sudo systemctl daemon-reload
-    log "Systemd daemon reloaded"
+    sudo "$PROJECT_ROOT/scripts/install-service-files.sh" "$PROJECT_ROOT" "$ACTUAL_USER" "$ACTUAL_HOME"
+    log "Service files installed via wrapper script"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────

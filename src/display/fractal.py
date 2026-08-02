@@ -311,10 +311,10 @@ def _run_dragon_curve(matrix, duration=15):
 
         # If we've drawn everything, hold the final image
         if current_segment >= total_segments:
-            # Slowly cycle hue on the completed fractal
             while time.time() - start < duration:
                 if should_stop():
                     return False
+                matrix.SetImage(image)  # keep pushing frames for watchdog
                 time.sleep(FRAME_INTERVAL)
             break
 

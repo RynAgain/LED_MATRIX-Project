@@ -5,7 +5,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 # Must run as root for GPIO/hardware access (rpi-rgb-led-matrix requirement)
 User=root
 Group=root
@@ -14,6 +15,7 @@ ExecStartPre=/bin/sleep 2
 ExecStart=/bin/bash /home/ryn/LED_MATRIX-Project/scripts/start.sh
 Restart=always
 RestartSec=10
+WatchdogSec=90
 TimeoutStartSec=120
 TimeoutStopSec=15
 KillMode=mixed
@@ -31,6 +33,8 @@ Environment=GIT_TERMINAL_PROMPT=0
 
 # Hardening (ProtectHome removed - project lives under /home and needs write access)
 NoNewPrivileges=false
+MemoryMax=512M
+OOMPolicy=stop
 
 [Install]
 WantedBy=multi-user.target

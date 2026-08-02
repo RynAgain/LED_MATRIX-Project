@@ -216,11 +216,18 @@ class RubiksCube:
                 f['B'][0][2], f['B'][1][2], f['B'][2][2] = f['U'][2][0], f['U'][1][0], f['U'][0][0]
                 f['U'][0][0], f['U'][1][0], f['U'][2][0] = tmp[0], tmp[1], tmp[2]
         elif face_name == 'B':
-            # Simplified B face rotation
             if clockwise:
-                self._rotate_face_cw('B')  # already done above, just edges
+                tmp = [f['U'][0][2], f['U'][0][1], f['U'][0][0]]
+                f['U'][0] = [f['R'][0][2], f['R'][1][2], f['R'][2][2]]
+                f['R'][0][2], f['R'][1][2], f['R'][2][2] = f['D'][2][0], f['D'][2][1], f['D'][2][2]
+                f['D'][2] = [f['L'][0][0], f['L'][1][0], f['L'][2][0]]
+                f['L'][0][0], f['L'][1][0], f['L'][2][0] = tmp[0], tmp[1], tmp[2]
             else:
-                self._rotate_face_ccw('B')
+                tmp = [f['U'][0][0], f['U'][0][1], f['U'][0][2]]
+                f['U'][0] = [f['L'][2][0], f['L'][1][0], f['L'][0][0]]
+                f['L'][0][0], f['L'][1][0], f['L'][2][0] = f['D'][2][2], f['D'][2][1], f['D'][2][0]
+                f['D'][2] = [f['R'][2][2], f['R'][1][2], f['R'][0][2]]
+                f['R'][0][2], f['R'][1][2], f['R'][2][2] = tmp[0], tmp[1], tmp[2]
 
     def get_sticker_quads(self):
         """Generate all visible sticker quads in 3D space.

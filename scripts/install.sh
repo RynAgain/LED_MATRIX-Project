@@ -37,7 +37,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ACTUAL_USER="${SUDO_USER:-pi}"
-ACTUAL_HOME=$(eval echo "~$ACTUAL_USER")
+ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
 
 # Detect platform (skip hardware steps on non-Pi systems)
 IS_PI=false
@@ -324,8 +324,7 @@ $ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart led-matrix.service
 $ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start led-matrix.service
 $ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop led-matrix.service
 $ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
-$ACTUAL_USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/systemd/system/*
-$ACTUAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sed -i * /etc/systemd/system/*
+$ACTUAL_USER ALL=(ALL) NOPASSWD: $PROJECT_ROOT/scripts/install-service-files.sh
 EOF
     chmod 440 "$SUDOERS_FILE"
     log_info "Sudoers file created: $ACTUAL_USER can restart services without password"

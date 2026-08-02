@@ -485,7 +485,7 @@ def _respawn_if_empty(villagers, heights, world, structures):
         col = _clamp(col, 4, WORLD_WIDTH - 5)
         if col in vc: continue
         sy = heights[col]
-        if world[sy][col] == GRASS:
+        if 0 <= sy < DISPLAY_HEIGHT and world[sy][col] == GRASS:
             baby = Villager(col, sy)
             _claim_unowned_house(baby, structures)
             villagers.append(baby)

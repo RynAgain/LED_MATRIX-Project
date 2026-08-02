@@ -790,8 +790,6 @@ def wants_quit(controller: "Controller") -> bool:
     """
     if controller.is_pressed(Button.START):
         return True
-    if controller.is_pressed(Button.START) and controller.is_pressed(Button.SELECT):
-        return True
     if controller.start_hold_seconds() >= START_HOLD_QUIT_SECONDS:
         return True
     return False

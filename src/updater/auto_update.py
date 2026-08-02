@@ -580,39 +580,34 @@ class AutoUpdater:
                 except (FileNotFoundError, PermissionError):
                     pass
 
+                # Verify substitution removed the placeholder
+                if "/home/ryn/LED_MATRIX-Project" in content:
+                    logger.warning(
+                        "Service file %s still contains placeholder after "
+                        "substitution; skipping write", svc_file)
+                    continue
+
                 # Write updated service file
                 with open(dst_path, "w") as f:
                     f.write(content)
                 logger.info("Updated service file: %s", svc_file)
 
             except PermissionError:
-                # Try with sudo
+                # Use the wrapper script (locked down via sudoers)
                 try:
+                    home = os.path.expanduser(f"~{actual_user}")
+                    wrapper = os.path.join(self.project_root, "scripts",
+                                           "install-service-files.sh")
                     proc = subprocess.run(
-                        ["sudo", "cp", src_path, dst_path],
-                        capture_output=True, text=True, timeout=10
+                        ["sudo", wrapper, self.project_root, actual_user, home],
+                        capture_output=True, text=True, timeout=30
                     )
                     if proc.returncode == 0:
-                        # Apply sed substitutions via sudo
-                        subprocess.run(
-                            ["sudo", "sed", "-i",
-                             f"s|/home/ryn/LED_MATRIX-Project|{self.project_root}|g",
-                             dst_path],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        subprocess.run(
-                            ["sudo", "sed", "-i",
-                             f"s|User=ryn|User={actual_user}|g",
-                             dst_path],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        subprocess.run(
-                            ["sudo", "sed", "-i",
-                             f"s|Group=ryn|Group={actual_user}|g",
-                             dst_path],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        logger.info("Updated service file (via sudo): %s", svc_file)
+                        logger.info("Service files installed via wrapper script")
+                    else:
+                        logger.warning("Wrapper script failed: %s", proc.stderr)
+                    # Wrapper handles all files + daemon-reload; skip rest
+                    return
                 except Exception as e:
                     logger.warning("Could not update service file %s: %s", svc_file, e)
             except Exception as e:
@@ -699,7 +694,9 @@ class AutoUpdater:
                     logger.warning("Force-removed git lock file after 20 failures")
                 except OSError:
                     pass
+            config_tmp = self._backup_configs()
             if self._nuclear_recovery():
+                self._restore_configs(config_tmp)
                 self._clear_failure_count()
                 self.install_dependencies()
                 self.restart_display_service()
@@ -707,12 +704,15 @@ class AutoUpdater:
                 self._clean_old_stashes()
                 return True
             else:
+                self._restore_configs(config_tmp)
                 self._increment_failure_count()
                 return False
         elif failure_count >= 10:
             # After 10 failures, try nuclear recovery (fetch + hard reset)
             logger.warning("10+ consecutive failures detected, attempting nuclear recovery")
+            config_tmp = self._backup_configs()
             if self._nuclear_recovery():
+                self._restore_configs(config_tmp)
                 self._clear_failure_count()
                 self.install_dependencies()
                 self.restart_display_service()
@@ -720,6 +720,7 @@ class AutoUpdater:
                 self._clean_old_stashes()
                 return True
             else:
+                self._restore_configs(config_tmp)
                 self._increment_failure_count()
                 return False
 

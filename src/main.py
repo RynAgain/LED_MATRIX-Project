@@ -26,6 +26,25 @@ from src.display._shared import request_stop, should_stop
 
 logger = logging.getLogger(__name__)
 
+
+def _sd_notify(state):
+    """Send a systemd notification (safe no-op if not running under systemd)."""
+    try:
+        addr = os.environ.get("NOTIFY_SOCKET")
+        if not addr:
+            return
+        import socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            if addr[0] == "@":
+                addr = "\0" + addr[1:]
+            sock.connect(addr)
+            sock.sendall(state.encode())
+        finally:
+            sock.close()
+    except Exception:
+        pass
+
 # Features that require internet connectivity
 INTERNET_FEATURES = {"bitcoin_price", "weather", "stock_ticker", "sp500_heatmap",
                      "video_player", "github_stats"}
@@ -166,6 +185,7 @@ _FRAME_HANG_TIMEOUT = 60
 def _mark_frame():
     """Record that a frame reached the matrix (called by _SafeMatrixProxy)."""
     _last_frame_ts[0] = time.monotonic()
+    _sd_notify("WATCHDOG=1")
 
 
 def _reap_zombies_or_die(next_feature_name, matrix=None):
@@ -203,77 +223,6 @@ def sighup_handler(signum, frame):
     """Handle SIGHUP for config reload."""
     logger.info("Received SIGHUP, config will reload on next cycle")
 
-
-def handle_play_video(matrix, url, title="Unknown", duration=300):
-    """Handle a play_video request by playing a video from cache.
-
-    Checks the local cache first (downloaded_videos/<md5hash>.mp4).
-    Only cached videos are supported -- add URLs to config/video_urls.csv
-    and reboot to download them.
-
-    Playback breaks out within one frame when ``should_stop()`` is set (the
-    state machine's input thread sets this on a START press), so video remains a
-    carousel demo that the user can interrupt to open the menu.
-
-    Args:
-        matrix: RGBMatrix instance.
-        url: Direct video URL.
-        title: Video title for logging.
-        duration: Max playback duration in seconds.
-    """
-    logger.info("Playing video: %s (%s)", title, url)
-    try:
-        from src.display.video_player import FRAME_INTERVAL, _url_to_cache_path, _is_cached
-        import cv2
-        from PIL import Image
-
-        if _is_cached(url):
-            video_url = _url_to_cache_path(url)
-            logger.info("Playing from local cache: %s", video_url)
-        else:
-            logger.warning("Video not cached: %s -- add to config/video_urls.csv and reboot", url)
-            return
-
-        cap = cv2.VideoCapture(video_url)
-        if not cap.isOpened():
-            logger.error("Failed to open video: %s", video_url)
-            return
-
-        start = time.time()
-        while cap.isOpened() and not _shutdown.is_set():
-            frame_start = time.time()
-
-            # Video interruption honors the shared stop flag (should_stop()),
-            # which the state machine's input thread sets on a START press --
-            # this breaks out within one frame when the user opens the menu.
-            if should_stop():
-                break
-
-            if time.time() - start >= duration:
-                break
-
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame = cv2.resize(frame, (64, 64), interpolation=cv2.INTER_NEAREST)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image = Image.fromarray(frame)
-            matrix.SetImage(image)
-
-            elapsed = time.time() - frame_start
-            sleep_time = FRAME_INTERVAL - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-        cap.release()
-    except Exception as e:
-        logger.error("Video playback error: %s", e, exc_info=True)
-    finally:
-        try:
-            matrix.Clear()
-        except Exception:
-            pass
 
 
 # Minimal fallback config so the system can boot even with a corrupt config.json.
@@ -818,6 +767,8 @@ def main():
         show_boot_screen(matrix)
     except Exception as e:
         logger.warning("Boot screen failed (non-fatal): %s", e)
+
+    _sd_notify("READY=1")
 
     # Now do the slower startup tasks (WiFi, config)
     logger.info("Checking WiFi connectivity...")

@@ -619,11 +619,12 @@ def _draw_world_clock(now, hue_offset):
     sec_color = _hsv_to_rgb((hue_offset + 120) % 360, 0.6, 0.65)
     _draw_small_string(image, now.strftime("%S"), 48, 16, sec_color)
 
-    # UTC offset display (simplified: show UTC and one other)
-    # UTC time
-    utc_hour = (now.hour + 5) % 24  # Approximate UTC (assuming CST offset)
+    # UTC offset display: compute from real UTC, not local-time guesses
+    from datetime import timezone as _tz
+    _utc_now = datetime.now(_tz.utc)
+    utc_hour = _utc_now.hour
     utc_str = f"{utc_hour:02d}"
-    utc_min = now.strftime("%M")
+    utc_min = _utc_now.strftime("%M")
 
     utc_color = _hsv_to_rgb((hue_offset + 180) % 360, 0.7, 0.6)
     utc_label_color = _hsv_to_rgb((hue_offset + 180) % 360, 0.4, 0.4)
@@ -633,8 +634,8 @@ def _draw_world_clock(now, hue_offset):
         _draw_colon(image, 26, 31, utc_color, large=False)
     _draw_small_string(image, utc_min, 29, 32, utc_color)
 
-    # Tokyo time (UTC+9, so +14 from CST)
-    tokyo_hour = (now.hour + 14) % 24
+    # Tokyo time (UTC+9)
+    tokyo_hour = (_utc_now.hour + 9) % 24
     tokyo_str = f"{tokyo_hour:02d}"
 
     tokyo_color = _hsv_to_rgb((hue_offset + 270) % 360, 0.7, 0.6)
@@ -645,8 +646,8 @@ def _draw_world_clock(now, hue_offset):
         _draw_colon(image, 26, 39, tokyo_color, large=False)
     _draw_small_string(image, utc_min, 29, 40, tokyo_color)
 
-    # London time (UTC+0 in winter, UTC+1 in summer)
-    london_hour = (now.hour + 5) % 24  # Approximate
+    # London time (UTC+0; BST not tracked -- close enough for a display)
+    london_hour = _utc_now.hour
     london_str = f"{london_hour:02d}"
 
     london_color = _hsv_to_rgb((hue_offset + 90) % 360, 0.7, 0.6)

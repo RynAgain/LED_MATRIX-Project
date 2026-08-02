@@ -245,7 +245,9 @@ class SettingsScreen:
             "display_duration": by_label["DEMO"].value,
             "matrix_hardware": {"brightness": by_label["BRIGHT"].value},
         }
-        save_settings(self.config_path, updates)
+        if not save_settings(self.config_path, updates):
+            logger.error("Settings save failed (disk full or read-only?)")
+            return
         # Reflect into the in-memory snapshot.
         self.config.setdefault("matrix_hardware", {})
         self.config["matrix_hardware"]["brightness"] = by_label["BRIGHT"].value

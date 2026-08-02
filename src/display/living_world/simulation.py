@@ -220,6 +220,9 @@ def run(matrix, duration=900):
             delete_save()
             restored = True
             logger.info("Restored world from save (tick=%d, %d villagers)", sim_tick, len(villagers))
+    # Restore day/night phase: if the save recorded elapsed time, wind back
+    # start_time so _compute_day_phase picks up where it left off.
+    _saved_elapsed = saved.get("elapsed", 0.0) if (saved and restored) else 0.0
     if not restored:
         seed = random.randint(0, 999999)
         heights = _generate_height_profile(seed)
@@ -263,7 +266,7 @@ def run(matrix, duration=900):
             if 0 <= sy < DISPLAY_HEIGHT and world[sy][x] == GRASS:
                 if not any(f.x == x for f in flowers):
                     flowers.append(Flower(x, sy, random.choice(FLOWER_COLORS)))
-    start_time = time.time()
+    start_time = time.time() - _saved_elapsed
     image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     try:
         while not should_stop():
