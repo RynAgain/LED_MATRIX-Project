@@ -167,6 +167,37 @@ def build_games_menu(playable=None) -> Menu:
     return Menu(MENU_GAMES, "GAMES", items)
 
 
+# Friendly labels for demo names whose 10-char truncation is unreadable.
+_DEMO_LABELS = {
+    "month_calendar": "CALENDAR",
+    "bitcoin_price": "BITCOIN",
+    "space_invaders": "INVADERS",
+    "hail_mary_clock": "HAIL MARY",
+    "logo_wholefoods": "WFM LOGO",
+    "system_stats": "SYS STATS",
+    "youtube_stream": "YT STREAM",
+    "terrain_ball": "TERRABALL",
+    "github_stats": "GITHUB",
+    "sp500_heatmap": "SP500 MAP",
+    "rainbow_waves": "RAINBOW",
+    "stock_ticker": "STOCKS",
+    "text_scroller": "SCROLLER",
+    "video_player": "VIDEO",
+    "binary_clock": "BIN CLOCK",
+    "base6_clock": "BASE6 CLK",
+    "time_display": "CLOCK",
+    "living_world": "WORLD",
+    "moon_tracker": "MOON",
+    "game_of_life": "LIFE",
+    "matrix_rain": "MATRIX",
+    "rubiks_cube": "RUBIKS",
+    "super_breakout": "S.BREAKOUT",
+    "portal_arena": "PORTAL",
+    "package_boy": "PKG BOY",
+    "death_ball": "DEATHBALL",
+}
+
+
 def build_demos_menu() -> Menu:
     """Build the **Demos** submenu from the feature registry.
 
@@ -178,8 +209,9 @@ def build_demos_menu() -> Menu:
 
     items: List[MenuItem] = []
     for name in sorted(FEATURE_MODULES.keys()):
-        # Truncate long names to fit the 64px display (~10 chars at 6px each).
-        label = name.upper()[:10]
+        # Friendly label if we have one; otherwise truncate to fit the
+        # 64px display (~10 chars at 6px each).
+        label = _DEMO_LABELS.get(name, name.upper()[:10])
         items.append(MenuItem(label, ItemAction.LAUNCH_DEMO, payload=name))
     items.append(MenuItem("BACK", ItemAction.BACK))
     return Menu(MENU_DEMOS, "DEMOS", items)
