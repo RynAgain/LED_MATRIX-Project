@@ -74,20 +74,21 @@ ANIM_RAIN = 2
 ANIM_SNOW = 3
 ANIM_STORM = 4
 ANIM_FOG = 5
-ANIM_HELL = 6  # >=90F clear or >=100F any weather: burning city
+ANIM_HELL = 6    # >=105F: burning city (extreme escalation)
+ANIM_DESERT = 7  # >=95F: desert scene (cactus, cow skull, fiery sun)
 
 def _code_to_anim(code, temp=None):
     """Map WMO weather code to animation type.
 
-    Special case: if temp > 100F with any weather, or > 90F with clear sky,
-    show the HELL (burning city) animation instead.
+    Heat tiers override the weather-code animation:
+      * temp >= 105F: HELL (burning city)
+      * temp >= 95F:  DESERT (cactus, cow skull, fiery sun)
     """
-    # Hell mode: extreme heat
     if temp is not None:
-        if temp >= 100:
+        if temp >= 105:
             return ANIM_HELL
-        if temp >= 90 and code in (0, 1):
-            return ANIM_HELL
+        if temp >= 95:
+            return ANIM_DESERT
 
     if code in (0, 1):
         return ANIM_CLEAR
@@ -135,6 +136,8 @@ class WeatherAnimator:
 
         if self.anim_type == ANIM_HELL:
             self._draw_hell(draw_ctx, x_offset, y_offset, w, h)
+        elif self.anim_type == ANIM_DESERT:
+            self._draw_desert(draw_ctx, x_offset, y_offset, w, h)
         elif self.anim_type == ANIM_CLEAR:
             self._draw_sun(draw_ctx, x_offset, y_offset, w, h)
         elif self.anim_type == ANIM_CLOUDY:
@@ -267,6 +270,87 @@ class WeatherAnimator:
                 if 0 <= px < WIDTH and 0 <= py < HEIGHT:
                     draw_ctx.point((px, py), fill=(alpha, alpha, alpha + 20))
 
+
+    def _draw_desert(self, draw_ctx, xo, yo, w, h):
+        """Classic desert scene -- 95F+ heat animation.
+
+        Fiery pulsing sun, saguaro cactus, a cow skull with rib bones
+        half-buried in the sand, and heat shimmer in the air.
+        """
+        ground_y = yo + h - 5  # top row of the sand
+
+        # Sand (dithered tan with darker specks)
+        for dy in range(5):
+            for dx in range(w):
+                px, py = xo + dx, ground_y + dy
+                if (dx * 7 + dy * 13) % 11 == 0:
+                    draw_ctx.point((px, py), fill=(150, 100, 40))
+                else:
+                    draw_ctx.point((px, py), fill=(194, 145, 70))
+
+        # Fiery sun (top-right, red-orange pulsing)
+        cx, cy = xo + w - 7, yo + 5
+        pulse = int(200 + 55 * math.sin(self.tick * 0.15))
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                if dx * dx + dy * dy <= 9:
+                    draw_ctx.point((cx + dx, cy + dy), fill=(pulse, pulse // 2, 0))
+        # Wavy heat rays
+        for i in range(8):
+            angle = self.tick * 0.05 + i * (math.pi / 4)
+            ray_len = 2 + int(math.sin(self.tick * 0.2 + i) * 1.5)
+            sx = cx + int(4 * math.cos(angle))
+            sy = cy + int(4 * math.sin(angle))
+            ex = cx + int((4 + ray_len) * math.cos(angle))
+            ey = cy + int((4 + ray_len) * math.sin(angle))
+            draw_ctx.line([(sx, sy), (ex, ey)], fill=(pulse, pulse // 3, 0))
+
+        # Saguaro cactus (left side): trunk + two arms
+        trunk_x = xo + 4
+        body = (30, 120, 40)
+        lite = (55, 165, 60)
+        for py in range(yo + 9, ground_y + 1):
+            draw_ctx.point((trunk_x, py), fill=body)
+            draw_ctx.point((trunk_x + 1, py), fill=lite)
+        # Left arm: elbow out, then up
+        arm_y = yo + 14
+        draw_ctx.point((trunk_x - 1, arm_y), fill=body)
+        for py in range(yo + 11, arm_y + 1):
+            draw_ctx.point((trunk_x - 2, py), fill=body)
+        # Right arm: slightly lower
+        arm_y2 = yo + 17
+        draw_ctx.point((trunk_x + 2, arm_y2), fill=lite)
+        for py in range(yo + 13, arm_y2 + 1):
+            draw_ctx.point((trunk_x + 3, py), fill=body)
+
+        # Cow skull on the sand: white dome + snout, horns, dark eye sockets
+        skx = xo + 12
+        sky = ground_y - 3
+        bone = (235, 230, 215)
+        shade = (180, 170, 150)
+        for dx in range(5):
+            draw_ctx.point((skx + dx, sky), fill=bone)
+        for dx in range(1, 4):
+            draw_ctx.point((skx + dx, sky + 1), fill=bone)
+            draw_ctx.point((skx + dx, sky + 2), fill=shade if dx == 2 else bone)
+        # Horns curving up and out
+        draw_ctx.point((skx - 1, sky - 1), fill=bone)
+        draw_ctx.point((skx - 2, sky - 2), fill=shade)
+        draw_ctx.point((skx + 5, sky - 1), fill=bone)
+        draw_ctx.point((skx + 6, sky - 2), fill=shade)
+        # Eye sockets (drawn after the snout so they stay dark)
+        draw_ctx.point((skx + 1, sky + 1), fill=(40, 25, 10))
+        draw_ctx.point((skx + 3, sky + 1), fill=(40, 25, 10))
+        # Rib bones half-buried beside the skull
+        draw_ctx.line([(skx + 5, ground_y + 2), (skx + 8, ground_y + 1)], fill=shade)
+        draw_ctx.line([(skx + 6, ground_y + 3), (skx + 9, ground_y + 2)], fill=bone)
+
+        # Heat shimmer (wavy points rising in the air)
+        for shimmer_y in range(yo + 10, ground_y - 2, 4):
+            wave_x = int(math.sin(self.tick * 0.12 + shimmer_y * 0.5) * 3)
+            px = xo + w // 2 + wave_x
+            if 0 <= px < WIDTH and 0 <= shimmer_y < HEIGHT:
+                draw_ctx.point((px, shimmer_y), fill=(255, 160, 60))
 
     def _draw_hell(self, draw_ctx, xo, yo, w, h):
         """Burning city under angry sun — extreme heat animation.
