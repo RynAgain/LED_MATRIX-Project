@@ -6,7 +6,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _VERSION_FILE = os.path.join(_PROJECT_ROOT, "VERSION")
 
 # Hardcoded fallback version. Updated at release time or by CI/CD.
-_FALLBACK_VERSION = "1.0.0"
+_FALLBACK_VERSION = "1.1.0"
 
 
 _cached_version = None
