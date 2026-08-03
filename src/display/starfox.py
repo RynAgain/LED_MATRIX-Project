@@ -716,9 +716,6 @@ class _AI:
 
     def __init__(self):
         self._dodge_cd = 0
-        self._current_target = None  # screen (x, y) we're sliding toward
-        self._on_target_frames = 0   # how many frames we've been lined up
-        self._target_switch_cd = 0   # cooldown before picking new target
 
     def decide(self, ship, enemies, obstacles, enemy_lasers, bank_offset, frame, boss=None):
         """Returns (dx, dy, fire, roll_dir_or_0)."""
