@@ -57,6 +57,7 @@ FEATURE_MODULES = {
     "rubiks_cube": "src.display.rubiks_cube",
     "super_breakout": "src.display.super_breakout",
     "pinball": "src.display.pinball",
+    "month_calendar": "src.display.month_calendar",
 }
 
 
