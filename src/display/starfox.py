@@ -8,20 +8,25 @@ and performs barrel rolls to deflect incoming fire.
 Control scheme (INTERACTIVE mode, ``controller is not None``)
 -------------------------------------------------------------
 - **D-pad / analog LEFT/RIGHT** moves the ship laterally.
-- **D-pad UP** moves ship up (tighter turns, near horizon).
-- **D-pad DOWN** moves ship down (lower, wider view).
-- **A** fires dual lasers at the nearest enemy / forward.
-- **B** performs a barrel roll (deflects enemy fire, brief invulnerability).
+- **D-pad UP/DOWN** moves the ship vertically (this is how you aim high/low).
+- **A** fires dual lasers (hold for continuous fire).
+- **B** barrel-rolls toward the held direction (deflects enemy fire).
+- **SELECT (hold)** boosts -- drains the boost meter, regenerates on release.
 - **Start + Select** (or hold Start) quits to menu.
 
-DEMO mode (``controller is None``) uses the same game logic with an intelligent
-autopilot AI that dodges, aims, fires, and barrel-rolls.
+Aiming: lasers travel forward in world space; the HUD reticle shows exactly
+where they will be at the target's depth. Put the reticle on the enemy.
+
+DEMO mode (``controller is None``) uses the same game logic with an
+autopilot AI that dodges, aims, fires, barrel-rolls, and fights bosses.
 
 Scoring:
-- Enemy kill: 10 pts
-- Ring flythrough: 25 pts
+- Enemy kill: 10 pts x combo multiplier (combo builds on consecutive kills)
+- Ring flythrough: 25 pts (GOLD rings also restore one shield)
 - Deflect with barrel roll: 5 pts
-- Survive a wave: bonus
+- Wave cleared: 50 pts
+- Boss core hit: 5 pts; boss destroyed: 200 pts
+- Colliding with a pylon costs one shield -- dodge them.
 """
 
 import math
@@ -96,7 +101,8 @@ ENEMY_PALETTES = [(220, 50, 50), (50, 160, 255), (255, 200, 40),
 class _Ship:
     """The player's Arwing."""
     MAX_X = 20         # Ship can reach full lateral range on 64px screen
-    MAX_Y = 16         # Ship can reach enemies anywhere on the Y axis too
+    MAX_Y_UP = 14      # highest climb (screen_y 34, just under the HUD)
+    MAX_Y_DOWN = 8     # lowest drop before clipping the bottom edge
 
     # Physics: momentum/inertia so the ship feels weighty like real Star Fox
     FRICTION = 0.87    # velocity decay (< 1 = drift after releasing input)
@@ -116,6 +122,8 @@ class _Ship:
         self.shield = 3    # hits before game over
         self.shield_flash = 0
         self.boost = 0.0
+        self.boost_meter = 1.0   # SELECT-boost fuel (0..1)
+        self.boosting = False
         self.alive = True
 
     def move(self, dx, dy):
@@ -151,7 +159,7 @@ class _Ship:
         self.y += self.vy
         # Clamp position
         self.x = max(-self.MAX_X, min(self.MAX_X, self.x))
-        self.y = max(-self.MAX_Y, min(self.MAX_Y, self.y))
+        self.y = max(-self.MAX_Y_UP, min(self.MAX_Y_DOWN, self.y))
         # Friction: velocity decays (gives inertia/drift feel)
         self.vx *= self.FRICTION
         self.vy *= self.FRICTION
@@ -168,7 +176,13 @@ class _Ship:
             self._roll_cd -= 1
         if self.shield_flash > 0:
             self.shield_flash -= 1
-        self.boost = max(0, self.boost - 0.03)
+        # Boost meter: drains while boosting, regenerates otherwise
+        if self.boosting and self.boost_meter > 0:
+            self.boost_meter = max(0.0, self.boost_meter - 0.02)
+            self.boost = 1.0
+        else:
+            self.boost_meter = min(1.0, self.boost_meter + 0.006)
+            self.boost = max(0, self.boost - 0.06)
 
     @property
     def screen_x(self):
@@ -243,23 +257,24 @@ class _Enemy:
     DIVE = 2
     CIRCLE = 3
 
-    def __init__(self, behavior=0, offset=(0, 0)):
+    def __init__(self, behavior=0, offset=(0, 0), speed_bonus=0.0, fire_scale=1.0):
         self.z = 14.0 + random.uniform(0, 3)
         self.x = random.uniform(-3.0, 3.0) + offset[0]
         self.y = random.uniform(-2.0, 1.5) + offset[1]  # Full vertical spread
-        self.speed = random.uniform(0.09, 0.14)
+        self.speed = random.uniform(0.09, 0.14) + speed_bonus
+        self.fire_scale = fire_scale
         self.behavior = behavior
         self.color = random.choice(ENEMY_PALETTES)
         self.phase = random.uniform(0, math.pi * 2)
         self.alive = True
         self._init_x = self.x
         self._init_y = self.y
-        self._fire_cd = random.randint(40, 90)
+        self._fire_cd = random.randint(int(40 * fire_scale), int(90 * fire_scale))
 
-    def update(self, frame):
+    def update(self, frame, speed_mult=1.0):
         if not self.alive:
             return
-        self.z -= self.speed
+        self.z -= self.speed * speed_mult
         if self.behavior == self.SINE:
             self.x = self._init_x + math.sin(frame * 0.05 + self.phase) * 1.8
         elif self.behavior == self.DIVE:
@@ -274,7 +289,8 @@ class _Enemy:
 
     def should_fire(self):
         if self._fire_cd <= 0 and self.z < 8 and self.z > 2:
-            self._fire_cd = random.randint(50, 120)
+            self._fire_cd = random.randint(int(50 * self.fire_scale),
+                                            int(120 * self.fire_scale))
             return True
         return False
 
@@ -319,12 +335,16 @@ class _Obstacle:
         self.x = random.uniform(-2.0, 2.0) if kind in ("ring", "arch") else random.uniform(-3.5, 3.5)
         self.y = 0.0 if kind in ("ring", "arch") else 0.5
         self.speed = 0.13
-        self.color = (60, 200, 200) if kind == "ring" else (200, 200, 60) if kind == "arch" else (60, 200, 60)
+        self.gold = kind == "ring" and random.random() < 0.25
+        if self.gold:
+            self.color = (255, 200, 50)   # gold ring: restores one shield
+        else:
+            self.color = (60, 200, 200) if kind == "ring" else (200, 200, 60) if kind == "arch" else (60, 200, 60)
         self.rotation = random.uniform(0, math.pi * 2)
         self.passed = False
 
-    def update(self):
-        self.z -= self.speed
+    def update(self, speed_mult=1.0):
+        self.z -= self.speed * speed_mult
         self.rotation += 0.04
 
     def is_dead(self):
@@ -379,50 +399,75 @@ class _Obstacle:
 
 
 class _Laser:
-    """Laser fires STRAIGHT FORWARD from the ship's position toward the vanishing point.
+    """Player laser: travels forward in WORLD space from the ship.
 
-    In Star Fox, the ship IS the cursor — lasers converge from the ship's screen
-    position toward the center/horizon. You aim by MOVING THE SHIP.
+    The laser's world line ``(wx, wy)`` is fixed at fire time from the ship's
+    position (see :func:`_ship_aim_world`); its depth ``z`` advances each
+    frame. An enemy is hit when the laser *crosses* the enemy's depth while
+    the world offsets line up -- which is exactly what the HUD reticle shows.
     """
-    def __init__(self, x, y):
-        self.x, self.y = float(x), float(y)
-        # Converge toward vanishing point (center of horizon)
-        self.start_x = float(x)
-        self.speed = 5.0
+    Z_MAX = 12.0
+
+    def __init__(self, x, y, wx=0.0, wy=0.0):
+        self.sx0, self.sy0 = float(x), float(y)
+        self.wx, self.wy = wx, wy
+        self.z = 1.0
+        self.z_prev = 1.0
+        self.zspeed = 1.1
         self.life = 1.0
+        # Visual endpoint: the laser line projected at max depth
+        self._ex = CX + wx * (30.0 / self.Z_MAX)
+        self._ey = (CY - 5) + wy * (30.0 / self.Z_MAX)
 
     def update(self):
-        # Move toward vanishing point (CX, HORIZON_Y) from ship position
-        # Lasers converge both X and Y toward the center vanishing point
-        self.y -= self.speed
-        # Converge X and Y toward vanishing point (perspective)
-        self.x += (CX - self.x) * 0.07
-        self.life -= 0.055
-        self.speed *= 1.02
+        self.z_prev = self.z
+        self.z += self.zspeed
+        self.zspeed *= 1.05
+
+    @property
+    def _t(self):
+        return min(1.0, (self.z - 1.0) / (self.Z_MAX - 1.0))
+
+    @property
+    def x(self):
+        return self.sx0 + (self._ex - self.sx0) * self._t
+
+    @property
+    def y(self):
+        return self.sy0 + (self._ey - self.sy0) * self._t
 
     def is_dead(self):
-        return self.life <= 0 or self.y < HORIZON_Y - 5
+        return self.life <= 0 or self.z >= self.Z_MAX
 
     def draw(self, draw_ctx):
         x, y = int(self.x), int(self.y)
         if 0 <= x < WIDTH and 0 <= y < HEIGHT:
-            b = max(0.3, self.life)
+            b = max(0.3, 1.0 - self._t * 0.7)
             core = tuple(int(c * b) for c in LASER_CORE)
             glow = tuple(int(c * b * 0.5) for c in LASER_GLOW)
             draw_ctx.point((x, y), fill=core)
-            if y + 1 < HEIGHT:
-                draw_ctx.point((x, y + 1), fill=core)
-            if y + 2 < HEIGHT:
-                draw_ctx.point((x, y + 2), fill=glow)
-            if y + 3 < HEIGHT:
-                draw_ctx.point((x, y + 3), fill=glow)
+            if self._t < 0.5:  # near = longer streak
+                if y + 1 < HEIGHT:
+                    draw_ctx.point((x, y + 1), fill=core)
+                if y + 2 < HEIGHT:
+                    draw_ctx.point((x, y + 2), fill=glow)
+            elif y + 1 < HEIGHT:
+                draw_ctx.point((x, y + 1), fill=glow)
 
 
 class _EnemyLaser:
-    def __init__(self, x, y):
+    """Enemy shot aimed at (or near) the player's ship at fire time."""
+
+    def __init__(self, x, y, tx=None, ty=None):
         self.x, self.y = float(x), float(y)
-        self.tx = CX + random.randint(-15, 15)
-        self.ty = HEIGHT + 5
+        aim_x = tx if tx is not None else CX + random.randint(-15, 15)
+        aim_y = ty if ty is not None else HEIGHT + 5
+        # Extend the aim line well past the target so shots fly through
+        ddx = aim_x - self.x
+        ddy = aim_y - self.y
+        dist = max(1.0, math.hypot(ddx, ddy))
+        self.tx = self.x + ddx / dist * 120.0
+        self.ty = self.y + ddy / dist * 120.0
         self.speed = 2.2
         self.life = 1.0
 
@@ -478,6 +523,133 @@ class _Explosion:
                 draw_ctx.point((x, y), fill=final)
                 if p["life"] > 0.6 and x + 1 < WIDTH:
                     draw_ctx.point((x + 1, y), fill=final)
+
+
+# ===========================================================================
+# Aiming model + boss
+# ===========================================================================
+
+LASER_AIM_Z = 6.0  # depth at which the ship's screen position IS the aim point
+
+
+def _ship_aim_world(ship):
+    """World-space lateral/vertical line the ship's lasers travel along.
+
+    Calibrated so that at depth :data:`LASER_AIM_Z` the laser passes through
+    the point the ship visually covers -- "the ship is the cursor" holds for
+    mid-depth targets, nearer/farther ones need leading via the reticle.
+    """
+    return ship.x / 5.0, (ship.y + 3.0) / 5.0
+
+
+def _check_laser_enemy(laser, enemy):
+    """True if the laser crossed the enemy's depth close enough to hit."""
+    if not enemy.alive or enemy.z > laser.Z_MAX:
+        return False
+    if not (laser.z_prev <= enemy.z <= laser.z):
+        return False
+    return (abs(laser.wx - enemy.x) < 0.65
+            and abs(laser.wy - enemy.y) < 0.75)
+
+
+def _check_laser_boss(laser, boss):
+    """Return ``"core"``, ``"body"`` or ``None`` for a laser vs the boss."""
+    if not boss.alive:
+        return None
+    if not (laser.z_prev <= boss.z <= laser.z):
+        return None
+    if (abs(laser.wx - boss.x) < 0.7
+            and abs(laser.wy - (boss.y + boss.CORE_DY)) < 0.7):
+        return "core"
+    if abs(laser.wx - boss.x) < 2.4 and abs(laser.wy - boss.y) < 1.3:
+        return "body"
+    return None
+
+
+class _Boss:
+    """Every-5th-wave mini-boss: armored wing with a glowing core weak point.
+
+    Body hits spark harmlessly off the armor; only core hits damage it. It
+    fires three-shot fans aimed at the ship, faster as its health drops.
+    """
+    CORE_DY = 0.8  # core hangs below the hull centre (world units)
+
+    def __init__(self, level=1):
+        self.level = level
+        self.z = 15.0
+        self.x = 0.0
+        self.y = -0.4
+        self.hp = 10 + 4 * level
+        self.max_hp = self.hp
+        self.state = "approach"
+        self.phase = random.uniform(0, math.pi * 2)
+        self.alive = True
+        self._fire_cd = 60
+        self.core_flash = 0
+        self.hit_flash = 0
+
+    def update(self, frame, speed_mult=1.0):
+        self.phase += 0.03
+        if self.state == "approach":
+            self.z -= 0.14 * speed_mult
+            if self.z <= 6.5:
+                self.z = 6.5
+                self.state = "fight"
+        else:
+            self.x = math.sin(self.phase) * 2.0
+            self.y = -0.4 + math.sin(self.phase * 1.7) * 0.7
+            self.z = 6.5 + math.sin(self.phase * 0.6) * 0.7
+        self._fire_cd -= 1
+        if self.core_flash > 0:
+            self.core_flash -= 1
+        if self.hit_flash > 0:
+            self.hit_flash -= 1
+
+    def should_fire(self):
+        if self.state == "fight" and self._fire_cd <= 0:
+            # Fires faster as it takes damage (rage)
+            rage = 1.0 - 0.4 * (1.0 - self.hp / self.max_hp)
+            self._fire_cd = max(20, int((50 - self.level * 4) * rage))
+            return True
+        return False
+
+    def take_hit(self):
+        self.hp -= 1
+        self.core_flash = 4
+        self.hit_flash = 2
+        if self.hp <= 0:
+            self.alive = False
+
+    def screen_pos(self):
+        f = 30.0 / self.z
+        return (int(CX + self.x * f), int(CY - 5 + self.y * f))
+
+    def core_screen_pos(self):
+        f = 30.0 / self.z
+        return (int(CX + self.x * f), int(CY - 5 + (self.y + self.CORE_DY) * f))
+
+    def draw(self, draw_ctx, frame):
+        cx, cy = self.screen_pos()
+        f = 30.0 / self.z
+        w = max(6, int(f * 2.2))
+        body = (255, 255, 255) if self.hit_flash else (170, 70, 190)
+        dark = tuple(c // 2 for c in body)
+        # Wing bar + upswept tips
+        draw_ctx.line([(cx - w, cy), (cx + w, cy)], fill=body)
+        draw_ctx.line([(cx - w, cy + 1), (cx + w, cy + 1)], fill=dark)
+        draw_ctx.line([(cx - w, cy), (cx - w + 2, cy - 3)], fill=body)
+        draw_ctx.line([(cx + w, cy), (cx + w - 2, cy - 3)], fill=body)
+        # Hull
+        draw_ctx.rectangle([cx - 2, cy - 3, cx + 2, cy + 2], fill=dark, outline=body)
+        # Core weak point (pulsing gold; white when just hit)
+        ccx, ccy = self.core_screen_pos()
+        pulse = 0.55 + 0.45 * math.sin(frame * 0.25)
+        core = ((255, 255, 255) if self.core_flash
+                else (int(255 * pulse), int(210 * pulse), 40))
+        for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+            px, py = ccx + dx, ccy + dy
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                draw_ctx.point((px, py), fill=core)
 
 
 # ===========================================================================
@@ -548,7 +720,7 @@ class _AI:
         self._on_target_frames = 0   # how many frames we've been lined up
         self._target_switch_cd = 0   # cooldown before picking new target
 
-    def decide(self, ship, enemies, obstacles, enemy_lasers, bank_offset, frame):
+    def decide(self, ship, enemies, obstacles, enemy_lasers, bank_offset, frame, boss=None):
         """Returns (dx, dy, fire, roll_dir_or_0)."""
         dx, dy = 0.0, 0.0
         fire = False
@@ -568,62 +740,49 @@ class _AI:
             self._dodge_cd = 60
             return dx, dy, fire, roll  # Don't aim while rolling
 
-        # --- Pick a target to slide toward ---
-        # Prefer enemies (since that's the core gameplay)
+        # --- Pick a target ---
+        # Aiming mirrors _ship_aim_world: the laser line hits world (wx, wy)
+        # where wx = ship.x/5 and wy = (ship.y+3)/5, so to hit a target at
+        # world (tx, ty) the ship must slide to ship.x = 5*tx, ship.y = 5*ty-3.
         alive = [e for e in enemies if e.alive and 1.5 < e.z < 10]
         rings = [o for o in obstacles if o.kind in ("ring", "arch") and 1.5 < o.z < 5 and not o.passed]
         pylons = [o for o in obstacles if o.kind == "pylon" and 1.0 < o.z < 3.5]
 
-        target_x, target_y = CX, CY - 5  # Default: center/forward
+        target_x, target_y = CX, sy  # default: hold height, drift to centre
 
-        if alive:
-            # Target the nearest enemy — snap ship to their screen pos
+        if boss is not None and boss.alive and boss.z < 12:
+            target_x = CX + 5.0 * boss.x
+            target_y = (HEIGHT - 16) + 5.0 * (boss.y + boss.CORE_DY) - 3.0
+            if math.hypot(sx - target_x, sy - target_y) < 6:
+                fire = True
+            elif random.random() < 0.1:
+                fire = True
+        elif alive:
             nearest = min(alive, key=lambda e: e.z)
-            sp = nearest.screen_pos(bank_offset)
-            if sp:
-                target_x, target_y = sp
+            target_x = CX + 5.0 * nearest.x
+            target_y = (HEIGHT - 16) + 5.0 * nearest.y - 3.0
+            if math.hypot(sx - target_x, sy - target_y) < 6:
+                fire = True
+            elif random.random() < 0.15:
+                fire = True  # suppressive fire while sliding
         elif rings:
-            # Fly through nearest ring
             ring = min(rings, key=lambda o: o.z)
-            target_x = CX + int(ring.x * (30.0 / ring.z))
-            target_y = CY - 5
-
-        # --- Dodge pylons (override target if about to hit one) ---
-        for pylon in pylons:
-            pylon_sx = CX + int(pylon.x * (30.0 / pylon.z))
-            if abs(pylon_sx - sx) < 8:
-                # Pylon in our path! Dodge to the side with more room
-                target_x = pylon_sx + (20 if pylon.x < 0 else -20)
-                break
-
-        # --- Slide ship toward target (this IS aiming in Star Fox) ---
-        diff_x = target_x - sx
-        diff_y = target_y - sy
-
-        # Aggressive movement — a skilled player snaps to targets fast
-        dx = max(-2.2, min(2.2, diff_x * 0.18))
-        dy = max(-0.8, min(0.8, diff_y * 0.08))
-
-        # --- Fire when lined up with an enemy ---
-        if alive:
-            nearest = min(alive, key=lambda e: e.z)
-            sp = nearest.screen_pos(bank_offset)
-            if sp:
-                dist_to_target = math.hypot(sx - sp[0], sy - sp[1])
-                # Fire when close to lined up (generous — skilled players spam fire while sliding)
-                if dist_to_target < 10:
-                    fire = True
-                    self._on_target_frames += 1
-                else:
-                    self._on_target_frames = 0
-                    # Still fire occasionally while sliding toward target (suppressive fire)
-                    if random.random() < 0.15:
-                        fire = True
-        else:
-            # No enemies — occasional forward shots
+            target_x = CX + ring.x * 4.0  # flythrough uses the ship.x/4 scale
+            target_y = sy
             if random.random() < 0.04:
                 fire = True
-            self._on_target_frames = 0
+
+        # --- Dodge pylons (they cost a shield now) ---
+        for pylon in pylons:
+            pylon_ship_x = CX + pylon.x * 4.0  # ship.x that would collide
+            if abs(pylon_ship_x - sx) < 8:
+                target_x = pylon_ship_x + (20 if pylon.x < 0 else -20)
+                break
+
+        diff_x = target_x - sx
+        diff_y = target_y - sy
+        dx = max(-2.2, min(2.2, diff_x * 0.18))
+        dy = max(-1.4, min(1.4, diff_y * 0.10))
 
         return dx, dy, fire, roll
 
@@ -633,42 +792,80 @@ class _AI:
 # ===========================================================================
 
 class _WaveManager:
+    """Spawns enemy waves with a difficulty curve; every Nth wave is a boss."""
+    BOSS_EVERY = 5
+
     def __init__(self):
         self.wave_timer = 30
         self.wave_num = 0
         self.obs_timer = 25
+        self.awaiting_clear = False  # a spawned wave is still on screen
 
-    def update(self, enemies, obstacles):
-        self.wave_timer -= 1
+    def update(self, enemies, obstacles, boss=None):
+        """Advance timers. Returns ``(spawn_boss, wave_cleared)``."""
+        cleared = False
+
         self.obs_timer -= 1
-
-        if self.wave_timer <= 0 and len(enemies) < 6:
-            self.wave_num += 1
-            p = self.wave_num % 5
-            if p == 0:
-                for i in range(4):
-                    enemies.append(_Enemy(_Enemy.STRAIGHT, ((i - 1.5) * 1.2, abs(i - 1.5) * 0.3)))
-            elif p == 1:
-                for i in range(3):
-                    e = _Enemy(_Enemy.SINE); e.phase = i * math.pi * 2 / 3; e._init_x = (i - 1) * 1.5
-                    enemies.append(e)
-            elif p == 2:
-                for i in range(2):
-                    e = _Enemy(_Enemy.DIVE); e.x = -1.5 + i * 3; e._init_x = e.x
-                    enemies.append(e)
-            elif p == 3:
-                for i in range(4):
-                    e = _Enemy(_Enemy.CIRCLE); e.phase = i * math.pi / 2; e._init_x = 0; e._init_y = -0.3
-                    enemies.append(e)
-            else:
-                for i in range(5):
-                    enemies.append(_Enemy(_Enemy.STRAIGHT, ((i - 2) * 0.9, 0)))
-            self.wave_timer = random.randint(55, 100)
-
         if self.obs_timer <= 0 and len(obstacles) < 4:
             kind = random.choices(["ring", "arch", "pylon", "ring"], weights=[3, 2, 2, 3])[0]
             obstacles.append(_Obstacle(kind))
-            self.obs_timer = random.randint(25, 55)
+            # Fewer obstacles during a boss fight
+            self.obs_timer = random.randint(25, 55) + (40 if boss is not None else 0)
+
+        if boss is not None:
+            return False, False  # the boss holds the wave clock
+
+        if self.awaiting_clear and not enemies:
+            self.awaiting_clear = False
+            cleared = True
+            self.wave_timer = max(self.wave_timer, 25)  # breathing room
+
+        self.wave_timer -= 1
+        if self.wave_timer <= 0 and len(enemies) < 6:
+            self.wave_num += 1
+            if self.wave_num % self.BOSS_EVERY == 0:
+                self.wave_timer = 120  # normal waves resume after the boss
+                return True, cleared
+
+            # Difficulty curve: faster ships, quicker fire, bigger waves
+            sb = min(0.05, 0.003 * self.wave_num)       # speed bonus
+            fs = max(0.55, 1.0 - 0.03 * self.wave_num)  # fire-cooldown scale
+            extra = min(2, self.wave_num // 4)          # extra ships per wave
+
+            p = self.wave_num % 5
+            if p == 0:
+                for i in range(4 + extra):
+                    enemies.append(_Enemy(_Enemy.STRAIGHT,
+                                          ((i - 1.5) * 1.2, abs(i - 1.5) * 0.3),
+                                          speed_bonus=sb, fire_scale=fs))
+            elif p == 1:
+                for i in range(3 + extra):
+                    e = _Enemy(_Enemy.SINE, speed_bonus=sb, fire_scale=fs)
+                    e.phase = i * math.pi * 2 / 3
+                    e._init_x = (i - 1) * 1.5
+                    enemies.append(e)
+            elif p == 2:
+                positions = [-1.5, 1.5, -3.0, 3.0]
+                for i in range(2 + extra):
+                    e = _Enemy(_Enemy.DIVE, speed_bonus=sb, fire_scale=fs)
+                    e.x = positions[i % 4]
+                    e._init_x = e.x
+                    enemies.append(e)
+            elif p == 3:
+                for i in range(4):
+                    e = _Enemy(_Enemy.CIRCLE, speed_bonus=sb, fire_scale=fs)
+                    e.phase = i * math.pi / 2
+                    e._init_x = 0
+                    e._init_y = -0.3
+                    enemies.append(e)
+            else:
+                for i in range(5):
+                    enemies.append(_Enemy(_Enemy.STRAIGHT, ((i - 2) * 0.9, 0),
+                                          speed_bonus=sb, fire_scale=fs))
+            self.awaiting_clear = True
+            self.wave_timer = random.randint(55, 100)
+
+        return False, cleared
 
 
 # ===========================================================================
@@ -697,7 +894,8 @@ def _draw_ground(draw, scroll_z, bank_offset, stage):
     draw.line([(0, HORIZON_Y), (WIDTH - 1, HORIZON_Y)], fill=stage["horizon"])
 
 
-def _draw_hud(draw, frame, ship, aim_target, score, callout, firing):
+def _draw_hud(draw, frame, ship, aim_target, score, callout, firing,
+              boss=None, combo_mult=1):
     # Reticle
     if aim_target:
         rx, ry = max(4, min(WIDTH - 4, aim_target[0])), max(4, min(HEIGHT - 16, aim_target[1]))
@@ -725,6 +923,26 @@ def _draw_hud(draw, frame, ship, aim_target, score, callout, firing):
         draw.point((2 + i * 3, 1), fill=HUD_GREEN)
         draw.point((3 + i * 3, 1), fill=HUD_GREEN)
 
+    # Combo multiplier (under the shield pips)
+    if combo_mult > 1:
+        _draw_text(draw, "x{}".format(combo_mult), 2, 7, (255, 220, 80),
+                   scale=1, spacing=1)
+
+    # Boost meter (bottom-left; hidden when full)
+    if ship.boost_meter < 0.999:
+        draw.line([(2, 62), (12, 62)], fill=(20, 40, 60))
+        bw = int(10 * ship.boost_meter)
+        if bw:
+            draw.line([(2, 62), (2 + bw, 62)], fill=(80, 180, 255))
+
+    # Boss health bar (top centre)
+    if boss is not None and boss.alive:
+        frac = max(0.0, boss.hp / boss.max_hp)
+        draw.line([(12, 7), (52, 7)], fill=(60, 10, 10))
+        bw = int(40 * frac)
+        if bw:
+            draw.line([(12, 7), (12 + bw, 7)], fill=(255, 60, 60))
+
     # Callout
     if callout and callout[1] > 0:
         alpha = min(1.0, callout[1] / 15.0)
@@ -744,7 +962,6 @@ def run(matrix, duration=60, controller=None):
     """
     interactive = controller is not None
 
-    # Show entry banner in interactive mode
     if interactive:
         show_banner(matrix, ["STAR FOX", "READY!"], color=(100, 200, 255), hold=1.5)
 
@@ -760,6 +977,7 @@ def run(matrix, duration=60, controller=None):
     stars = _StarField()
     terrain = _Terrain()
     wave_mgr = _WaveManager()
+    boss = None
     enemies = []
     obstacles = []
     lasers = []
@@ -768,6 +986,8 @@ def run(matrix, duration=60, controller=None):
     callout = [STAGES[0]["name"], 50]
     firing_this_frame = False
     fire_cooldown = 0
+    combo = 0        # consecutive kills without taking a hit
+    combo_timer = 0  # frames until the combo decays
 
     try:
         while time.time() - start_time < duration:
@@ -775,49 +995,53 @@ def run(matrix, duration=60, controller=None):
                 break
             frame_start = time.time()
             frame += 1
-            scroll_z += 0.05
 
             # --- Input ---
             move_dx, move_dy = 0.0, 0.0
             want_fire = False
             want_roll = 0
+            ship.boosting = False
 
             if interactive:
-                # Check quit
                 if wants_quit(controller):
                     break
+                # Read held direction BEFORE events so B can roll toward it
+                direction = read_direction(controller, cardinal_only=False)
+                held_dx = direction[0] if direction else 0
                 events = controller.poll_events()
                 for ev in events:
                     if ev.type is EventType.PRESSED:
                         if ev.button is Button.A:
                             want_fire = True
                         elif ev.button is Button.B:
-                            want_roll = 1  # Roll right by default
-                        elif ev.button is Button.START:
-                            break
-                # Directional held-state
-                direction = read_direction(controller, cardinal_only=False)
+                            # Roll toward the held direction (default: right)
+                            want_roll = -1 if held_dx < 0 else 1
                 if direction:
                     dx, dy = direction
-                    move_dx = dx * 1.8  # Speed multiplier for feel
-                    move_dy = dy * 0.8
-                # A held = continuous fire
+                    move_dx = dx * 1.8
+                    move_dy = dy * 1.4
                 try:
                     if controller.is_pressed(Button.A):
-                        want_fire = True
+                        want_fire = True  # A held = continuous fire
+                    if controller.is_pressed(Button.SELECT):
+                        ship.boosting = True  # hold SELECT = boost
                 except Exception:
                     pass
             else:
-                # AI mode
                 bank_offset_preview = ship.bank * 9
                 move_dx, move_dy, want_fire, want_roll = ai.decide(
-                    ship, enemies, obstacles, enemy_lasers, bank_offset_preview, frame)
+                    ship, enemies, obstacles, enemy_lasers, bank_offset_preview,
+                    frame, boss=boss)
 
             # --- Apply input to ship ---
             ship.move(move_dx, move_dy)
             if want_roll:
                 if ship.do_barrel_roll(want_roll):
                     callout = ["BARREL ROLL!", 25]
+
+            # Boost stretches world speed while the meter lasts
+            speed_mult = 1.45 if (ship.boosting and ship.boost_meter > 0) else 1.0
+            scroll_z += 0.05 * speed_mult
 
             # --- Stage transitions ---
             elapsed = time.time() - start_time
@@ -833,22 +1057,41 @@ def run(matrix, duration=60, controller=None):
 
             bank_offset = ship.bank * 9
 
-            # --- Update ---
+            # --- Update world ---
             ship.update(frame)
             stars.update(bank_offset)
             terrain.update(bank_offset)
-            wave_mgr.update(enemies, obstacles)
+            spawn_boss, wave_cleared = wave_mgr.update(enemies, obstacles, boss)
+            if spawn_boss:
+                boss = _Boss(level=max(1, wave_mgr.wave_num // _WaveManager.BOSS_EVERY))
+                callout = ["WARNING!", 45]
+            if wave_cleared:
+                score += 50
+                callout = ["WAVE CLEAR +50", 30]
 
+            # Enemy fire aims at the ship; spread tightens as waves progress
+            spread = max(2, 12 - wave_mgr.wave_num)
             for e in enemies:
-                e.update(frame)
+                e.update(frame, speed_mult)
                 if e.should_fire():
                     sp = e.screen_pos(bank_offset)
                     if sp:
-                        enemy_lasers.append(_EnemyLaser(sp[0], sp[1]))
+                        enemy_lasers.append(_EnemyLaser(
+                            sp[0], sp[1],
+                            ship.screen_x + random.randint(-spread, spread),
+                            ship.screen_y + random.randint(-spread // 2, spread // 2)))
             enemies = [e for e in enemies if not e.is_dead()]
 
+            if boss is not None and boss.alive:
+                boss.update(frame, speed_mult)
+                if boss.should_fire():
+                    bp = boss.core_screen_pos()
+                    for off in (-9, 0, 9):  # three-shot fan aimed at the ship
+                        enemy_lasers.append(_EnemyLaser(
+                            bp[0], bp[1], ship.screen_x + off, ship.screen_y))
+
             for o in obstacles:
-                o.update()
+                o.update(speed_mult)
             obstacles = [o for o in obstacles if not o.is_dead()]
 
             for l in lasers:
@@ -867,31 +1110,64 @@ def run(matrix, duration=60, controller=None):
             firing_this_frame = False
             fire_cooldown = max(0, fire_cooldown - 1)
             if want_fire and fire_cooldown <= 0:
-                # Lasers fire STRAIGHT FORWARD from ship position (ship IS the cursor)
                 sx = ship.screen_x
                 sy = ship.screen_y - 7
-                lasers.append(_Laser(sx - 4, sy))
-                lasers.append(_Laser(sx + 4, sy))
+                wx, wy = _ship_aim_world(ship)
+                lasers.append(_Laser(sx - 4, sy, wx, wy))
+                lasers.append(_Laser(sx + 4, sy, wx, wy))
                 fire_cooldown = 4
                 firing_this_frame = True
 
-            # --- Collision: lasers hit enemies ---
+            # --- Collision: player lasers vs boss and enemies ---
             for laser in lasers:
                 if laser.is_dead():
                     continue
-                for enemy in enemies:
-                    if not enemy.alive or enemy.z < 1 or enemy.z > 11:
+                if boss is not None and boss.alive:
+                    part = _check_laser_boss(laser, boss)
+                    if part == "core":
+                        laser.life = 0
+                        boss.take_hit()
+                        score += 5
+                        cp = boss.core_screen_pos()
+                        explosions.append(_Explosion(cp[0], cp[1], 0.4))
+                        if not boss.alive:
+                            bx, by = boss.screen_pos()
+                            for _ in range(3):
+                                explosions.append(_Explosion(
+                                    bx + random.randint(-6, 6),
+                                    by + random.randint(-3, 3), 1.6))
+                            score += 200
+                            combo += 3
+                            combo_timer = 120
+                            callout = ["BOSS DOWN! +200", 45]
+                            boss = None
+                            if interactive:
+                                safe_rumble(controller, 1.0, 300)
                         continue
-                    ex = CX + enemy.x * (30.0 / enemy.z)
-                    ey = CY - 5 + enemy.y * (30.0 / enemy.z)
-                    if math.hypot(laser.x - ex, laser.y - ey) < max(5, 14.0 / enemy.z):
+                    elif part == "body":
+                        laser.life = 0  # armor spark, no damage
+                        explosions.append(_Explosion(int(laser.x), int(laser.y), 0.2))
+                        continue
+                for enemy in enemies:
+                    if _check_laser_enemy(laser, enemy):
                         enemy.alive = False
-                        explosions.append(_Explosion(int(ex), int(ey), 1.0))
-                        score += 10
+                        sp = enemy.screen_pos(bank_offset) or (int(laser.x), int(laser.y))
+                        explosions.append(_Explosion(sp[0], sp[1], 1.0))
+                        combo += 1
+                        combo_timer = 90
+                        mult = min(4, 1 + combo // 3)
+                        score += 10 * mult
+                        if combo in (3, 6, 9):
+                            callout = ["COMBO x{}".format(mult), 20]
                         laser.life = 0
                         if interactive:
                             safe_rumble(controller, 0.3, 80)
                         break
+
+            if combo_timer > 0:
+                combo_timer -= 1
+                if combo_timer == 0:
+                    combo = 0
 
             # --- Collision: enemy lasers hit ship ---
             for el in enemy_lasers:
@@ -902,6 +1178,8 @@ def run(matrix, duration=60, controller=None):
                         explosions.append(_Explosion(int(el.x), int(el.y), 0.3))
                     else:
                         el.life = 0
+                        combo = 0
+                        combo_timer = 0
                         dead = ship.take_hit()
                         if interactive:
                             safe_rumble(controller, 0.8, 200)
@@ -909,15 +1187,33 @@ def run(matrix, duration=60, controller=None):
                             explosions.append(_Explosion(ship.screen_x, ship.screen_y, 2.0))
                             break
 
-            # --- Ring flythrough ---
+            # --- Ring flythrough / pylon collision ---
             for o in obstacles:
-                if o.kind in ("ring", "arch") and not o.passed and o.z < 1.2:
-                    ship_world_x = ship.x / 4.0
+                if o.passed or o.z >= 1.2:
+                    continue
+                ship_world_x = ship.x / 4.0
+                if o.kind in ("ring", "arch"):
                     if abs(ship_world_x - o.x) < 2.5:
                         o.passed = True
                         score += 25
-                        callout = ["NICE!", 20]
+                        if getattr(o, "gold", False) and ship.shield < 3:
+                            ship.shield += 1
+                            callout = ["SHIELD UP!", 25]
+                        else:
+                            callout = ["NICE!", 20]
                         ship.boost = 1.0
+                elif o.kind == "pylon":
+                    o.passed = True  # each pylon judged once
+                    if abs(ship_world_x - o.x) < 1.4 and not ship.barrel_rolling:
+                        combo = 0
+                        combo_timer = 0
+                        dead = ship.take_hit()
+                        explosions.append(_Explosion(ship.screen_x, ship.screen_y, 0.8))
+                        callout = ["CRASH!", 25]
+                        if interactive:
+                            safe_rumble(controller, 0.8, 200)
+                        if dead:
+                            break
 
             # --- Game over check ---
             if not ship.alive:
@@ -929,6 +1225,9 @@ def run(matrix, duration=60, controller=None):
                     # Demo: restart
                     ship = _Ship()
                     score = 0
+                    combo = 0
+                    combo_timer = 0
+                    boss = None
                     enemies.clear(); obstacles.clear(); lasers.clear()
                     enemy_lasers.clear(); explosions.clear()
                     wave_mgr = _WaveManager()
@@ -950,6 +1249,8 @@ def run(matrix, duration=60, controller=None):
 
             for o in sorted(obstacles, key=lambda o: -o.z):
                 o.draw(draw, bank_offset)
+            if boss is not None and boss.alive:
+                boss.draw(draw, frame)
             for e in sorted(enemies, key=lambda e: -e.z):
                 e.draw(draw, bank_offset)
             for l in lasers:
@@ -963,12 +1264,18 @@ def run(matrix, duration=60, controller=None):
                 for _ in range(5):
                     draw.point((random.randint(0, WIDTH - 1), random.randint(0, HEIGHT - 1)), fill=(255, 255, 255))
 
-            # Aim target for HUD
-            # Reticle shows where shots converge (between ship and vanishing point)
-            # It moves with the ship but partway toward center (perspective)
-            reticle_x = int(ship.screen_x * 0.6 + CX * 0.4)
-            reticle_y = int(ship.screen_y * 0.3 + (HORIZON_Y + 5) * 0.7)
-            _draw_hud(draw, frame, ship, (reticle_x, reticle_y), score, callout, firing_this_frame)
+            # HONEST reticle: project the ship's laser line at the target's depth
+            if boss is not None and boss.alive:
+                tz = boss.z
+            else:
+                zs = [e.z for e in enemies if e.alive and 1.5 < e.z < 11]
+                tz = min(zs) if zs else LASER_AIM_Z
+            wx, wy = _ship_aim_world(ship)
+            reticle_x = int(CX + wx * (30.0 / tz))
+            reticle_y = int((CY - 5) + wy * (30.0 / tz))
+            _draw_hud(draw, frame, ship, (reticle_x, reticle_y), score, callout,
+                      firing_this_frame, boss=boss,
+                      combo_mult=min(4, 1 + combo // 3) if combo >= 3 else 1)
 
             if ship.alive:
                 ship.draw(draw, frame)
