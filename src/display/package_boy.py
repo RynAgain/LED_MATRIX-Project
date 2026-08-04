@@ -666,13 +666,12 @@ def _run_interactive(matrix, controller, start_time):
     while time.time() - start_time < _MAX_SECONDS:
         if should_stop():
             return
-        controller.poll_events()
+        events = controller.poll_events()
         if wants_quit(controller):
             return
 
-        events = controller.poll_events()
         for ev in events:
-            if ev.event_type in (EventType.PRESSED, EventType.REPEAT):
+            if ev.type in (EventType.PRESSED, EventType.REPEAT):
                 if ev.button == Button.UP:
                     game.van_y = max(4, game.van_y - 2)
                 elif ev.button == Button.DOWN:

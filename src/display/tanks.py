@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""Tank duel game for 64x64 LED matrix. Two AI tanks battle it out."""
+"""Tank duel game for 64x64 LED matrix.
+
+DEMO mode (controller is None): two AI tanks battle it out.
+INTERACTIVE mode: you are the BLUE tank (left) against the red AI:
+- D-pad LEFT/RIGHT drives the tank
+- D-pad UP/DOWN raises/lowers the barrel
+- Hold A to charge power (meter above the tank), release to FIRE
+- First to 5 knockouts wins. Start+Select (or hold Start) quits.
+"""
 
 import time
 import random
 import math
 import logging
 from PIL import Image, ImageDraw, ImageFont
-from src.display._shared import should_stop, interruptible_sleep
+from src.display._shared import should_stop, interruptible_sleep, read_direction, safe_rumble, show_banner
+from src.input import Button, EventType, wants_quit
+
+WIN_SCORE = 5
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +83,12 @@ class Tank:
         for i in range(self.health):
             draw.point((x - 1 + i, y - 2), fill=(0, 255, 0))
     
-    def shoot(self):
+    def shoot(self, power=None):
         if self.cooldown > 0:
             return None
         self.cooldown = 20
+        if power is not None:
+            self.power = power
         
         angle_rad = math.radians(self.angle)
         bx = self.x + 5 * math.cos(angle_rad)
@@ -215,8 +228,14 @@ def _destroy_terrain(terrain, x, y, radius=4):
             terrain[tx] = min(HEIGHT - 1, terrain[tx] + depth)
 
 
-def run(matrix, duration=60):
-    """Run the tank duel game."""
+def run(matrix, duration=60, controller=None):
+    """Run the tank duel game.
+
+    :param controller: if provided, human drives the blue tank. None = AI duel.
+    """
+    interactive = controller is not None
+    if interactive:
+        show_banner(matrix, ["TANKS", "FIRST TO 5"], color=(100, 100, 255), hold=1.5)
     start_time = time.time()
     
     terrain = _generate_terrain()
@@ -229,6 +248,8 @@ def run(matrix, duration=60):
     bullets = []
     explosions = []  # [(x, y, radius, timer)]
     scores = [0, 0]
+    charge = 0.0       # A-button charge (interactive): 0..1
+    charging = False
     
     try:
         _cached_star_rng = random.Random(99)
@@ -246,11 +267,48 @@ def run(matrix, duration=60):
             for _ in range(15):
                 draw.point((_star_rng.randint(0, WIDTH-1), _star_rng.randint(0, 20)), fill=(30, 30, 50))
             
-            # AI updates
-            b1 = tank1.ai_update(tank2, terrain)
+            # --- Tank 1: player input (interactive) or AI ---
+            if interactive:
+                if wants_quit(controller):
+                    break
+                events = controller.poll_events()
+                tank1.cooldown = max(0, tank1.cooldown - 1)
+                if tank1.health > 0:
+                    d = read_direction(controller, cardinal_only=False)
+                    if d:
+                        dx, dy = d
+                        if dx:
+                            new_x = tank1.x + dx * 0.6
+                            if 4 < new_x < WIDTH - 4:
+                                tank1.x = new_x
+                                tank1.place_on_terrain(terrain)
+                        if dy:
+                            # UP raises the barrel (screen dy=-1), DOWN lowers it
+                            tank1.angle = max(10, min(170, tank1.angle - dy * 2))
+                    for ev in events:
+                        if ev.type is EventType.PRESSED and ev.button is Button.A:
+                            charging = True
+                            charge = 0.0
+                        elif ev.type is EventType.RELEASED and ev.button is Button.A:
+                            if charging and tank1.cooldown <= 0:
+                                b1 = tank1.shoot(power=2.5 + 3.0 * charge)
+                                if b1:
+                                    bullets.append(b1)
+                                    safe_rumble(controller, 0.4, 100)
+                            charging = False
+                            charge = 0.0
+                    if charging:
+                        charge = min(1.0, charge + 0.04)  # full charge ~1.25s
+                else:
+                    charging = False
+                    charge = 0.0
+            else:
+                b1 = tank1.ai_update(tank2, terrain)
+                if b1:
+                    bullets.append(b1)
+
+            # --- Tank 2: always AI ---
             b2 = tank2.ai_update(tank1, terrain)
-            if b1:
-                bullets.append(b1)
             if b2:
                 bullets.append(b2)
             
@@ -277,6 +335,8 @@ def run(matrix, duration=60):
                     if tank.health > 0 and abs(bullet.x - tank.x) < 3 and abs(bullet.y - tank.y) < 3:
                         tank.health -= 1
                         explosions.append([tank.x, tank.y, 5, 8])
+                        if interactive and tank is tank1:
+                            safe_rumble(controller, 0.8, 200)
                         if bullet in bullets:
                             bullets.remove(bullet)
                         if tank.health <= 0:
@@ -284,6 +344,16 @@ def run(matrix, duration=60):
                             explosions.append([tank.x, tank.y, 8, 15])
                         break
             
+            # First to WIN_SCORE ends an interactive match
+            if interactive and max(scores) >= WIN_SCORE:
+                player_won = scores[0] >= WIN_SCORE
+                show_banner(matrix,
+                            ["YOU WIN!" if player_won else "AI WINS",
+                             f"{scores[0]} - {scores[1]}"],
+                            color=(100, 200, 255) if player_won else (255, 80, 80),
+                            hold=3.0)
+                return
+
             # Reset if both tanks dead
             if tank1.health <= 0 and tank2.health <= 0:
                 if not interruptible_sleep(1):
@@ -316,6 +386,15 @@ def run(matrix, duration=60):
             # Draw tanks
             tank1.draw(draw)
             tank2.draw(draw)
+
+            # Charge meter above the player tank while charging
+            if interactive and charging and tank1.health > 0:
+                mx, my = int(tank1.x), int(tank1.y) - 5
+                draw.line([(mx - 3, my), (mx + 3, my)], fill=(40, 40, 40))
+                cw = int(6 * charge)
+                if cw:
+                    c = (int(255 * charge), int(255 * (1 - charge * 0.5)), 0)
+                    draw.line([(mx - 3, my), (mx - 3 + cw, my)], fill=c)
             
             # Draw bullets
             for bullet in bullets:

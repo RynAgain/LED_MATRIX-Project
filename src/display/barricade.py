@@ -718,13 +718,12 @@ def _run_interactive(matrix, controller, start_time):
         while not turn_done:
             if should_stop():
                 return
-            controller.poll_events()
+            events = controller.poll_events()
             if wants_quit(controller):
                 return
 
-            events = controller.poll_events()
             for ev in events:
-                if ev.event_type not in (EventType.PRESSED, EventType.REPEAT):
+                if ev.type not in (EventType.PRESSED, EventType.REPEAT):
                     continue
 
                 if ev.button == Button.B:

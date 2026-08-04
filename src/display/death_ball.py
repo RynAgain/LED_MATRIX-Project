@@ -30,6 +30,7 @@ import time
 import math
 from PIL import Image, ImageDraw
 from src.display._shared import (
+    read_direction,
     should_stop,
     interruptible_sleep,
     safe_rumble,
@@ -799,7 +800,7 @@ def _run_interactive(matrix, controller, start_time):
 
         # Player input
         move_dx = 0
-        d = controller.get_direction()
+        d = read_direction(controller, cardinal_only=False)
         if d:
             move_dx = d[0]
             if d[1] > 0:  # DOWN

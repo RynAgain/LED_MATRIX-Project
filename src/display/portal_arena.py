@@ -29,7 +29,7 @@ import logging
 import time
 import math
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop, interruptible_sleep, show_banner, safe_rumble
+from src.display._shared import should_stop, interruptible_sleep, show_banner, safe_rumble, read_direction
 from src.display._fonts import _draw_text, _text_width
 from src.display._utils import _scale_color
 
@@ -734,7 +734,7 @@ def _run_interactive(matrix, controller, start_time):
 
         # Player 1 input
         dx, dy = 0.0, 0.0
-        d = controller.get_direction()
+        d = read_direction(controller, cardinal_only=False)
         if d:
             dx, dy = float(d[0]), float(d[1])
 

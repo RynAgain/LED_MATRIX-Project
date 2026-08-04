@@ -34,6 +34,7 @@ import time
 import math
 from PIL import Image, ImageDraw
 from src.display._shared import (
+    read_direction,
     should_stop,
     interruptible_sleep,
     safe_rumble,
@@ -445,7 +446,7 @@ def _run_interactive(matrix, controller, start_time):
             frame_start = time.time()
 
             # Level-poll the player's vertical direction; UP = -1, DOWN = +1.
-            d = controller.get_direction()
+            d = read_direction(controller, cardinal_only=False)
             player_dy = 0
             if d is not None:
                 player_dy = d[1]  # screen coords: up is -1

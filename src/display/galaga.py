@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Galaga-style space shooter for 64x64 LED matrix. AI-controlled.
+"""Galaga-style space shooter for 64x64 LED matrix.
+
+DEMO mode (controller is None): smart AI plays. INTERACTIVE mode:
+- D-pad LEFT/RIGHT (and UP/DOWN for dodging) moves the ship
+- A fires (hold for continuous fire)
+- Start+Select (or hold Start) quits to menu
 
 Features inspired by the original Galaga:
 - Aliens in formation that dive-bomb the player
@@ -16,9 +21,12 @@ import random
 import math
 import logging
 from PIL import Image, ImageDraw, ImageFont
-from src.display._shared import should_stop
+from src.display._shared import should_stop, read_direction, safe_rumble, show_banner
+from src.input import Button, EventType, wants_quit
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_FONT = ImageFont.load_default()  # hoisted: load_default() per frame is slow
 
 WIDTH, HEIGHT = 64, 64
 FRAME_INTERVAL = 1.0 / 20
@@ -197,6 +205,21 @@ class Ship:
             self.cooldown = 4
         self.cooldown -= 1
 
+    def manual_update(self, dx, dy, fire):
+        """Interactive-mode tick: apply player input, tick timers, move bullets."""
+        if self.invincible > 0:
+            self.invincible -= 1
+        self.x = max(2, min(WIDTH - 3, self.x + dx))
+        self.y = max(HEIGHT - 18, min(HEIGHT - 3, self.y + dy))
+        if fire:
+            self.shoot()          # shoot() ticks the cooldown itself
+        else:
+            self.cooldown -= 1    # keep the cooldown ticking between shots
+        for b in self.bullets[:]:
+            b[1] -= 3
+            if b[1] < 0:
+                self.bullets.remove(b)
+
     def update(self, aliens, enemy_bullets, diving_aliens):
         """Smart AI with Y-axis movement for better dodging."""
         if self.invincible > 0:
@@ -366,8 +389,14 @@ def _create_formation(wave):
     return aliens
 
 
-def run(matrix, duration=60):
-    """Run the Galaga game."""
+def run(matrix, duration=60, controller=None):
+    """Run the Galaga game.
+
+    :param controller: if provided, human plays. If None, AI demo mode.
+    """
+    interactive = controller is not None
+    if interactive:
+        show_banner(matrix, ["GALAGA", "READY!"], color=(0, 255, 200), hold=1.5)
     start_time = time.time()
     ship = Ship()
     wave = 1
@@ -400,6 +429,26 @@ def run(matrix, duration=60):
             frame_start = time.time()
             anim_tick += 1
 
+            # --- Input (read every frame, including wave transitions) ---
+            move_dx, move_dy = 0, 0
+            want_fire = False
+            if interactive:
+                if wants_quit(controller):
+                    break
+                events = controller.poll_events()
+                for ev in events:
+                    if ev.type is EventType.PRESSED and ev.button is Button.A:
+                        want_fire = True
+                direction = read_direction(controller, cardinal_only=False)
+                if direction:
+                    move_dx = direction[0] * 2
+                    move_dy = direction[1]
+                try:
+                    if controller.is_pressed(Button.A):
+                        want_fire = True
+                except Exception:
+                    pass
+
             image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 5))
             draw = ImageDraw.Draw(image)
 
@@ -420,7 +469,7 @@ def run(matrix, duration=60):
                 # Flash "WAVE X" text
                 if wave_transition > 20:
                     try:
-                        font = ImageFont.load_default()
+                        font = _DEFAULT_FONT
                         text = f"WAVE {wave}"
                         draw.text((WIDTH // 2 - 15, HEIGHT // 2 - 4), text,
                                   fill=(255, 255, 0), font=font)
@@ -549,6 +598,8 @@ def run(matrix, duration=60):
                         ship.invincible = 40
                         ship.double_shot = False
                         explosions.append([ship.x, ship.y, 8, (0, 255, 255)])
+                        if interactive:
+                            safe_rumble(controller, 0.8, 200)
                         break
 
                 # Collision: diving aliens vs player
@@ -561,11 +612,17 @@ def run(matrix, duration=60):
                         explosions.append([ship.x, ship.y, 8, (0, 255, 255)])
                         explosions.append([a.x, a.y, 6, a.get_color()])
                         score += ALIEN_POINTS[a.alien_type]
+                        if interactive:
+                            safe_rumble(controller, 0.8, 200)
                         break
 
             # --- Respawn / game over ---
             if ship.lives <= 0:
-                # Game over — reset
+                if interactive:
+                    show_banner(matrix, ["GAME OVER", f"SCORE {score}"],
+                                color=(255, 80, 80), hold=3.0)
+                    return
+                # Demo: reset
                 ship.lives = 3
                 ship.x = WIDTH // 2
                 ship.invincible = 60
@@ -594,8 +651,11 @@ def run(matrix, duration=60):
                 max_enemy_bullets = min(10, 3 + wave)
                 continue
 
-            # --- Update ship AI ---
-            ship.update(live_aliens, enemy_bullets, diving_aliens)
+            # --- Update ship (player input or AI) ---
+            if interactive:
+                ship.manual_update(move_dx, move_dy, want_fire)
+            else:
+                ship.update(live_aliens, enemy_bullets, diving_aliens)
 
             # --- Draw everything ---
             # Tractor beams (behind aliens)
@@ -642,7 +702,7 @@ def run(matrix, duration=60):
             # --- HUD ---
             # Score (top-left)
             try:
-                font = ImageFont.load_default()
+                font = _DEFAULT_FONT
                 draw.text((1, 0), str(score), fill=(100, 100, 100), font=font)
             except Exception:
                 pass
@@ -653,7 +713,7 @@ def run(matrix, duration=60):
 
             # Wave indicator (bottom-left)
             try:
-                draw.text((1, HEIGHT - 8), f"W{wave}", fill=(80, 80, 80), font=font)
+                draw.text((1, HEIGHT - 8), f"W{wave}", fill=(80, 80, 80), font=_DEFAULT_FONT)
             except Exception:
                 pass
 
