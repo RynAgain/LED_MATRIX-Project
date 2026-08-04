@@ -3426,6 +3426,12 @@ class TestBowCrafting:
         clear_events()
         heights, world = _make_flat_world()
         v = Villager(50, 42)
+        # Villager.__init__ picks a random trait, and _score_goals applies a
+        # +20% bonus to that trait's preferred goals. "hunt" belongs to no
+        # trait, so a randomly-assigned builder/farmer/lumberjack could outrank
+        # it and this test failed roughly half the time. Pin trait=None to
+        # disable the bonus: this test is about bow crafting, not trait tuning.
+        v.trait = None
         v.state = "idle"
         v.idle_timer = 25
         v.lumber = 2
