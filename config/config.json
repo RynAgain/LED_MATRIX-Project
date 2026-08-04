@@ -270,6 +270,11 @@
       "name": "pinball",
       "type": "game",
       "enabled": true
+    },
+    {
+      "name": "big_eye",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

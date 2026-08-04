@@ -89,6 +89,7 @@ DISPLAY_MODULES = [
     "src.display.system_stats",
     "src.display.living_world",
     "src.display.fractal",
+    "src.display.big_eye",
 ]
 
 

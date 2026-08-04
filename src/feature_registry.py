@@ -47,6 +47,7 @@ FEATURE_MODULES = {
     "album_art": "src.display.album_art",
     "starfox": "src.display.starfox",
     "fractal": "src.display.fractal",
+    "big_eye": "src.display.big_eye",
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",

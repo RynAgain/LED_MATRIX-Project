@@ -173,6 +173,7 @@ def build_games_menu(playable=None) -> Menu:
 
 # Friendly labels for demo names whose 10-char truncation is unreadable.
 _DEMO_LABELS = {
+    "big_eye": "BIG EYE",
     "month_calendar": "CALENDAR",
     "bitcoin_price": "BITCOIN",
     "space_invaders": "INVADERS",
