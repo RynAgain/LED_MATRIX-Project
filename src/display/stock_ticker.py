@@ -287,6 +287,60 @@ def _fetch_quote(symbol):
         return None
 
 
+def _fit_price(price, max_width, scale=2, spacing=1):
+    """Return ``(dollars_str, cents_str, scale)`` for the big price row.
+
+    The 5x7 font is 11px/char at scale 2, so ``$123.45`` needs 76px and would
+    run off the 64px panel. Instead of clipping mid-glyph, render the dollars
+    large and the cents small (the classic ticker look); if even the dollars
+    don't fit at ``scale``, fall back to scale 1.
+
+    ``cents_str`` is drawn at scale 1 with ``spacing=0`` and is ``""`` when
+    there is no room for it (or the price is large enough that cents are noise).
+    """
+    whole, cents = divmod(int(round(abs(price) * 100)), 100)
+    dollars = f"${whole}"
+    cents_str = "" if whole >= 10000 else f".{cents:02d}"
+    cents_w = _text_width(cents_str, scale=1, spacing=0) if cents_str else 0
+
+    for sc in ((scale, 1) if scale > 1 else (1,)):
+        dollars_w = _text_width(dollars, scale=sc, spacing=spacing)
+        if cents_str and dollars_w + 1 + cents_w <= max_width:
+            return dollars, cents_str, sc
+        if dollars_w <= max_width:
+            return dollars, "", sc
+    return dollars, "", 1
+
+
+def _fit_change_pct(change, change_pct, is_up, max_width, gap=3, spacing=1):
+    """Return ``(change_str, pct_str)`` that share one row without overlapping.
+
+    ``change`` is left-aligned and ``pct`` right-aligned, so long values used to
+    collide in the middle of the row. Shed precision from the absolute change
+    first, then the percent, and finally drop the absolute change entirely so
+    the percent (the more useful number) always stays readable.
+    """
+    sign = "+" if is_up else ""
+    # Only offer roundings that stay honest: a $0.05 move must never be shown
+    # as "-0.1", so small values keep both decimals and we drop the absolute
+    # change entirely before we would misreport it.
+    mag = abs(change)
+    if mag < 10:
+        change_cands = [f"{sign}{change:.2f}"]
+    elif mag < 100:
+        change_cands = [f"{sign}{change:.2f}", f"{sign}{change:.1f}"]
+    else:
+        change_cands = [f"{sign}{change:.1f}", f"{sign}{change:.0f}"]
+    pct_cands = [f"{sign}{change_pct:.1f}%", f"{sign}{change_pct:.0f}%"]
+    for pct_str in pct_cands:
+        pct_w = _text_width(pct_str, scale=1, spacing=spacing)
+        for change_str in change_cands:
+            change_w = _text_width(change_str, scale=1, spacing=spacing)
+            if change_w + gap + pct_w <= max_width:
+                return change_str, pct_str
+    return "", pct_cands[-1]
+
+
 def _truncate_industry(industry, max_width=60, scale=1):
     """Truncate industry name to fit within pixel width."""
     if _text_width(industry, scale=scale, spacing=1) <= max_width:
@@ -325,7 +379,7 @@ def _truncate_industry(industry, max_width=60, scale=1):
     # Last resort: truncate with ellipsis
     while len(shortened) > 3 and _text_width(shortened + "..", scale=scale, spacing=1) > max_width:
         shortened = shortened[:-1]
-    return shortened + ".."
+    return shortened.rstrip() + ".."
 
 
 def _draw_sparkline(draw, prices, x, y, w, h, is_up):
@@ -433,12 +487,19 @@ def _render_stock(quote, tick, rank=None):
     if rank is not None:
         rank_str = f"#{rank}"
         _draw_text(draw, rank_str, x_offset, 1, (255, 200, 50), scale=1, spacing=1)
-        x_offset += _text_width(rank_str, scale=1, spacing=1) + 2
+        x_offset += _text_width(rank_str, scale=1, spacing=1) + 3
 
-    _draw_text(draw, symbol, x_offset, 1, SYMBOL_COLOR, scale=1, spacing=1)
+    # Truncate the symbol so it can never run under the arrow (5px wide) or off
+    # the right edge once a wide rank badge has pushed x_offset over.
+    _ARROW_W = 5
+    sym_budget = 61 - x_offset - 3 - _ARROW_W
+    sym_text = symbol
+    while sym_text and _text_width(sym_text, scale=1, spacing=1) > sym_budget:
+        sym_text = sym_text[:-1]
+    _draw_text(draw, sym_text, x_offset, 1, SYMBOL_COLOR, scale=1, spacing=1)
 
     # Animated arrow next to symbol
-    sym_w = _text_width(symbol, scale=1, spacing=1)
+    sym_w = _text_width(sym_text, scale=1, spacing=1) if sym_text else 0
     _draw_arrow(draw, x_offset + sym_w + 2, 2, is_up, tick)
 
     # --- Separator ---
@@ -451,25 +512,28 @@ def _render_stock(quote, tick, rank=None):
     # --- Separator ---
     draw.line([(2, 18), (61, 18)], fill=SEPARATOR_COLOR)
 
-    # --- Price (large, scale=2) ---
-    if price >= 10000:
-        price_str = f"${price:.0f}"
-    elif price >= 1000:
-        price_str = f"${price:.1f}"
-    else:
-        price_str = f"${price:.2f}"
-    _draw_text(draw, price_str, 2, 20, price_color, scale=2, spacing=1)
+    # --- Price (big dollars + small cents, sized to fit the row) ---
+    dollars_str, cents_str, price_scale = _fit_price(
+        price, max_width=60, scale=2, spacing=1
+    )
+    price_y = 20 if price_scale == 2 else 23
+    _draw_text(draw, dollars_str, 2, price_y, price_color,
+               scale=price_scale, spacing=1)
+    if cents_str:
+        dollars_w = _text_width(dollars_str, scale=price_scale, spacing=1)
+        # Bottom-align the small cents with the tall dollars glyphs.
+        cents_y = price_y + 7 * price_scale - 7
+        _draw_text(draw, cents_str, 2 + dollars_w + 1, cents_y, price_color,
+                   scale=1, spacing=0)
 
-    # --- Change + Percent ---
-    arrow_char = "+" if is_up else ""
-    change_str = f"{arrow_char}{change:.2f}"
-    if abs(change) >= 100:
-        change_str = f"{arrow_char}{change:.1f}"
-    pct_str = f"{arrow_char}{change_pct:.1f}%"
-
-    _draw_text(draw, change_str, 2, 35, price_color, scale=1, spacing=1)
+    # --- Change + Percent (fit to one row, never overlapping) ---
+    change_str, pct_str = _fit_change_pct(
+        change, change_pct, is_up, max_width=62, gap=3, spacing=1
+    )
+    if change_str:
+        _draw_text(draw, change_str, 1, 35, price_color, scale=1, spacing=1)
     pct_w = _text_width(pct_str, scale=1, spacing=1)
-    _draw_text(draw, pct_str, WIDTH - pct_w - 2, 35, price_color, scale=1, spacing=1)
+    _draw_text(draw, pct_str, WIDTH - pct_w - 1, 35, price_color, scale=1, spacing=1)
 
     # --- Separator ---
     draw.line([(2, 43), (61, 43)], fill=SEPARATOR_COLOR)
