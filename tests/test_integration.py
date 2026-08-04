@@ -320,9 +320,15 @@ class TestControllerFlowEndToEnd:
         menu = MenuSystem(json.loads(json.dumps(cfg)),
                           config_path=cfg_path, fps=0)
 
-        # Main: GAMES(0), SETTINGS(1), RESUME(2).
+        # Locate SETTINGS dynamically -- the main menu has grown over time
+        # (GAMES/DEMOS/CAROUSEL/CONTROLS/SETTINGS/UPDATE/ABOUT/RESUME), and a
+        # hardcoded index silently drove the test into the wrong submenu.
+        from src.menu.menu_data import build_main_menu
+        labels = [item.label for item in build_main_menu().items]
+        settings_idx = labels.index("SETTINGS")
+
         ctrl = ScriptedController(event_script=[
-            _press(Button.DOWN),   # -> SETTINGS
+            *([_press(Button.DOWN)] * settings_idx),  # -> SETTINGS
             _press(Button.A),      # open inline Settings screen
             _press(Button.RIGHT),  # brightness +5 (consumed by settings screen)
             _press(Button.B),      # back out of Settings -> returns to the menu

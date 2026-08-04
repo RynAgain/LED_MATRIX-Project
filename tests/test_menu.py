@@ -880,12 +880,19 @@ class TestVersion:
         assert len(ver) > 0
 
     def test_get_version_looks_like_hash_or_unknown(self):
-        """In a git repo, get_version() returns a hex-ish short hash."""
+        """get_version() returns a git-describe version, a hash, or 'unknown'."""
+        import re
+
         from src.version import get_version
 
         ver = get_version()
-        # Either a hex hash (7+ chars) or 'unknown'.
-        assert ver == "unknown" or all(c in "0123456789abcdef" for c in ver)
+        # get_version() prefers tag-based `git describe`, so all three shapes
+        # are valid: "v1.2.3" / "1.2.3-5-gabc1234", a bare short hash, or the
+        # "unknown" fallback when git and the VERSION file are both unavailable.
+        is_unknown = ver == "unknown"
+        is_hash = bool(re.fullmatch(r"[0-9a-f]{7,40}", ver))
+        is_describe = bool(re.fullmatch(r"v?\d+\.\d+\.\d+(-\d+-g[0-9a-f]{7,40})?", ver))
+        assert is_unknown or is_hash or is_describe, f"unexpected version {ver!r}"
 
     def test_version_cached_in_menu_system(self, config):
         """MenuSystem caches the version string at init time."""

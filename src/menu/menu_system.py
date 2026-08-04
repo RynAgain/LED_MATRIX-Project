@@ -143,7 +143,12 @@ class MenuSystem:
         # In test mode (fps=0), bypass both gates since there's no physical button.
         self._start_armed = (self._frame_dt == 0.0)
         self._menu_open_time = time.time()
-        self._start_grace_seconds = 2.0  # Ignore START for 2s after menu opens
+        # Ignore START for 2s after the menu opens (physical button bounce).
+        # In test mode (fps=0) there is no physical button, so the grace
+        # period is disabled to match _start_armed above -- otherwise the
+        # gate silently swallows every scripted START and run() never
+        # returns.
+        self._start_grace_seconds = 0.0 if self._frame_dt == 0.0 else 2.0
 
         self._render(matrix)
         while True:
