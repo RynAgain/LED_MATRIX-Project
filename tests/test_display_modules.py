@@ -88,6 +88,7 @@ DISPLAY_MODULES = [
     "src.display.terrain_ball",
     "src.display.system_stats",
     "src.display.living_world",
+    "src.display.fractal",
 ]
 
 

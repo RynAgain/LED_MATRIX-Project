@@ -14,9 +14,11 @@ effect before transitioning to the next.
 
 import time
 import math
+import random
 import logging
 from PIL import Image
-from src.display._shared import should_stop
+from src.display._shared import should_stop, interruptible_sleep
+from src.display._utils import _hsv_to_rgb
 
 logger = logging.getLogger(__name__)
 
@@ -28,26 +30,6 @@ FRAME_INTERVAL = 1.0 / 30  # 30 FPS
 # Color palettes
 # ---------------------------------------------------------------------------
 
-def _hue_to_rgb(hue):
-    """Convert a hue (0.0-1.0) to an RGB tuple using HSV with full saturation."""
-    h = (hue % 1.0) * 6.0
-    c = 255
-    x = int(c * (1 - abs(h % 2 - 1)))
-    c = int(c)
-    if h < 1:
-        return (c, x, 0)
-    elif h < 2:
-        return (x, c, 0)
-    elif h < 3:
-        return (0, c, x)
-    elif h < 4:
-        return (0, x, c)
-    elif h < 5:
-        return (x, 0, c)
-    else:
-        return (c, 0, x)
-
-
 def _depth_color(depth, max_depth, hue_offset=0.0):
     """Map a recursion/iteration depth to a vibrant color."""
     if max_depth == 0:
@@ -55,27 +37,42 @@ def _depth_color(depth, max_depth, hue_offset=0.0):
     else:
         t = depth / max_depth
     hue = (t * 0.7 + hue_offset) % 1.0
-    return _hue_to_rgb(hue)
+    return _hsv_to_rgb(hue, 1.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
 # Fractal 1: Sierpinski Triangle (pixel-by-pixel unfold)
 # ---------------------------------------------------------------------------
 
-def _sierpinski_points(max_points):
+# Chaos-game iterates converge onto the attractor exponentially; the first
+# handful start from an arbitrary seed point and land off the triangle.
+_CHAOS_BURN_IN = 10
+
+
+def _sierpinski_points(max_points=None):
     """Generate Sierpinski triangle points using the chaos game algorithm.
 
-    Yields (x, y) coordinates one at a time for progressive reveal.
+    Yields (x, y) coordinates one at a time for progressive reveal. With
+    ``max_points=None`` the generator is unbounded, so the reveal fills in over
+    the wall-clock duration regardless of the frame rate actually achieved --
+    pre-sizing it to an assumed 30fps left the triangle half-drawn on hardware
+    that renders slower.
     """
-    import random
     # Triangle vertices scaled to 64x64
     vertices = [(32, 2), (2, 61), (61, 61)]
     x, y = 32.0, 32.0
 
-    for _ in range(max_points):
+    for _ in range(_CHAOS_BURN_IN):
         v = random.choice(vertices)
         x = (x + v[0]) / 2.0
         y = (y + v[1]) / 2.0
+
+    emitted = 0
+    while max_points is None or emitted < max_points:
+        v = random.choice(vertices)
+        x = (x + v[0]) / 2.0
+        y = (y + v[1]) / 2.0
+        emitted += 1
         yield (int(x), int(y))
 
 
@@ -90,7 +87,7 @@ def _run_sierpinski(matrix, duration=15):
     total_points = 0
     hue_offset = 0.0
 
-    point_gen = _sierpinski_points(points_per_frame * int(duration / FRAME_INTERVAL))
+    point_gen = _sierpinski_points()  # unbounded: reveal is paced by wall clock
 
     while time.time() - start < duration:
         if should_stop():
@@ -151,8 +148,6 @@ def _run_mandelbrot(matrix, duration=20):
     initial_scale = 3.5
     final_scale = 0.0002  # Don't zoom deeper than detail allows
 
-    frame_count = 0
-
     while time.time() - start < duration:
         if should_stop():
             return False
@@ -194,7 +189,6 @@ def _run_mandelbrot(matrix, duration=20):
                     pixels[px, py] = color
 
         matrix.SetImage(image)
-        frame_count += 1
 
         elapsed = time.time() - frame_start
         sleep_time = FRAME_INTERVAL - elapsed
@@ -241,8 +235,11 @@ def _run_dragon_curve(matrix, duration=15):
     """Dragon curve that draws itself stroke by stroke."""
     start = time.time()
 
-    # Generate curve with enough iterations to fill the screen
-    iterations = 12  # 2^12 = 4096 segments
+    # 11 iterations (2048 points) has a 63x52 bounding box, which lands on the
+    # panel at scale 1.0 -- i.e. lattice-aligned, no collapsing. 12 iterations
+    # is 95 wide, so it has to be squashed to 0.63 and two thirds of the points
+    # pile onto pixels already drawn: twice the work for less visible detail.
+    iterations = 11
     points = _dragon_curve_points(iterations)
 
     # Scale and center the points to fit 64x64
@@ -257,8 +254,9 @@ def _run_dragon_curve(matrix, duration=15):
     range_x = max_x - min_x or 1
     range_y = max_y - min_y or 1
 
-    # Scale to fit with 2px margin
-    scale = min(60.0 / range_x, 60.0 / range_y)
+    # Fit within the panel leaving a 1px margin (uniform scale, aspect kept).
+    available = float(WIDTH - 1)
+    scale = min(available / range_x, available / range_y)
     offset_x = (WIDTH - range_x * scale) / 2 - min_x * scale
     offset_y = (HEIGHT - range_y * scale) / 2 - min_y * scale
 
@@ -274,7 +272,10 @@ def _run_dragon_curve(matrix, duration=15):
     pixels = image.load()
 
     total_segments = len(scaled_points) - 1
-    segments_per_frame = max(1, total_segments // int(duration / FRAME_INTERVAL))
+    # run() can hand us a duration shorter than a single frame interval; int()
+    # then floors to 0 and the division below raises ZeroDivisionError.
+    expected_frames = max(1, int(duration / FRAME_INTERVAL))
+    segments_per_frame = max(1, total_segments // expected_frames)
     current_segment = 0
 
     while time.time() - start < duration:
@@ -291,9 +292,8 @@ def _run_dragon_curve(matrix, duration=15):
             # Color based on progress through curve
             color = _depth_color(i, total_segments, hue_offset=0.6)
 
-            # Draw pixel at endpoint (and interpolate for longer segments)
-            pixels[x1, y1] = color
-            # Simple line between consecutive points
+            # Adjacent points are a single pixel; anything further apart (only
+            # possible when the curve is upscaled) needs interpolating.
             if abs(x1 - x0) <= 1 and abs(y1 - y0) <= 1:
                 pixels[x1, y1] = color
             else:
@@ -330,29 +330,43 @@ def _run_dragon_curve(matrix, duration=15):
 # Fractal 4: Recursive square subdivision (Sierpinski carpet unfold)
 # ---------------------------------------------------------------------------
 
+# A 64px panel supports exactly three carpet levels: successive thirds are
+# 64 -> 21.3 -> 7.1 -> 2.4, and below ~3px there is no room left to carve out a
+# centre square. max_level was 4, so levels 3 and 4 never drew anything while
+# still claiming two fifths of the segment's time budget -- the deepest visible
+# level finished 54% of the way in and the remaining 46% was a frozen image.
+_CARPET_MAX_LEVEL = 2
+
+
 def _run_carpet(matrix, duration=15):
     """Sierpinski carpet that unfolds level by level with animation.
 
     Each recursion level subdivides existing squares, filling in the pattern
-    progressively from level 0 up to level 4.
+    progressively from level 0 up to :data:`_CARPET_MAX_LEVEL`.
     """
     start = time.time()
-    max_level = 4
+    max_level = _CARPET_MAX_LEVEL
     time_per_level = duration / (max_level + 1)
 
     image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
     pixels = image.load()
 
     def _draw_carpet_level(level, x, y, size, current_time):
-        """Recursively draw one level of the carpet with fade-in."""
-        if level < 0 or size < 1:
+        """Recursively draw one level of the carpet with fade-in.
+
+        ``x``, ``y`` and ``size`` are floats: keeping sub-square boundaries
+        exact and only rounding when painting means the three columns absorb
+        the remainder (21/21/22 px for a 64px parent) instead of integer
+        division truncating 64 to 63 and leaving a dead edge column.
+        """
+        if level < 0:
             return
         if should_stop():
             return
 
         # The center square of the 3x3 grid is "cut out" (drawn bright)
-        third = size // 3
-        if third < 1:
+        third = size / 3.0
+        if third < 1.0:
             return
 
         # Calculate fade based on when this level should appear
@@ -367,10 +381,13 @@ def _run_carpet(matrix, duration=15):
             b = int(b * fade)
 
             # Fill center square
-            for py in range(y + third, min(y + 2 * third, HEIGHT)):
-                for px in range(x + third, min(x + 2 * third, WIDTH)):
-                    if 0 <= px < WIDTH and 0 <= py < HEIGHT:
-                        pixels[px, py] = (r, g, b)
+            px0 = max(0, int(round(x + third)))
+            px1 = min(WIDTH, int(round(x + 2 * third)))
+            py0 = max(0, int(round(y + third)))
+            py1 = min(HEIGHT, int(round(y + 2 * third)))
+            for py in range(py0, py1):
+                for px in range(px0, px1):
+                    pixels[px, py] = (r, g, b)
 
         # Recurse into the 8 surrounding sub-squares
         if level < max_level:
@@ -394,7 +411,7 @@ def _run_carpet(matrix, duration=15):
         # Clear and redraw with current time for fade effects
         image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
         pixels = image.load()
-        _draw_carpet_level(0, 0, 0, 64, time.time())
+        _draw_carpet_level(0, 0.0, 0.0, float(WIDTH), time.time())
 
         matrix.SetImage(image)
 
@@ -439,7 +456,7 @@ def run(matrix, duration=60):
             # Brief fade-to-black transition
             image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
             matrix.SetImage(image)
-            time.sleep(0.3)
+            interruptible_sleep(0.3)
 
             if should_stop():
                 break
