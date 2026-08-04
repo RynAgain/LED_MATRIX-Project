@@ -261,12 +261,31 @@ class AutoUpdater:
         local_hash = local.stdout.strip()
         remote_hash = remote.stdout.strip()
 
-        if local_hash != remote_hash:
-            logger.info("Update available: local=%s remote=%s", local_hash[:8], remote_hash[:8])
-            return True
-        else:
+        if local_hash == remote_hash:
             logger.info("Already up to date: %s", local_hash[:8])
             return False
+
+        # Only a remote that is strictly AHEAD counts as an update. If the
+        # local branch has commits that origin doesn't (a dev checkout with
+        # work in flight), pull_updates()'s `reset --hard origin/<branch>`
+        # would silently destroy them -- this actually happened when the test
+        # suite ran the idle-cycle update check on a dev machine with three
+        # unpushed commits. On the Pi, HEAD is always an ancestor of origin,
+        # so update behaviour there is unchanged.
+        ancestor = self._run_git(
+            ["merge-base", "--is-ancestor", "HEAD", f"origin/{self.branch}"]
+        )
+        if not ancestor or ancestor.returncode != 0:
+            logger.warning(
+                "Local HEAD %s has commits not on origin/%s; refusing "
+                "auto-update (it would discard local work)",
+                local_hash[:8], self.branch,
+            )
+            return False
+
+        logger.info("Update available: local=%s remote=%s",
+                    local_hash[:8], remote_hash[:8])
+        return True
 
     def _backup_configs(self):
         """Backup config/*.json to a temp directory outside git's reach.

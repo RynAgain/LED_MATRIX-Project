@@ -41,6 +41,31 @@ _register_simulator()
 
 
 @pytest.fixture(autouse=True)
+def _never_run_real_updater(monkeypatch):
+    """Make it impossible for a test to run the real auto-updater.
+
+    AppStateMachine's idle cycle fires _trigger_update_check() in a daemon
+    thread; unmocked, that constructs a real AutoUpdater whose pull_updates()
+    runs `git fetch` + `git reset --hard origin/main` against THIS repository.
+    A test run once reset a dev checkout and orphaned three local commits.
+    Tests that want to exercise the update flow must monkeypatch these back in
+    explicitly with their own fakes.
+    """
+    from src.app_state import DemoCarousel
+    from src.updater.auto_update import AutoUpdater
+
+    monkeypatch.setattr(DemoCarousel, "_trigger_update_check",
+                        lambda self: None)
+    # Belt and braces: even a directly-constructed AutoUpdater must not touch
+    # the network or move refs from inside the test suite.
+    monkeypatch.setattr(AutoUpdater, "fetch_remote", lambda self: False)
+    monkeypatch.setattr(AutoUpdater, "pull_updates",
+                        lambda self: (_ for _ in ()).throw(
+                            AssertionError("real AutoUpdater.pull_updates() "
+                                           "called from a test")))
+
+
+@pytest.fixture(autouse=True)
 def preserve_config_files():
     """Backup and restore config files to prevent tests from polluting the repo.
 
