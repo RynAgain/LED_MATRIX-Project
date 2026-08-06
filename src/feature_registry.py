@@ -48,6 +48,7 @@ FEATURE_MODULES = {
     "starfox": "src.display.starfox",
     "fractal": "src.display.fractal",
     "big_eye": "src.display.big_eye",
+    "flight_radar": "src.display.flight_radar",
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",

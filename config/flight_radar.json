@@ -1,0 +1,6 @@
+{
+  "_comment": "Live ADS-B flight radar. lat/lon default to config/weather.json if omitted.",
+  "radius_miles": 30,
+  "poll_seconds": 12,
+  "show_ground": true
+}

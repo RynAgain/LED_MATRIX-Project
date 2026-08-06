@@ -275,6 +275,11 @@
       "name": "big_eye",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "flight_radar",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

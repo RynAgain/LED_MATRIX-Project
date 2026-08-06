@@ -90,6 +90,7 @@ DISPLAY_MODULES = [
     "src.display.living_world",
     "src.display.fractal",
     "src.display.big_eye",
+    "src.display.flight_radar",
 ]
 
 
