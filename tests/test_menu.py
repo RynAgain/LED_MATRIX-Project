@@ -140,10 +140,11 @@ class TestMenuData:
     def test_main_menu_structure(self):
         menu = build_main_menu()
         labels = [i.label for i in menu.items]
-        assert labels == ["GAMES", "DEMOS", "CAROUSEL", "CONTROLS", "SETTINGS",
-                          "UPDATE", "ABOUT", "RESUME"]
+        assert labels == ["GAMES", "DEMOS", "LOCK DEMO", "CAROUSEL", "CONTROLS",
+                          "SETTINGS", "UPDATE", "ABOUT", "RESUME"]
         actions = [i.action for i in menu.items]
         assert actions == [
+            ItemAction.OPEN_SUBMENU,
             ItemAction.OPEN_SUBMENU,
             ItemAction.OPEN_SUBMENU,
             ItemAction.OPEN_CAROUSEL,
@@ -203,14 +204,14 @@ class TestNavigation:
     def test_repeat_autoscroll_moves_selection(self, config):
         """A REPEAT DOWN event also advances the cursor (held auto-scroll)."""
         menu = _make_menu(config)
-        # REPEAT DOWN x7 lands on RESUME (idx 7); A activates it.
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #            UPDATE(5), ABOUT(6), RESUME(7)
+        # REPEAT DOWN x8 lands on RESUME (idx 8); A activates it.
+        # Main menu: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #            SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8)
         ctrl = FakeController(event_script=[
             _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN), _repeat(Button.DOWN),
             _repeat(Button.DOWN), _repeat(Button.DOWN),
-            _repeat(Button.DOWN),
+            _repeat(Button.DOWN), _repeat(Button.DOWN),
             _press(Button.A),
         ])
         result = menu.run(FakeMatrix(), ctrl)
@@ -280,10 +281,11 @@ class TestNavigation:
     def test_resume_item_returns_resume(self, config):
         """Selecting the RESUME item returns MenuResult.resume()."""
         menu = _make_menu(config)
-        # Main menu: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #            UPDATE(5), ABOUT(6), RESUME(7)
+        # Main menu: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #            SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8)
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),  # DEMOS
+            _press(Button.DOWN),  # LOCK DEMO
             _press(Button.DOWN),  # CAROUSEL
             _press(Button.DOWN),  # CONTROLS
             _press(Button.DOWN),  # SETTINGS
@@ -513,10 +515,11 @@ class TestSettingsInline:
         matrix = FakeMatrix()
         matrix.brightness = baseline
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #       UPDATE(5), ABOUT(6), RESUME(7).
+        # Main: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #       SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> CONTROLS
             _press(Button.DOWN),   # -> SETTINGS
@@ -697,7 +700,7 @@ class TestCarouselScreen:
         assert data["sequence"][0]["type"] == "effect"
 
     def test_carousel_inline_from_menu(self, config, tmp_path):
-        """A on CAROUSEL (idx 2) opens the inline carousel screen."""
+        """A on CAROUSEL (idx 3) opens the inline carousel screen."""
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps(config))
 
@@ -705,10 +708,11 @@ class TestCarouselScreen:
                           config_path=str(cfg_path), fps=0)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #       UPDATE(5), ABOUT(6), RESUME(7).
+        # Main: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #       SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.A),      # open carousel screen
             _press(Button.B),      # back out of carousel -> returns to menu
@@ -853,10 +857,11 @@ class TestControllerScreen:
                           config_path=str(cfg_path), fps=0)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #       UPDATE(5), ABOUT(6), RESUME(7).
+        # Main: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #       SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> CONTROLS
             _press(Button.A),      # open controller screen
@@ -907,14 +912,15 @@ class TestVersion:
 # ---------------------------------------------------------------------------
 class TestAboutScreen:
     def test_about_opens_and_b_returns(self, config):
-        """A on ABOUT (idx 6) opens the about screen; B returns to menu."""
+        """A on ABOUT (idx 7) opens the about screen; B returns to menu."""
         menu = _make_menu(config)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #       UPDATE(5), ABOUT(6), RESUME(7).
+        # Main: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #       SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> CONTROLS
             _press(Button.DOWN),   # -> SETTINGS
@@ -944,10 +950,11 @@ class TestForceUpdate:
         menu = _make_menu(config)
         matrix = FakeMatrix()
 
-        # Main: GAMES(0), DEMOS(1), CAROUSEL(2), CONTROLS(3), SETTINGS(4),
-        #       UPDATE(5), ABOUT(6), RESUME(7).
+        # Main: GAMES(0), DEMOS(1), LOCK DEMO(2), CAROUSEL(3), CONTROLS(4),
+        #       SETTINGS(5), UPDATE(6), ABOUT(7), RESUME(8).
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> CONTROLS
             _press(Button.DOWN),   # -> SETTINGS
@@ -971,6 +978,7 @@ class TestForceUpdate:
 
         ctrl = FakeController(event_script=[
             _press(Button.DOWN),   # -> DEMOS
+            _press(Button.DOWN),   # -> LOCK DEMO
             _press(Button.DOWN),   # -> CAROUSEL
             _press(Button.DOWN),   # -> CONTROLS
             _press(Button.DOWN),   # -> SETTINGS

@@ -79,6 +79,7 @@ class AppMode(Enum):
     IDLE = "IDLE"        # demo carousel (current default behavior)
     MENU = "MENU"        # on-matrix menu navigation
     IN_GAME = "IN_GAME"  # playable game running with the controller
+    LOCKED = "LOCKED"    # one demo pinned for a user-chosen time (no carousel)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,7 @@ class MenuResultKind(Enum):
     RESUME = "RESUME"              # back to the demo carousel (IDLE)
     LAUNCH_GAME = "LAUNCH_GAME"    # enter IN_GAME with payload = feature name
     LAUNCH_DEMO = "LAUNCH_DEMO"    # run a feature as demo (no controller) then return to MENU
+    LAUNCH_LOCKED_DEMO = "LAUNCH_LOCKED_DEMO"  # pin one demo for `duration` seconds (LOCKED)
     OPEN_SETTINGS = "OPEN_SETTINGS"  # deferred to Phase 3/4; stay in MENU for now
     QUIT = "QUIT"                  # request a clean application shutdown
 
@@ -108,10 +110,13 @@ class MenuResult:
     :param kind: one of :class:`MenuResultKind`.
     :param payload: optional data; for ``LAUNCH_GAME`` this is the feature name
         (e.g. ``"snake"``).
+    :param duration: seconds, only for ``LAUNCH_LOCKED_DEMO`` (how long the
+        chosen demo stays locked on screen).
     """
 
     kind: MenuResultKind
     payload: Optional[str] = None
+    duration: Optional[int] = None
 
     # Convenience constructors so call-sites read naturally.
     @staticmethod
@@ -125,6 +130,11 @@ class MenuResult:
     @staticmethod
     def launch_demo(name: str) -> "MenuResult":
         return MenuResult(MenuResultKind.LAUNCH_DEMO, name)
+
+    @staticmethod
+    def launch_locked_demo(name: str, seconds: int) -> "MenuResult":
+        return MenuResult(MenuResultKind.LAUNCH_LOCKED_DEMO, name,
+                          duration=seconds)
 
     @staticmethod
     def open_settings() -> "MenuResult":
@@ -532,11 +542,15 @@ class AppStateMachine:
         keyboard fallback) rather than a file write. It also surfaces a
         window-close (``is_quitting()``) as a shutdown request.
 
-        IMPORTANT: This thread only polls the controller when in IDLE mode.
-        In MENU and IN_GAME modes, the foreground loop owns the controller and
-        calls ``poll_events()`` itself. Polling from both threads would race on
-        the event buffer and reset directional held-state, causing the game to
-        miss D-pad/analog stick input.
+        IMPORTANT: This thread only polls the controller in IDLE and LOCKED
+        modes. In MENU and IN_GAME modes, the foreground loop owns the
+        controller and calls ``poll_events()`` itself. Polling from both
+        threads would race on the event buffer and reset directional
+        held-state, causing the game to miss D-pad/analog stick input.
+        LOCKED is safe to poll for the same reason IDLE is: the pinned demo
+        runs with ``controller=None`` and never polls -- and without polling
+        here, a locked demo would be a trap with no way out until the timer
+        expired.
         """
         logger.info("Input watcher thread started")
         while not self._shutdown.is_set():
@@ -544,7 +558,7 @@ class AppStateMachine:
             # foreground loop owns input exclusively -- polling here would drain
             # the event buffer and reset directional held-state, causing the
             # game/menu to miss D-pad/analog stick input.
-            if self.mode is AppMode.IDLE:
+            if self.mode in (AppMode.IDLE, AppMode.LOCKED):
                 if not self._poll_lock.acquire(blocking=False):
                     events = []  # foreground owns controller right now
                 else:
@@ -572,8 +586,8 @@ class AppStateMachine:
                                 self.START_DEBOUNCE_SECONDS,
                             )
                             break
-                        logger.info("%s pressed during demo -> requesting MENU",
-                                    ev.button.value)
+                        logger.info("%s pressed during %s -> requesting MENU",
+                                    ev.button.value, self.mode.value)
                         self._menu_requested.set()
                         request_stop()
                         break
@@ -631,6 +645,12 @@ class AppStateMachine:
             self._run_demo(result.payload)
             # After the demo finishes, return to MENU (stay in MENU mode).
             self.mode = AppMode.MENU
+        elif kind is MenuResultKind.LAUNCH_LOCKED_DEMO:
+            self._pending_lock = (result.payload, result.duration or 0)
+            self.mode = AppMode.LOCKED
+            # Debounce base for the input thread: the A press that confirmed
+            # the duration must not immediately reopen the menu.
+            self._last_idle_entry_time = time.monotonic()
         elif kind is MenuResultKind.QUIT:
             self._shutdown.set()
         elif kind is MenuResultKind.OPEN_SETTINGS:
@@ -662,6 +682,64 @@ class AppStateMachine:
             logger.error("Demo '%s' crashed; returning to menu", name, exc_info=True)
         finally:
             clear_stop()
+
+    # How long a locked demo's relaunch cycle must last before the crash /
+    # instant-return guard stops treating relaunches as a hot spin.
+    _LOCK_MIN_CYCLE_SECONDS = 0.5
+
+    def _run_locked(self) -> None:
+        """LOCKED: pin one demo on screen until its deadline, then go IDLE.
+
+        The demo runs exactly as in demo mode (``controller=None``), but the
+        carousel never advances. Demos that return early (a game demo hitting
+        game-over, a network demo erroring out) are relaunched with whatever
+        time remains, so the lock holds for the full chosen duration.
+
+        Exits early on: START (the input thread sets ``_menu_requested`` and
+        ``request_stop`` -- same escape as the carousel, goes to MENU) or
+        shutdown. Rapid relaunches are throttled so a demo that crashes
+        instantly cannot spin the CPU for hours.
+        """
+        pending = getattr(self, "_pending_lock", None)
+        self._pending_lock = None
+        if not pending or not pending[0] or pending[1] <= 0:
+            self.mode = AppMode.IDLE
+            self._last_idle_entry_time = time.monotonic()
+            return
+
+        name, seconds = pending
+        deadline = time.monotonic() + seconds
+        logger.info("Locking demo '%s' for %ds", name, seconds)
+
+        clear_stop()
+        from src.main import run_feature
+        while (time.monotonic() < deadline
+               and not self._shutdown.is_set()
+               and not self._menu_requested.is_set()):
+            cycle_start = time.monotonic()
+            remaining = deadline - cycle_start
+            try:
+                run_feature(name, self.matrix, remaining, controller=None)
+            except Exception:  # noqa: BLE001 - a crashing demo must not crash the app
+                logger.error("Locked demo '%s' crashed; will relaunch",
+                             name, exc_info=True)
+            # Throttle: a demo that returns (or crashes) immediately would
+            # otherwise relaunch in a tight loop. The wait is on the shutdown
+            # event so process exit is never delayed by it.
+            elapsed = time.monotonic() - cycle_start
+            if elapsed < self._LOCK_MIN_CYCLE_SECONDS:
+                self._shutdown.wait(self._LOCK_MIN_CYCLE_SECONDS - elapsed)
+
+        if self._menu_requested.is_set():
+            self._menu_requested.clear()
+            clear_stop()
+            self.mode = AppMode.MENU
+            logger.info("Lock on '%s' broken by user -> MENU", name)
+        else:
+            clear_stop()
+            self.mode = AppMode.IDLE
+            self._last_idle_entry_time = time.monotonic()
+            logger.info("Lock on '%s' expired -> IDLE", name)
 
     def _run_game(self) -> None:
         """IN_GAME: launch the chosen playable game with the controller.
@@ -742,6 +820,8 @@ class AppStateMachine:
                     self._run_menu()
                 elif self.mode is AppMode.IN_GAME:
                     self._run_game()
+                elif self.mode is AppMode.LOCKED:
+                    self._run_locked()
                 else:  # pragma: no cover - defensive; unknown mode -> idle
                     logger.warning("Unknown mode %r, reverting to IDLE", self.mode)
                     self.mode = AppMode.IDLE

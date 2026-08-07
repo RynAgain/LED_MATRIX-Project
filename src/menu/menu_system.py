@@ -57,6 +57,7 @@ from src.input import Button, EventType, wants_quit
 from src.menu.menu_data import (
     ItemAction,
     Menu,
+    build_duration_menu,
     build_main_menu,
     build_menu_registry,
 )
@@ -291,6 +292,23 @@ class MenuSystem:
             return MenuResult.launch_game(item.payload)
         if action is ItemAction.LAUNCH_DEMO:
             return MenuResult.launch_demo(item.payload)
+        if action is ItemAction.PICK_LOCK_DEMO:
+            # Not terminal: push the duration menu for this demo. The user
+            # still has to choose how long, or back out.
+            self._push(build_duration_menu(item.payload, item.label))
+            return None
+        if action is ItemAction.LAUNCH_LOCKED:
+            # Payload is "<name>:<seconds>" (see build_duration_menu).
+            name, _, secs = (item.payload or "").rpartition(":")
+            try:
+                seconds = int(secs)
+            except ValueError:
+                logger.warning("Bad LAUNCH_LOCKED payload %r", item.payload)
+                return None
+            if not name or seconds <= 0:
+                logger.warning("Bad LAUNCH_LOCKED payload %r", item.payload)
+                return None
+            return MenuResult.launch_locked_demo(name, seconds)
         if action is ItemAction.RESUME_IDLE:
             return MenuResult.resume()
         if action is ItemAction.BACK:

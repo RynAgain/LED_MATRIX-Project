@@ -18,9 +18,15 @@ Menu hierarchy (§4.2)::
     Main Menu
       ├── Games      -> Games submenu
       ├── Demos      -> Demos submenu (watch any feature as a demo)
+      ├── Lock Demo  -> Lock submenu (pin one demo for a chosen time)
       ├── Carousel   -> Carousel config screen (toggle demos on/off)
       ├── Settings   -> Settings screen (handled inline by the engine)
       └── Resume     -> back to the demo carousel (IDLE)
+
+    Lock Demo submenu
+      ├── Fire       -> duration menu (5 MIN ... 8 HOURS) -> launch_locked
+      ├── ...        -> (all features from the registry)
+      └── Back       -> pop to Main Menu
 
     Games submenu
       ├── Snake      -> launch_game("snake")
@@ -49,6 +55,8 @@ from typing import List, Optional
 MENU_MAIN = "main"
 MENU_GAMES = "games"
 MENU_DEMOS = "demos"
+MENU_LOCK = "lock"
+MENU_LOCK_DURATION = "lock_duration"
 MENU_SETTINGS = "settings"
 
 
@@ -59,6 +67,9 @@ class ItemAction(Enum):
 
     * ``LAUNCH_GAME``  -> return ``MenuResult.launch_game(payload)`` (enter game).
     * ``LAUNCH_DEMO``  -> return ``MenuResult.launch_demo(payload)`` (watch demo).
+    * ``PICK_LOCK_DEMO`` -> push a duration menu for the chosen demo (payload).
+    * ``LAUNCH_LOCKED``-> return ``MenuResult.launch_locked_demo(...)``; the
+      payload is ``"<demo_name>:<seconds>"``.
     * ``OPEN_SUBMENU`` -> push the submenu identified by ``payload``.
     * ``OPEN_SETTINGS``-> push the inline Settings screen.
     * ``OPEN_CAROUSEL``-> push the inline Carousel config screen.
@@ -71,6 +82,8 @@ class ItemAction(Enum):
 
     LAUNCH_GAME = "LAUNCH_GAME"
     LAUNCH_DEMO = "LAUNCH_DEMO"
+    PICK_LOCK_DEMO = "PICK_LOCK_DEMO"
+    LAUNCH_LOCKED = "LAUNCH_LOCKED"
     OPEN_SUBMENU = "OPEN_SUBMENU"
     OPEN_SETTINGS = "OPEN_SETTINGS"
     OPEN_CAROUSEL = "OPEN_CAROUSEL"
@@ -223,10 +236,56 @@ def build_demos_menu() -> Menu:
     return Menu(MENU_DEMOS, "DEMOS", items)
 
 
+# Duration choices for the Lock Demo flow. Labels fit the 64px row width.
+LOCK_DURATIONS = [
+    ("5 MIN", 5 * 60),
+    ("10 MIN", 10 * 60),
+    ("15 MIN", 15 * 60),
+    ("30 MIN", 30 * 60),
+    ("1 HOUR", 60 * 60),
+    ("2 HOURS", 2 * 60 * 60),
+    ("4 HOURS", 4 * 60 * 60),
+    ("8 HOURS", 8 * 60 * 60),
+]
+
+
+def build_lock_menu() -> Menu:
+    """Build the **Lock Demo** submenu: every feature, as PICK_LOCK_DEMO items.
+
+    Same feature list and labels as :func:`build_demos_menu`, but activating an
+    item does not launch it -- the engine pushes a duration menu for it instead.
+    """
+    from src.feature_registry import FEATURE_MODULES
+
+    items: List[MenuItem] = []
+    for name in sorted(FEATURE_MODULES.keys()):
+        label = _DEMO_LABELS.get(name, name.upper()[:10])
+        items.append(MenuItem(label, ItemAction.PICK_LOCK_DEMO, payload=name))
+    items.append(MenuItem("BACK", ItemAction.BACK))
+    return Menu(MENU_LOCK, "LOCK DEMO", items)
+
+
+def build_duration_menu(name: str, label: str) -> Menu:
+    """Build the duration menu for one demo picked in the Lock Demo submenu.
+
+    Each row is a ``LAUNCH_LOCKED`` item whose payload packs the demo name and
+    the duration in seconds as ``"<name>:<seconds>"`` (feature names never
+    contain a colon). The title is the demo's own label so it stays obvious
+    what is being locked.
+    """
+    items = [
+        MenuItem(dlabel, ItemAction.LAUNCH_LOCKED, payload="%s:%d" % (name, secs))
+        for dlabel, secs in LOCK_DURATIONS
+    ]
+    items.append(MenuItem("BACK", ItemAction.BACK))
+    return Menu(MENU_LOCK_DURATION, label[:10], items)
+
+
 def build_main_menu() -> Menu:
     """Build the top-level **Main Menu**.
 
-    Order: GAMES / DEMOS / CAROUSEL / CONTROLS / SETTINGS / UPDATE / ABOUT / RESUME.
+    Order: GAMES / DEMOS / LOCK DEMO / CAROUSEL / CONTROLS / SETTINGS /
+    UPDATE / ABOUT / RESUME.
     """
     return Menu(
         MENU_MAIN,
@@ -234,6 +293,7 @@ def build_main_menu() -> Menu:
         [
             MenuItem("GAMES", ItemAction.OPEN_SUBMENU, payload=MENU_GAMES),
             MenuItem("DEMOS", ItemAction.OPEN_SUBMENU, payload=MENU_DEMOS),
+            MenuItem("LOCK DEMO", ItemAction.OPEN_SUBMENU, payload=MENU_LOCK),
             MenuItem("CAROUSEL", ItemAction.OPEN_CAROUSEL),
             MenuItem("CONTROLS", ItemAction.OPEN_CONTROLS),
             MenuItem("SETTINGS", ItemAction.OPEN_SETTINGS),
@@ -255,4 +315,5 @@ def build_menu_registry(playable=None) -> dict:
     return {
         MENU_GAMES: build_games_menu(playable),
         MENU_DEMOS: build_demos_menu(),
+        MENU_LOCK: build_lock_menu(),
     }
