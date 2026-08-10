@@ -193,6 +193,31 @@ class TestMandelbrot:
         lit = sum(1 for y in range(64) for x in range(64) if px[x, y] != (0, 0, 0))
         assert lit > 100, f"only {lit} pixels lit"
 
+    @pytest.mark.parametrize("t", [0.0, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0])
+    def test_no_blackout_anywhere_along_the_zoom(self, t):
+        """The whole flight must keep escaping pixels in frame.
+
+        The original camera interpolated its centre across set interior while
+        already zoomed deep, so the panel was fully black from ~15%% to ~88%%
+        of the segment -- and the short-duration test above only ever rendered
+        the first frames, so it passed anyway (it failed only on a loaded
+        machine that reached full zoom). This renders a 32x32 subsample of
+        the exact frame the demo would draw at progress ``t`` and requires a
+        meaningful share of pixels to escape.
+        """
+        scale, cx, cy, max_iter = fractal._mandelbrot_view(t)
+        n = 32
+        lit = 0
+        for py in range(n):
+            for px_i in range(n):
+                real = cx + (px_i * 64 / n - 32) * scale / 64
+                imag = cy + (py * 64 / n - 32) * scale / 64
+                if fractal._mandelbrot_iter(real, imag, max_iter) < max_iter:
+                    lit += 1
+        assert lit / (n * n) > 0.05, (
+            f"blackout at t={t}: {lit}/{n*n} pixels escape "
+            f"(scale={scale:.6f}, iter={max_iter})")
+
 
 class TestColorHelper:
     def test_uses_the_shared_hsv_helper(self):

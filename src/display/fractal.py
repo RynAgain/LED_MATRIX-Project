@@ -130,6 +130,30 @@ def _mandelbrot_iter(cx, cy, max_iter):
     return max_iter
 
 
+def _mandelbrot_view(t):
+    """Camera for progress ``t`` in 0..1: (scale, cx, cy, max_iter).
+
+    The centre sits ON the zoom target for the whole flight. An earlier
+    version interpolated the centre from (-0.5, 0) toward the target while
+    the scale was already zooming exponentially; the viewport spent most of
+    the segment over set interior where nothing escapes within the 80
+    iteration cap, so the panel rendered fully black from roughly t=0.15 to
+    t=0.88. Zooming straight at a boundary point keeps escaping pixels in
+    frame at every depth (measured 20-100%% lit along the whole trajectory).
+    """
+    target_cx, target_cy = -0.7436439, 0.1318259
+    initial_scale = 3.5
+    final_scale = 0.0002
+
+    eased_t = t * (2 - t)  # Ease-out so we slow down as we get deeper
+    scale = initial_scale * math.exp(
+        math.log(final_scale / initial_scale) * eased_t)
+    zoom_factor = initial_scale / scale
+    max_iter = int(30 + math.log2(max(1, zoom_factor)) * 25)
+    max_iter = min(max_iter, 80)  # 64x64 needs no more; 300 = ~1fps on Pi
+    return scale, target_cx, target_cy, max_iter
+
+
 def _run_mandelbrot(matrix, duration=20):
     """Mandelbrot set that progressively increases iteration depth and zooms in.
 
@@ -139,36 +163,15 @@ def _run_mandelbrot(matrix, duration=20):
     """
     start = time.time()
 
-    # Zoom target: a point precisely ON the boundary of the Mandelbrot set
-    # This is in the "Seahorse Valley" filament area - guaranteed to have
-    # infinite detail and never go blank (it's on the edge, not inside)
-    target_cx, target_cy = -0.7436439, 0.1318259
-
-    # Start wide, zoom in over time - but limit zoom to avoid going blank
-    initial_scale = 3.5
-    final_scale = 0.0002  # Don't zoom deeper than detail allows
-
     while time.time() - start < duration:
         if should_stop():
             return False
         frame_start = time.time()
 
-        # Progress 0..1 over the duration
+        # Progress 0..1 over the duration; the camera maths lives in
+        # _mandelbrot_view so the no-blackout property is testable.
         t = min(1.0, (time.time() - start) / duration)
-
-        # Exponential zoom - smooth deceleration at end
-        eased_t = t * (2 - t)  # Ease-out so we slow down as we get deeper
-        scale = initial_scale * math.exp(math.log(final_scale / initial_scale) * eased_t)
-
-        # Increase max iterations proportionally with zoom depth
-        # More zoom = need more iterations to see boundary detail
-        zoom_factor = initial_scale / scale
-        max_iter = int(30 + math.log2(max(1, zoom_factor)) * 25)
-        max_iter = min(max_iter, 80)  # 64x64 needs no more; 300 = ~1fps on Pi  # Cap for performance on 64x64
-
-        # Center interpolates toward target
-        cx = -0.5 + (target_cx - (-0.5)) * eased_t
-        cy = 0.0 + (target_cy - 0.0) * eased_t
+        scale, cx, cy, max_iter = _mandelbrot_view(t)
 
         image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
         pixels = image.load()
