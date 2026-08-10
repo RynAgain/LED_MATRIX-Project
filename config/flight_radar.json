@@ -1,5 +1,7 @@
 {
-  "_comment": "Live ADS-B flight radar. lat/lon default to config/weather.json if omitted.",
+  "_comment": "Live ADS-B flight radar. Centre = Whole Foods, 525 N Lamar Blvd, Austin. lat/lon default to config/weather.json if omitted.",
+  "lat": 30.2706,
+  "lon": -97.7525,
   "radius_miles": 30,
   "poll_seconds": 12,
   "show_ground": true

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Live flight radar: a PPI scope showing real aircraft overhead.
 
-A classic plan-position-indicator radar scope fills the panel. A beam sweeps
-around once every few seconds and, as it passes each aircraft, paints a blip
-that then decays like real radar phosphor. Aircraft are coloured by altitude,
-sized by weight class, and tagged with a short heading vector. A HUD bar at
-the bottom cycles through the contacts showing callsign and flight level.
+A plan-position-indicator radar scope fills the panel, centred on the
+configured location with a real map underlay (major highways and the river,
+pre-fetched from OpenStreetMap into ``config/flight_radar_map.json``) so the
+traffic has geography under it. A cosmetic beam sweeps the scope; aircraft
+are drawn live every frame -- coloured by altitude, sized by weight class,
+tagged with a short heading vector -- so they read as crisp moving symbols.
+An early version only painted contacts as the beam passed them, decaying like
+real phosphor; authentic, but a moving plane smeared into an unreadable blob
+trail at 64px. A HUD bar cycles the contacts with callsign and flight level.
 
 The panel is 64x64 and the default range is 30 miles, which makes the scale a
 convenient 1 pixel per mile.
@@ -52,14 +56,18 @@ DEFAULT_RADIUS_MILES = 30.0
 DEFAULT_POLL_SECONDS = 12.0
 SWEEP_PERIOD = 4.0          # seconds per revolution
 
-# Two phosphor layers, because one does not look like radar. The beam trail
-# has to fade in well under a second or it becomes a bright wedge covering a
-# quarter of the scope, but a contact must stay lit until the beam comes back
-# round to repaint it. A single decay rate cannot do both.
+# The beam trail has to fade in well under a second or it becomes a bright
+# wedge covering a quarter of the scope.
 BEAM_DECAY = 0.80           # ~27 degrees of visible trail at 30fps
-BLIP_DECAY = 0.982          # contacts survive comfortably past one sweep
 BEAM_FILL = 0.30            # trail brightness relative to the leading edge
 BEAM_STEP_DEG = 1.0         # sub-step the trail so it has no comb gaps
+
+# The map underlay must sit below everything: brighter than the scope
+# background, dimmer than the range rings, far dimmer than any aircraft.
+MAP_ROAD = (36, 58, 44)
+MAP_WATER = (22, 48, 78)
+CENTRE_MARK = (255, 255, 255)   # "you are here" -- brightest thing but a dot
+MAP_MAX_CENTRE_DRIFT_MILES = 3.0
 HUD_HEIGHT = 9
 HUD_DWELL = 2.5             # seconds per contact in the HUD
 STALE_SECONDS = 60.0        # drop contacts whose position is older than this
@@ -160,6 +168,39 @@ def _load_config():
         "poll_seconds": poll,
         "show_ground": bool(cfg.get("show_ground", True)),
     }
+
+
+def _load_map(lat, lon, radius_miles):
+    """Load the pre-fetched map underlay, or None if it does not apply.
+
+    The geometry is fetched once at development time (OSM Overpass) and
+    committed, so the device never needs the map API. If the configured
+    centre has moved away from the cached one, the stale map is worse than
+    no map -- roads would be drawn in the wrong place under real aircraft --
+    so it is rejected and the scope falls back to plain rings.
+    """
+    path = os.path.join(PROJECT_ROOT, "config", "flight_radar_map.json")
+    try:
+        with open(path, "r") as f:
+            data = json.load(f) or {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    try:
+        mlat = float(data["lat"])
+        mlon = float(data["lon"])
+        roads = data.get("roads") or []
+        water = data.get("water") or []
+    except (KeyError, TypeError, ValueError):
+        logger.warning("flight_radar: malformed map cache ignored")
+        return None
+    east, north = _project(mlat, mlon, lat, lon)
+    drift = math.hypot(east, north)
+    if drift > MAP_MAX_CENTRE_DRIFT_MILES:
+        logger.warning(
+            "flight_radar: map cache centred %.1f mi away from the configured "
+            "location; ignoring it (regenerate flight_radar_map.json)", drift)
+        return None
+    return {"roads": roads, "water": water}
 
 
 # --------------------------------------------------------------------------
@@ -388,13 +429,50 @@ class AircraftFeed:
 # rendering
 # --------------------------------------------------------------------------
 
-def _build_scope(radius_miles):
-    """Static scope furniture: range rings, cardinal ticks, centre mark."""
+def _draw_map_layer(img, mask, map_data, lat0, lon0, px_per_mile):
+    """Draw the road/river polylines, clipped to the scope disc.
+
+    The polylines are drawn on their own layer and pasted through the disc
+    mask, because a highway that leaves the 30 mile range would otherwise be
+    drawn across the corner HUD text.
+    """
+    layer = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    for ways, color in ((map_data.get("water") or [], MAP_WATER),
+                        (map_data.get("roads") or [], MAP_ROAD)):
+        for way in ways:
+            pts = []
+            for pt in way:
+                try:
+                    east, north = _project(float(pt[0]), float(pt[1]),
+                                           lat0, lon0)
+                except (TypeError, ValueError, IndexError):
+                    pts = []
+                    break
+                pts.append((CX + east * px_per_mile,
+                            CY - north * px_per_mile))
+            if len(pts) > 1:
+                draw.line(pts, fill=color)
+    img.paste(layer, (0, 0), Image.composite(
+        mask, Image.new("L", (WIDTH, HEIGHT), 0),
+        layer.convert("L").point(lambda v: 255 if v else 0)))
+
+
+def _build_scope(radius_miles, map_data=None, lat0=None, lon0=None):
+    """Static scope furniture: map underlay, range rings, cardinal ticks."""
     img = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     draw.ellipse([CX - SCOPE_R, CY - SCOPE_R, CX + SCOPE_R, CY + SCOPE_R],
                  fill=SCOPE_BG, outline=RING_MAJOR)
+
+    # Geography first, so the rings and ticks stay legible on top of it.
+    if map_data and lat0 is not None and lon0 is not None:
+        _draw_map_layer(img, _scope_mask(), map_data, lat0, lon0,
+                        SCOPE_R / radius_miles)
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([CX - SCOPE_R, CY - SCOPE_R, CX + SCOPE_R, CY + SCOPE_R],
+                     outline=RING_MAJOR)
 
     # Range rings every third of the range.
     for frac in (1 / 3, 2 / 3):
@@ -410,10 +488,6 @@ def _build_scope(radius_miles):
                    (CX + SCOPE_R * math.cos(rad), CY + SCOPE_R * math.sin(rad))],
                   fill=color)
 
-    # Centre mark: this is where the panel is.
-    draw.line([(CX - 2, CY), (CX + 2, CY)], fill=TICK)
-    draw.line([(CX, CY - 2), (CX, CY + 2)], fill=TICK)
-
     return img
 
 
@@ -428,15 +502,13 @@ def _scope_mask():
 class Scope:
     """Holds the static layers plus the decaying phosphor layer."""
 
-    def __init__(self, radius_miles):
+    def __init__(self, radius_miles, map_data=None, lat0=None, lon0=None):
         self.radius_miles = radius_miles
         self.px_per_mile = SCOPE_R / radius_miles
-        self.background = _build_scope(radius_miles)
+        self.background = _build_scope(radius_miles, map_data, lat0, lon0)
         self.mask = _scope_mask()
         self.beam_layer = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
-        self.blip_layer = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
         self._beam_decay = _decay_table(BEAM_DECAY)
-        self._blip_decay = _decay_table(BLIP_DECAY)
         self.sweep = 0.0
 
     # -- placement ---------------------------------------------------------
@@ -450,7 +522,6 @@ class Scope:
     # -- per-frame ---------------------------------------------------------
     def decay(self):
         self.beam_layer = self.beam_layer.point(self._beam_decay)
-        self.blip_layer = self.blip_layer.point(self._blip_decay)
 
     def advance_sweep(self, dt):
         """Move the beam, returning the (start, end) bearings it just covered."""
@@ -484,12 +555,18 @@ class Scope:
         for i in range(steps):
             self._beam_ray(draw, self.sweep - i * BEAM_STEP_DEG, fill)
 
-    def paint(self, contact):
-        """Stamp a blip at full brightness; the decay does the rest."""
+    def paint(self, frame, contact):
+        """Draw one contact live onto the composed frame.
+
+        Contacts used to be stamped into a slow-decay phosphor layer as the
+        beam passed. Authentic, but a moving aircraft turned into a smeared
+        blob of stale positions -- at 64px legibility beats authenticity, so
+        every contact is redrawn crisp at its current position every frame.
+        """
         x, y = self.to_screen(contact)
         color = ALERT if contact.emergency else _alt_color(contact.alt)
         size = _blip_size(contact.category)
-        draw = ImageDraw.Draw(self.blip_layer)
+        draw = ImageDraw.Draw(frame)
 
         # Heading vector first: it is drawn from the blip position outward, so
         # painting it second would overwrite the aircraft itself with the
@@ -508,26 +585,21 @@ class Scope:
             draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
 
     def compose(self):
-        # Beam first, then contacts on top, so a blip is never washed out by
-        # the trail passing over it.
         glow = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
         glow.paste(self.beam_layer, (0, 0), self.mask)
         frame = ImageChops.add(self.background, glow)
 
-        blips = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
-        blips.paste(self.blip_layer, (0, 0), self.mask)
-        frame = ImageChops.add(frame, blips)
-
+        draw = ImageDraw.Draw(frame)
         # Leading edge, drawn live rather than accumulated (see draw_beam).
-        self._beam_ray(ImageDraw.Draw(frame), self.sweep, BEAM)
+        self._beam_ray(draw, self.sweep, BEAM)
+
+        # Centre marker: the station itself (Whole Foods on Lamar, per
+        # config). Drawn after the beam so it never gets washed out --
+        # knowing where the centre is turns the display from dots on a
+        # circle into "that plane is over MY head".
+        draw.line([(CX - 2, CY), (CX + 2, CY)], fill=CENTRE_MARK)
+        draw.line([(CX, CY - 2), (CX, CY + 2)], fill=CENTRE_MARK)
         return frame
-
-
-def _sweep_covers(start, end, bearing):
-    """True if the beam moved across ``bearing`` this frame (handles wrap)."""
-    if start <= end:
-        return start < bearing <= end
-    return bearing > start or bearing <= end
 
 
 def _format_altitude(contact):
@@ -606,7 +678,10 @@ def _draw_alert_ring(frame):
 def run(matrix, duration=60):
     """Run the flight radar demo."""
     cfg = _load_config()
-    scope = Scope(cfg["radius_miles"])
+    scope = Scope(cfg["radius_miles"],
+                  map_data=_load_map(cfg["lat"], cfg["lon"],
+                                     cfg["radius_miles"]),
+                  lat0=cfg["lat"], lon0=cfg["lon"])
     feed = AircraftFeed(cfg["lat"], cfg["lon"],
                         cfg["radius_miles"], cfg["poll_seconds"])
     feed.start()
@@ -631,13 +706,12 @@ def run(matrix, duration=60):
                        and (show_ground or not c.on_ground)]
 
             scope.decay()
-            sweep_start, sweep_end = scope.advance_sweep(dt)
-            for c in visible:
-                if _sweep_covers(sweep_start, sweep_end, c.bearing):
-                    scope.paint(c)
+            sweep_start, _sweep_end = scope.advance_sweep(dt)
             scope.draw_beam(sweep_start)
 
             frame = scope.compose()
+            for c in visible:
+                scope.paint(frame, c)
 
             blink = int(frame_start * 2) % 2 == 0
             if any(c.emergency for c in visible) and blink:

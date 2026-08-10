@@ -11,10 +11,12 @@ about bad or missing data rather than about geometry:
 * the network must never be touched from the render loop, because
   ``src/main.py`` has a frame-hang watchdog that would trip on a slow request
 
-The rendering half is pinned on the two things that were actually wrong during
+The rendering half is pinned on the things that were actually wrong during
 development: the beam trail must be uniform in brightness (accumulating a
-bright leading edge turned it into a comb) and contacts must outlive the trail
-by a wide margin.
+bright leading edge turned it into a comb), contacts must be drawn live every
+frame (sweep-painted phosphor blips smeared moving aircraft into blobs), and
+a stale map cache centred somewhere else entirely must be rejected rather
+than drawn under real aircraft.
 """
 
 import json
@@ -33,10 +35,10 @@ from src.display.flight_radar import (
     _blip_size,
     _format_altitude,
     _hud_candidates,
+    _load_map,
     _parse_altitude,
     _parse_contacts,
     _project,
-    _sweep_covers,
 )
 
 
@@ -246,32 +248,6 @@ def test_format_altitude_is_three_chars_wide():
 
 # --- sweep -----------------------------------------------------------------
 
-def test_sweep_covers_a_simple_span():
-    assert _sweep_covers(10.0, 20.0, 15.0) is True
-    assert _sweep_covers(10.0, 20.0, 25.0) is False
-    assert _sweep_covers(10.0, 20.0, 5.0) is False
-
-
-def test_sweep_covers_wraps_through_north():
-    assert _sweep_covers(355.0, 5.0, 359.0) is True
-    assert _sweep_covers(355.0, 5.0, 2.0) is True
-    assert _sweep_covers(355.0, 5.0, 180.0) is False
-
-
-def test_every_bearing_is_swept_exactly_once_per_revolution():
-    """A contact must not be missed or double-painted by rounding."""
-    scope = Scope(30.0)
-    dt = 1.0 / 30
-    hits = {b: 0 for b in range(0, 360, 7)}
-    frames = int(fr.SWEEP_PERIOD / dt) + 2
-    for _ in range(frames):
-        start, _end = scope.advance_sweep(dt)
-        for b in hits:
-            if _sweep_covers(start, scope.sweep, float(b)):
-                hits[b] += 1
-    assert all(v == 1 for v in hits.values()), hits
-
-
 def test_sweep_period_is_respected():
     scope = Scope(30.0)
     for _ in range(30):
@@ -323,7 +299,6 @@ def test_nothing_is_drawn_outside_the_scope_disc():
     for _ in range(60):
         scope.decay()
         start, _e = scope.advance_sweep(1.0 / 30)
-        scope.paint(_contact(east=0.0, north=29.5))
         scope.draw_beam(start)
     frame = scope.compose()
     for x in range(fr.WIDTH):
@@ -378,44 +353,140 @@ def test_beam_trail_is_uniform_not_a_comb():
             assert near >= far * 0.33, f"comb artefact: {samples}"
 
 
-def test_contacts_outlive_the_beam_trail():
+def test_contacts_are_drawn_live_at_full_colour():
+    """Contacts are repainted crisp every frame, not left to decay.
+
+    The original phosphor approach painted a contact only as the beam swept
+    past it; a moving aircraft became a smeared blob of stale positions.
+    paint() must therefore write the full altitude colour directly into the
+    frame, independent of the sweep angle or any decay state.
+    """
     scope = Scope(30.0)
-    scope.paint(_contact(east=0.0, north=15.0))
-    scope.draw_beam(None)
-    for _ in range(90):     # three seconds
-        scope.decay()
-    blip = sum(scope.blip_layer.getpixel((int(fr.CX), int(fr.CY - 15))))
-    assert blip > 0, "contact faded within a single sweep"
-    assert fr.BLIP_DECAY > fr.BEAM_DECAY
+    frame = scope.compose()
+    scope.paint(frame, _contact(east=0.0, north=15.0, alt=36000,
+                                category="A1", track=None))
+    assert frame.getpixel((int(fr.CX), int(fr.CY - 15))) == \
+        fr._alt_color(36000)
 
 
 def test_ground_contacts_get_no_heading_vector():
     """A parked aircraft has no meaningful track, so it must not grow a tail."""
-    air = Scope(30.0)
-    air.paint(_contact(east=0.0, north=10.0, on_ground=False))
-    ground = Scope(30.0)
-    ground.paint(_contact(east=0.0, north=10.0, on_ground=True, track=None))
-    air_lit = sum(1 for v in air.blip_layer.tobytes() if v)
-    gnd_lit = sum(1 for v in ground.blip_layer.tobytes() if v)
+    scope = Scope(30.0)
+    base = scope.compose()
+    air = base.copy()
+    scope.paint(air, _contact(east=0.0, north=10.0, on_ground=False))
+    ground = base.copy()
+    scope.paint(ground, _contact(east=0.0, north=10.0, on_ground=True,
+                                 track=None))
+    air_lit = sum(1 for a, b in zip(air.tobytes(), base.tobytes()) if a != b)
+    gnd_lit = sum(1 for a, b in zip(ground.tobytes(), base.tobytes()) if a != b)
     assert air_lit > gnd_lit
 
 
 def test_emergency_contact_paints_in_the_alert_colour():
     scope = Scope(30.0)
-    scope.paint(_contact(east=0.0, north=10.0, squawk="7700", category="A1"))
-    assert scope.blip_layer.getpixel((int(fr.CX), int(fr.CY - 10))) == fr.ALERT
+    frame = scope.compose()
+    scope.paint(frame, _contact(east=0.0, north=10.0, squawk="7700",
+                                category="A1"))
+    assert frame.getpixel((int(fr.CX), int(fr.CY - 10))) == fr.ALERT
 
 
 def test_the_contact_is_brighter_than_its_heading_vector():
     """The leader line is drawn from the blip outward and must not dim it."""
     scope = Scope(30.0)
-    scope.paint(_contact(east=0.0, north=10.0, track=90.0, speed=460.0,
-                         category="A1", alt=36000))
-    blip = scope.blip_layer.getpixel((int(fr.CX), int(fr.CY - 10)))
-    leader = scope.blip_layer.getpixel((int(fr.CX) + 2, int(fr.CY - 10)))
+    frame = scope.compose()
+    scope.paint(frame, _contact(east=0.0, north=10.0, track=90.0, speed=460.0,
+                                category="A1", alt=36000))
+    blip = frame.getpixel((int(fr.CX), int(fr.CY - 10)))
+    leader = frame.getpixel((int(fr.CX) + 2, int(fr.CY - 10)))
     assert blip == fr._alt_color(36000)
     assert sum(leader) > 0, "heading vector missing"
     assert sum(blip) > sum(leader)
+
+
+def test_centre_marker_is_always_visible():
+    """The station cross must survive the beam passing over it."""
+    scope = Scope(30.0)
+    for _ in range(10):
+        scope.decay()
+        start, _e = scope.advance_sweep(1.0 / 30)
+        scope.draw_beam(start)
+    frame = scope.compose()
+    assert frame.getpixel((int(fr.CX), int(fr.CY))) == fr.CENTRE_MARK
+
+
+# --- map underlay ------------------------------------------------------------
+
+def _map_payload(lat, lon):
+    return {
+        "lat": lat, "lon": lon, "radius_miles": 30,
+        "roads": [[[lat + 0.1, lon], [lat - 0.1, lon]]],
+        "water": [[[lat, lon - 0.1], [lat, lon + 0.1]]],
+    }
+
+
+def test_load_map_missing_file_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(fr, "PROJECT_ROOT", str(tmp_path))
+    assert _load_map(30.27, -97.75, 30.0) is None
+
+
+def test_load_map_garbage_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(fr, "PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "flight_radar_map.json").write_text("{nope")
+    assert _load_map(30.27, -97.75, 30.0) is None
+    (tmp_path / "config" / "flight_radar_map.json").write_text(
+        json.dumps({"roads": []}))          # missing lat/lon
+    assert _load_map(30.27, -97.75, 30.0) is None
+
+
+def test_load_map_rejects_a_drifted_centre(tmp_path, monkeypatch):
+    """A cache built for another city must not be drawn under real traffic."""
+    monkeypatch.setattr(fr, "PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "flight_radar_map.json").write_text(
+        json.dumps(_map_payload(47.6, -122.3)))     # Seattle cache
+    assert _load_map(30.27, -97.75, 30.0) is None
+
+
+def test_load_map_accepts_a_matching_centre(tmp_path, monkeypatch):
+    monkeypatch.setattr(fr, "PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "flight_radar_map.json").write_text(
+        json.dumps(_map_payload(30.2706, -97.7525)))
+    m = _load_map(30.2706, -97.7525, 30.0)
+    assert m is not None
+    assert len(m["roads"]) == 1 and len(m["water"]) == 1
+
+
+def test_map_changes_the_background_but_stays_inside_the_disc():
+    m = _map_payload(30.2706, -97.7525)
+    plain = Scope(30.0)
+    mapped = Scope(30.0, map_data=m, lat0=30.2706, lon0=-97.7525)
+    assert mapped.background.tobytes() != plain.background.tobytes()
+    for x in range(fr.WIDTH):
+        for y in range(fr.HEIGHT):
+            if math.hypot(x - fr.CX, y - fr.CY) <= fr.SCOPE_R + 1.5:
+                continue
+            assert mapped.background.getpixel((x, y)) == (0, 0, 0), \
+                f"map spill at {(x, y)}"
+
+
+def test_map_survives_malformed_ways():
+    """Junk coordinates in the cache must be skipped, not raised."""
+    m = {"roads": [[["x", None]], [[30.28, -97.75], [30.26, -97.75]]],
+         "water": [[]]}
+    scope = Scope(30.0, map_data=m, lat0=30.2706, lon0=-97.7525)
+    assert scope.background.size == (fr.WIDTH, fr.HEIGHT)
+
+
+def test_committed_map_cache_matches_the_committed_config():
+    """The repo ships both files; they must agree with each other."""
+    cfg = fr._load_config()
+    m = _load_map(cfg["lat"], cfg["lon"], cfg["radius_miles"])
+    assert m is not None, "shipped map cache does not match shipped config"
+    assert len(m["roads"]) > 100      # Austin has real highway coverage
+    assert len(m["water"]) >= 1       # the Colorado River
 
 
 # --- HUD -------------------------------------------------------------------
