@@ -49,6 +49,13 @@ PUPIL_MIN, PUPIL_MAX = 4.0, 11.0
 GAZE_X_LIMIT = 13.0
 GAZE_UP_LIMIT, GAZE_DOWN_LIMIT = 8.0, 6.0
 
+# --- Sclera life ---------------------------------------------------------
+# The eye white is pre-rendered oversized and slid a fraction of the gaze
+# each frame, so its veins travel like the surface of the same rotating
+# ball instead of reading as a painted backdrop behind the iris.
+SCLERA_PAD = 8         # oversize margin in pixels on every side
+SCLERA_TRACK = 0.28    # fraction of the gaze offset the eye white follows
+
 # --- Colours ----------------------------------------------------------------
 SKIN = (168, 116, 92)
 SKIN_SHADOW = (120, 78, 62)
@@ -133,21 +140,56 @@ def _build_skin(bounds):
     return img
 
 
-def _build_sclera(bounds, skin):
-    """Skin background with the eye white, its shading and blood vessels."""
-    img = skin.copy()
-    draw = ImageDraw.Draw(img)
+def _layer_bounds():
+    """Per-column (top, bottom) of an inflated aperture on the padded canvas.
 
-    for x in range(WIDTH):
+    The sclera layer is bigger than the visible opening so that sliding it
+    with the gaze never uncovers a bare edge: shading and veins are painted
+    out to this inflated boundary and the aperture mask clips the excess.
+    """
+    w = WIDTH + 2 * SCLERA_PAD
+    cx = EYE_CX + SCLERA_PAD
+    cy = EYE_CY + SCLERA_PAD
+    half_w = APERTURE_HALF_W + SCLERA_PAD * 0.75
+    up = APERTURE_UP + 6.0
+    down = APERTURE_DOWN + 6.0
+    bounds = []
+    for x in range(w):
+        u = (x - cx) / half_w
+        if abs(u) >= 1.0:
+            bounds.append(None)
+            continue
+        k = math.sqrt(1.0 - u * u)
+        bounds.append((cy - up * k, cy + down * k))
+    return bounds
+
+
+def _build_sclera(bloodshot=False):
+    """Oversized eye-white layer: shading plus blood vessels.
+
+    Two variants are built at start-up -- calm and bloodshot -- and blended
+    per frame by ``EyeState.redness``, so the vessels flush and fade over
+    time instead of being a fixed part of the artwork.
+    """
+    bounds = _layer_bounds()
+    w = len(bounds)
+    h = HEIGHT + 2 * SCLERA_PAD
+    cx = EYE_CX + SCLERA_PAD
+    cy = EYE_CY + SCLERA_PAD
+    img = Image.new("RGB", (w, h), SCLERA)
+
+    for x in range(w):
         b = bounds[x]
         if b is None:
             continue
         top, bot = b
         y0, y1 = int(round(top)), int(round(bot))
-        # Corners are pinker; the top sits in the lid's shadow.
-        corner_t = abs(x - EYE_CX) / APERTURE_HALF_W
+        # Corners are pinker; the top sits in the lid's shadow. Normalised
+        # against the *visible* half-width so the on-panel corners still
+        # reach full pinkness.
+        corner_t = min(1.0, abs(x - cx) / APERTURE_HALF_W)
         base = _mix(SCLERA, SCLERA_CORNER, corner_t ** 2)
-        for y in range(max(0, y0), min(HEIGHT, y1 + 1)):
+        for y in range(max(0, y0), min(h, y1 + 1)):
             depth = (y - top) / max(1.0, bot - top)
             if depth < 0.35:
                 color = _mix(SCLERA_SHADOW, base, depth / 0.35)
@@ -157,36 +199,52 @@ def _build_sclera(bounds, skin):
 
     # Blood vessels: random walks inward from each corner, with forks.
     rng = random.Random(0xE1E)  # fixed seed: vessels are part of the artwork
+    gain = 1.55 if bloodshot else 1.0
     for side in (-1, 1):
         for _ in range(7):
-            x = EYE_CX + side * rng.uniform(0.62, 0.95) * APERTURE_HALF_W
-            y = EYE_CY + rng.uniform(-8, 8)
+            x = cx + side * rng.uniform(0.62, 0.95) * APERTURE_HALF_W
+            y = cy + rng.uniform(-8, 8)
             heading = math.pi if side > 0 else 0.0
             heading += rng.uniform(-0.5, 0.5)
             length = rng.randint(6, 16)
-            _draw_vein(img, bounds, x, y, heading, length, rng, depth=0)
+            _draw_vein(img, bounds, x, y, heading, length, rng, depth=0,
+                       gain=gain)
+
+    if bloodshot:
+        # Extra angry vessels that only appear as the eye reddens.
+        rng = random.Random(0xB100D)
+        for side in (-1, 1):
+            for _ in range(6):
+                x = cx + side * rng.uniform(0.45, 0.95) * APERTURE_HALF_W
+                y = cy + rng.uniform(-12, 12)
+                heading = math.pi if side > 0 else 0.0
+                heading += rng.uniform(-0.7, 0.7)
+                length = rng.randint(8, 20)
+                _draw_vein(img, bounds, x, y, heading, length, rng, depth=0,
+                           gain=1.4)
 
     return img
 
 
-def _draw_vein(img, bounds, x, y, heading, length, rng, depth):
+def _draw_vein(img, bounds, x, y, heading, length, rng, depth, gain=1.0):
     """Walk a faint vessel inward, forking occasionally. Clipped to the sclera."""
+    w, h = img.size
     for step in range(length):
         heading += rng.uniform(-0.35, 0.35)
         x += math.cos(heading)
         y += math.sin(heading)
         ix, iy = int(round(x)), int(round(y))
-        if not (0 <= ix < WIDTH and 0 <= iy < HEIGHT):
+        if not (0 <= ix < w and 0 <= iy < h):
             return
         b = bounds[ix]
         if b is None or not (b[0] <= iy <= b[1]):
             return
         # Fade out along the length so vessels dissolve toward the iris.
-        fade = 0.30 + 0.45 * (1.0 - step / max(1, length))
+        fade = min(0.9, gain * (0.30 + 0.45 * (1.0 - step / max(1, length))))
         img.putpixel((ix, iy), _mix(img.getpixel((ix, iy)), VEIN, fade))
         if depth < 2 and rng.random() < 0.12:
             _draw_vein(img, bounds, x, y, heading + rng.choice((-0.9, 0.9)),
-                       max(2, length // 2), rng, depth + 1)
+                       max(2, length // 2), rng, depth + 1, gain=gain)
 
 
 def _build_masks(bounds):
@@ -276,6 +334,11 @@ class EyeState:
         self.pupil_timer = 1.0
         self.palette_index = 0
         self.palette_changed = False
+        # Sclera flush: 0 calm .. 1 bloodshot. Drifts slowly on its own and
+        # spikes after a squint.
+        self.redness = 0.12
+        self.redness_target = 0.12
+        self.redness_timer = self.rng.uniform(4.0, 9.0)
 
     # -- gaze ---------------------------------------------------------------
     def _new_gaze_target(self):
@@ -374,6 +437,8 @@ class EyeState:
             if roll < 0.5:
                 self.open_target = self.rng.uniform(0.40, 0.60)  # squint
                 self.pupil_target = min(PUPIL_MAX, self.pupil + 1.5)
+                # Squinting irritates the eye a little.
+                self.redness_target = min(1.0, self.redness_target + 0.4)
             else:
                 self.open_target = 1.14                          # surprise
                 self.pupil_target = PUPIL_MIN
@@ -389,6 +454,15 @@ class EyeState:
         self.pupil += (self.pupil_target - self.pupil) * min(1.0, dt * 3.0)
         self.pupil = max(PUPIL_MIN, min(PUPIL_MAX, self.pupil))
 
+        # Redness: a slow wander so the vessels flush and fade over tens of
+        # seconds rather than pulsing.
+        self.redness_timer -= dt
+        if self.redness_timer <= 0.0:
+            self.redness_target = self.rng.uniform(0.0, 0.55)
+            self.redness_timer = self.rng.uniform(6.0, 14.0)
+        self.redness += (self.redness_target - self.redness) * min(1.0, dt * 0.6)
+        self.redness = max(0.0, min(1.0, self.redness))
+
 
 class _Renderer:
     """Holds the pre-rendered layers and composites one frame at a time."""
@@ -396,17 +470,36 @@ class _Renderer:
     def __init__(self, palette_index=0):
         self.bounds = _aperture_bounds()
         self.skin = _build_skin(self.bounds)
-        self.sclera = _build_sclera(self.bounds, self.skin)
+        self.sclera_calm = _build_sclera(bloodshot=False)
+        self.sclera_red = _build_sclera(bloodshot=True)
+        self._sclera_q = None
+        self._sclera_blend = self.sclera_calm
         self.inside, self.outside = _build_masks(self.bounds)
         self.set_palette(palette_index)
         self._lid_mask = Image.new("L", (WIDTH, HEIGHT), 0)
+        self._shadow_mask = Image.new("L", (WIDTH, HEIGHT), 0)
+        self._shadow_ink = Image.new("RGB", (WIDTH, HEIGHT), (10, 8, 14))
 
     def set_palette(self, index):
         self.iris, self.iris_mask = _build_iris(
             IRIS_PALETTES[index % len(IRIS_PALETTES)])
 
     def render(self, state):
-        frame = self.sclera.copy()
+        # Blend calm/bloodshot eye whites (quantised so the C-level blend
+        # only reruns when the redness has visibly moved).
+        q = int(round(max(0.0, min(1.0, getattr(state, "redness", 0.0))) * 12))
+        if q != self._sclera_q:
+            self._sclera_q = q
+            self._sclera_blend = Image.blend(
+                self.sclera_calm, self.sclera_red, q / 12.0)
+
+        # Slide the eye white a fraction of the gaze: the veins travel with
+        # the ball instead of sitting behind the iris like a painted flat.
+        dx = int(round(state.gx * SCLERA_TRACK))
+        dy = int(round(state.gy * SCLERA_TRACK))
+        frame = self._sclera_blend.crop(
+            (SCLERA_PAD - dx, SCLERA_PAD - dy,
+             SCLERA_PAD - dx + WIDTH, SCLERA_PAD - dy + HEIGHT))
 
         # Iris disc at the gaze offset.
         ix = int(round(EYE_CX + state.gx)) - IRIS_R
@@ -446,6 +539,9 @@ class _Renderer:
     # it, "wide open" and "neutral" rendered identically.
     NEUTRAL_OVERLAP = 0.22
 
+    # Alpha (0..255) of the soft shadow the upper lid throws onto the ball.
+    LID_SHADOW_ALPHA = 70
+
     def _draw_lids(self, frame, openness):
         """Cover the shut part of the opening with skin, then draw the lashes."""
         openness = max(0.0, min(1.15, openness))
@@ -478,6 +574,19 @@ class _Renderer:
         mdraw.polygon([(x0, -1)] + upper + [(x1, -1)], fill=255)
         mdraw.polygon([(x0, HEIGHT)] + lower + [(x1, HEIGHT)], fill=255)
         frame.paste(self.skin, (0, 0), self._lid_mask)
+
+        # The upper lid throws a soft shadow onto the ball beneath it; the
+        # further shut the lid, the deeper the band.
+        if self.LID_SHADOW_ALPHA > 0:
+            depth = 1.5 + 2.5 * shut
+            band_bot = [(x, min(uy + depth, ly))
+                        for (x, uy), (_, ly) in zip(upper, lower)]
+            if max(ly - uy for (_, uy), (_, ly) in zip(upper, lower)) > 2.0:
+                self._shadow_mask.paste(0, (0, 0, WIDTH, HEIGHT))
+                sdraw = ImageDraw.Draw(self._shadow_mask)
+                sdraw.polygon(upper + band_bot[::-1],
+                              fill=self.LID_SHADOW_ALPHA)
+                frame.paste(self._shadow_ink, (0, 0), self._shadow_mask)
 
         fdraw = ImageDraw.Draw(frame)
         if len(upper) > 1:

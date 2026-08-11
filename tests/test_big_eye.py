@@ -442,3 +442,77 @@ def test_frame_interval_is_a_sane_frame_rate():
     fps = 1.0 / big_eye.FRAME_INTERVAL
     assert 15 <= fps <= 60
     assert math.isfinite(fps)
+
+
+# --- sclera life -------------------------------------------------------------
+
+def test_sclera_shifts_with_gaze():
+    """Looking sideways must move the eye white, not just the iris.
+
+    Compare a far-left patch of sclera (never covered by the iris or the
+    glints at these gazes) between centre gaze and full-right gaze: the vein
+    and shading pattern must have slid.
+    """
+    r = _renderer()
+    s = _state()
+    s.open = 1.0
+    s.blink_phase = None
+    s.redness = 0.0
+
+    s.gx, s.gy = 0.0, 0.0
+    centre = r.render(s)
+    s.gx = GAZE_X_LIMIT
+    right = r.render(s)
+
+    diffs = 0
+    for x in range(3, 12):
+        b = r.bounds[x]
+        if b is None:
+            continue
+        for y in range(int(b[0]) + 2, int(b[1]) - 1):
+            if centre.getpixel((x, y)) != right.getpixel((x, y)):
+                diffs += 1
+    assert diffs > 5, "sclera did not move with the gaze"
+
+
+def test_redness_is_bounded_and_drifts():
+    s = _state(seed=42)
+    values = set()
+    for _ in range(30 * 120):  # two simulated minutes
+        s.update(1.0 / 30)
+        assert 0.0 <= s.redness <= 1.0
+        values.add(round(s.redness, 2))
+    assert len(values) > 3, "redness never drifted"
+
+
+def test_bloodshot_sclera_renders_differently():
+    r = _renderer()
+    s = _state()
+    s.open = 1.0
+    s.blink_phase = None
+    s.gx = s.gy = 0.0
+
+    s.redness = 0.0
+    calm = r.render(s).tobytes()
+    s.redness = 1.0
+    red = r.render(s).tobytes()
+    s.redness = 0.0
+    calm_again = r.render(s).tobytes()
+
+    assert calm != red, "redness had no visible effect"
+    assert calm == calm_again, "sclera blend is not deterministic"
+
+
+def test_lid_shadow_darkens_the_ball(monkeypatch):
+    """A squint must cast a shadow band under the upper lash."""
+    s = _state()
+    s.open = 0.5
+    s.blink_phase = None
+    s.gx = s.gy = 0.0
+    s.redness = 0.0
+
+    r = _renderer()
+    with_shadow = sum(r.render(s).tobytes())
+    monkeypatch.setattr(_Renderer, "LID_SHADOW_ALPHA", 0)
+    without = sum(r.render(s).tobytes())
+    assert with_shadow < without, "lid shadow did not darken the frame"
