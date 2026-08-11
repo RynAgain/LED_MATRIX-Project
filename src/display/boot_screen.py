@@ -5,19 +5,23 @@ Boot screen animation for LED Matrix Project.
 Displays a startup animation when the service first launches.
 Shown once at boot before the main feature loop begins.
 
-Design:
-  - Expanding pixel ring burst from center
-  - "LED" text fades in large, then "MATRIX" below
-  - Loading bar fills across the bottom
-  - Total duration: ~4 seconds
+Design (~4 seconds total):
+  - Phase 1: RGB panel self-test -- red/green/blue light bands sweep
+    across the matrix like a hardware check, with trailing sparkle
+  - Phase 2: "LED" letters drop in one by one with overshoot;
+    "MATRIX" types itself out underneath with a blinking cursor
+  - Phase 3: loading bar with a moving shine + the running version
+    (auto-bumping, from src.version) shown above it
 """
 
 import math
+import random
 import time
 import threading
 import logging
 from PIL import Image, ImageDraw
 from src.display._fonts import FONT_5X7, _draw_char, _draw_text, _text_width
+from src.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +32,32 @@ FRAME_DUR = 1.0 / FPS
 
 # Color palette
 BG = (0, 0, 0)
-RING_COLOR = (0, 120, 255)       # Blue expanding ring
-TEXT_COLOR_LED = (255, 255, 255)  # White for "LED"
-TEXT_COLOR_MATRIX = (0, 180, 255) # Cyan for "MATRIX"
-BAR_BG = (20, 20, 30)            # Dark loading bar background
-BAR_FG = (0, 200, 100)           # Green loading bar fill
-DOT_COLOR = (80, 80, 120)        # Dim corner dots
+TEXT_COLOR_LED = (255, 255, 255)   # White for "LED"
+LED_GLOW = (0, 90, 140)            # Drop-shadow glow behind "LED"
+TEXT_COLOR_MATRIX = (0, 180, 255)  # Cyan for "MATRIX"
+BAR_BG = (20, 20, 30)              # Dark loading bar background
+BAR_FG = (0, 200, 100)             # Green loading bar fill
+BAR_SHINE = (180, 255, 210)        # Moving highlight on the bar
+VERSION_COLOR = (150, 150, 170)    # Version line
+DOT_COLOR = (80, 80, 120)          # Dim corner dots
+SWEEP_COLORS = [(255, 40, 40), (40, 255, 40), (60, 60, 255)]  # R, G, B bands
 
 # Duration of each phase in seconds
-PHASE_RING = 1.0       # Expanding ring burst
-PHASE_TEXT = 1.5        # Text fade-in
-PHASE_LOADING = 1.5     # Loading bar
-TOTAL_DURATION = PHASE_RING + PHASE_TEXT + PHASE_LOADING
+PHASE_SWEEP = 1.1       # RGB self-test sweep
+PHASE_TEXT = 1.6        # Letter drop + typewriter
+PHASE_LOADING = 1.3     # Loading bar + version
+TOTAL_DURATION = PHASE_SWEEP + PHASE_TEXT + PHASE_LOADING
 
-# Font data and drawing helpers imported from shared module.
-# FONT_5X7, _draw_char, _draw_text, _text_width are imported at top of file.
+# Layout
+LED_TEXT = "LED"
+LED_SCALE = 3
+LED_Y = 12
+MATRIX_TEXT = "MATRIX"
+MATRIX_Y = 38
+BAR_Y = 56
+BAR_H = 3
+BAR_MARGIN = 8
+VERSION_Y = 47
 
 
 def _blend_color(color, alpha):
@@ -50,140 +65,148 @@ def _blend_color(color, alpha):
     return tuple(int(c * alpha) for c in color)
 
 
-def _draw_ring_frame(draw, t, max_t):
-    """Draw expanding ring burst animation.
+def _ease_out_back(t):
+    """Ease-out with a small overshoot (letters land with a bounce)."""
+    c1 = 1.70158
+    c3 = c1 + 1
+    t -= 1
+    return 1 + c3 * t * t * t + c1 * t * t
 
-    Multiple rings expand outward from center with fading trails.
-    """
+
+def _version_text():
+    """Short version line for the boot screen, e.g. 'V1.1.18'."""
+    ver = get_version()
+    if len(ver) > 9:          # bare hash fallback etc.
+        ver = ver[:9]
+    return "V" + ver.upper()
+
+
+def _draw_sweep_frame(draw, t, max_t, rng):
+    """Phase 1: R/G/B light bands sweep across like a panel self-test."""
     progress = t / max_t  # 0.0 to 1.0
 
-    # Draw 3 staggered rings
-    for ring_idx in range(3):
-        ring_delay = ring_idx * 0.2
-        ring_progress = max(0.0, (progress - ring_delay) / (1.0 - ring_delay))
-        if ring_progress <= 0:
+    band_w = 10
+    travel = SIZE + band_w * 2
+    for i, color in enumerate(SWEEP_COLORS):
+        # Staggered starts; each band crosses the full panel
+        band_progress = progress * 1.6 - i * 0.22
+        if band_progress <= 0 or band_progress > 1.0:
             continue
+        head_x = int(band_progress * travel) - band_w
+        for x_off in range(band_w):
+            x = head_x - x_off
+            if 0 <= x < SIZE:
+                fade = 1.0 - (x_off / band_w)
+                draw.line([(x, 0), (x, SIZE - 1)],
+                          fill=_blend_color(color, fade * fade))
 
-        radius = ring_progress * (SIZE * 0.7)
-        alpha = max(0.0, 1.0 - ring_progress * 1.2)
-        thickness = max(1, int(3 * (1.0 - ring_progress)))
+    # Sparkle: random pixels twinkle in the swept area
+    sparkle_count = 14
+    swept_limit = min(SIZE, int(progress * 1.6 * travel))
+    if swept_limit > 4:
+        for _ in range(sparkle_count):
+            px = rng.randrange(0, swept_limit)
+            py = rng.randrange(0, SIZE)
+            if px < SIZE:
+                draw.point((px, py), fill=_blend_color((255, 255, 255),
+                                                       rng.uniform(0.2, 0.8)))
 
-        color = _blend_color(RING_COLOR, alpha)
-        if color == (0, 0, 0):
-            continue
-
-        bbox = [
-            CENTER - radius, CENTER - radius,
-            CENTER + radius, CENTER + radius
-        ]
-        draw.ellipse(bbox, outline=color, width=thickness)
-
-    # Central bright dot that fades out
-    dot_alpha = max(0.0, 1.0 - progress * 2)
-    if dot_alpha > 0:
-        dot_color = _blend_color((255, 255, 255), dot_alpha)
-        dot_r = max(1, int(3 * (1.0 - progress)))
-        draw.ellipse(
-            [CENTER - dot_r, CENTER - dot_r,
-             CENTER + dot_r, CENTER + dot_r],
-            fill=dot_color
-        )
-
-    # Particle sparks radiating outward
-    num_particles = 12
-    for i in range(num_particles):
-        angle = (2 * math.pi / num_particles) * i
-        particle_progress = max(0.0, progress - 0.1)
-        dist = particle_progress * SIZE * 0.5
-        px = int(CENTER + math.cos(angle) * dist)
-        py = int(CENTER + math.sin(angle) * dist)
-        p_alpha = max(0.0, 1.0 - particle_progress * 1.5)
-        if 0 <= px < SIZE and 0 <= py < SIZE and p_alpha > 0:
-            p_color = _blend_color((200, 200, 255), p_alpha)
-            draw.point((px, py), fill=p_color)
+    # Fade the whole show out at the end of the phase
+    # (handled by the bands leaving the panel; sparkles thin naturally)
 
 
-def _draw_text_frame(draw, t, max_t):
-    """Draw text fade-in: 'LED' large, then 'MATRIX' below."""
-    progress = t / max_t
-
-    # "LED" - large text (scale=2), centered, fades in during first half
-    led_alpha = min(1.0, progress * 2.5)
-    led_text = "LED"
-    led_scale = 3
-    led_w = _text_width(led_text, scale=led_scale, spacing=2)
+def _draw_led_letters(draw, progress):
+    """Draw 'LED' with per-letter staggered drop-in and glow shadow."""
+    led_w = _text_width(LED_TEXT, scale=LED_SCALE, spacing=2)
     led_x = (SIZE - led_w) // 2
-    led_y = 12
-    _draw_text(draw, led_text, led_x, led_y, _blend_color(TEXT_COLOR_LED, led_alpha),
-               scale=led_scale, spacing=2)
+    char_w = 5 * LED_SCALE + 2  # glyph + spacing
 
-    # "MATRIX" - smaller text, centered below, fades in during second half
-    matrix_alpha = max(0.0, min(1.0, (progress - 0.3) * 2.5))
-    matrix_text = "MATRIX"
-    matrix_scale = 1
-    matrix_w = _text_width(matrix_text, scale=matrix_scale, spacing=1)
-    matrix_x = (SIZE - matrix_w) // 2
-    matrix_y = 38
-    _draw_text(draw, matrix_text, matrix_x, matrix_y,
-               _blend_color(TEXT_COLOR_MATRIX, matrix_alpha),
-               scale=matrix_scale, spacing=1)
+    for i, ch in enumerate(LED_TEXT):
+        # Each letter animates in its own staggered window
+        t = max(0.0, min(1.0, progress * 3.0 - i * 0.55))
+        if t <= 0:
+            continue
+        eased = _ease_out_back(t)
+        y = int(LED_Y - (1.0 - eased) * 20)
+        alpha = min(1.0, t * 2.0)
+        x = led_x + i * char_w
+        # Glow shadow (offset down-right)
+        _draw_char(draw, ch, x + 1, y + 1, _blend_color(LED_GLOW, alpha),
+                   scale=LED_SCALE)
+        _draw_char(draw, ch, x, y, _blend_color(TEXT_COLOR_LED, alpha),
+                   scale=LED_SCALE)
 
-    # Decorative dots in corners (subtle)
-    corner_alpha = max(0.0, min(1.0, (progress - 0.5) * 3.0))
+
+def _draw_matrix_typewriter(draw, progress, tick):
+    """Draw 'MATRIX' typing itself out with a blinking cursor."""
+    # Typing happens in the second half of the text phase
+    type_progress = max(0.0, (progress - 0.45) / 0.55)
+    shown = min(len(MATRIX_TEXT), int(type_progress * (len(MATRIX_TEXT) + 1)))
+    if shown <= 0 and type_progress <= 0:
+        return
+    full_w = _text_width(MATRIX_TEXT, scale=1, spacing=1)
+    x = (SIZE - full_w) // 2
+    text = MATRIX_TEXT[:shown]
+    if text:
+        _draw_text(draw, text, x, MATRIX_Y, TEXT_COLOR_MATRIX,
+                   scale=1, spacing=1)
+    # Blinking cursor after the last typed char (hidden once complete)
+    if shown < len(MATRIX_TEXT) and (tick // 4) % 2 == 0:
+        cx = x + _text_width(text, scale=1, spacing=1) + (1 if text else 0)
+        draw.rectangle([cx, MATRIX_Y, cx + 2, MATRIX_Y + 6],
+                       fill=TEXT_COLOR_MATRIX)
+
+
+def _draw_text_frame(draw, t, max_t, tick):
+    """Phase 2: letter drop-in + typewriter."""
+    progress = t / max_t
+    _draw_led_letters(draw, progress)
+    _draw_matrix_typewriter(draw, progress, tick)
+
+    # Corner dots fade in late
+    corner_alpha = max(0.0, min(1.0, (progress - 0.7) * 3.0))
     if corner_alpha > 0:
         dc = _blend_color(DOT_COLOR, corner_alpha)
         for cx, cy in [(2, 2), (SIZE - 3, 2), (2, SIZE - 3), (SIZE - 3, SIZE - 3)]:
-            draw.point((cx, cy), fill=dc)
-            draw.point((cx + 1, cy), fill=dc)
-            draw.point((cx, cy + 1), fill=dc)
-            draw.point((cx + 1, cy + 1), fill=dc)
+            for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                draw.point((cx + dx, cy + dy), fill=dc)
 
 
-def _draw_loading_frame(draw, t, max_t):
-    """Draw the text (held) plus an animated loading bar at the bottom."""
+def _draw_loading_frame(draw, t, max_t, tick):
+    """Phase 3: held text + loading bar with shine + version line."""
     progress = t / max_t
 
-    # Keep the text visible
-    _draw_text_frame(draw, max_t, max_t)
+    # Keep the finished text visible
+    _draw_text_frame(draw, max_t, max_t, tick=1)  # tick=1: cursor hidden
 
-    # Loading bar dimensions
-    bar_y = 54
-    bar_h = 4
-    bar_margin = 8
-    bar_x0 = bar_margin
-    bar_x1 = SIZE - bar_margin - 1
+    # Version line (auto-bumping, e.g. V1.1.18)
+    ver = _version_text()
+    vw = _text_width(ver, scale=1, spacing=1)
+    _draw_text(draw, ver, (SIZE - vw) // 2, VERSION_Y,
+               VERSION_COLOR, scale=1, spacing=1)
+
+    # Loading bar
+    bar_x0 = BAR_MARGIN
+    bar_x1 = SIZE - BAR_MARGIN - 1
     bar_w = bar_x1 - bar_x0
+    draw.rectangle([bar_x0, BAR_Y, bar_x1, BAR_Y + BAR_H], fill=BAR_BG)
 
-    # Background
-    draw.rectangle([bar_x0, bar_y, bar_x1, bar_y + bar_h], fill=BAR_BG)
-
-    # Fill with eased progress
     eased = progress * progress * (3 - 2 * progress)  # smoothstep
     fill_w = int(bar_w * eased)
     if fill_w > 0:
-        # Gradient fill: left green -> right bright green
         for x_off in range(fill_w):
             frac = x_off / max(bar_w, 1)
             r = int(BAR_FG[0] + (50 * frac))
             g = int(BAR_FG[1] + (55 * frac))
             b = int(BAR_FG[2] - (50 * frac))
             col = (min(r, 255), min(g, 255), max(b, 0))
-            draw.line(
-                [(bar_x0 + x_off, bar_y + 1),
-                 (bar_x0 + x_off, bar_y + bar_h - 1)],
-                fill=col
-            )
-
-    # Small "LOADING..." text above bar
-    loading_alpha = min(1.0, progress * 3)
-    blink = 1.0 if (int(t * 4) % 2 == 0) else 0.6
-    txt = "LOADING..."
-    tw = _text_width(txt, scale=1, spacing=1)
-    tx = (SIZE - tw) // 2
-    ty = 47
-    _draw_text(draw, txt, tx, ty,
-               _blend_color((100, 100, 120), loading_alpha * blink),
-               scale=1, spacing=1)
+            draw.line([(bar_x0 + x_off, BAR_Y + 1),
+                       (bar_x0 + x_off, BAR_Y + BAR_H - 1)], fill=col)
+        # Moving shine sweeps the filled part
+        shine_x = bar_x0 + int((tick * 2) % max(fill_w, 1))
+        if shine_x <= bar_x0 + fill_w:
+            draw.line([(shine_x, BAR_Y + 1), (shine_x, BAR_Y + BAR_H - 1)],
+                      fill=BAR_SHINE)
 
 
 def show(matrix, duration=None):
@@ -198,10 +221,12 @@ def show(matrix, duration=None):
 
     logger.info("Showing boot screen (%.1fs)", duration)
     start = time.time()
+    rng = random.Random(1234)  # deterministic sparkle
+    tick = 0
 
     # Scale phase durations proportionally if total duration differs
     scale = duration / TOTAL_DURATION
-    p_ring = PHASE_RING * scale
+    p_sweep = PHASE_SWEEP * scale
     p_text = PHASE_TEXT * scale
     p_loading = PHASE_LOADING * scale
 
@@ -215,16 +240,15 @@ def show(matrix, duration=None):
 
             img = Image.new("RGB", (SIZE, SIZE), BG)
             draw = ImageDraw.Draw(img)
+            tick += 1
 
-            if elapsed < p_ring:
-                # Phase 1: Ring burst
-                _draw_ring_frame(draw, elapsed, p_ring)
-            elif elapsed < p_ring + p_text:
-                # Phase 2: Text fade-in
-                _draw_text_frame(draw, elapsed - p_ring, p_text)
+            if elapsed < p_sweep:
+                _draw_sweep_frame(draw, elapsed, p_sweep, rng)
+            elif elapsed < p_sweep + p_text:
+                _draw_text_frame(draw, elapsed - p_sweep, p_text, tick)
             else:
-                # Phase 3: Loading bar
-                _draw_loading_frame(draw, elapsed - p_ring - p_text, p_loading)
+                _draw_loading_frame(draw, elapsed - p_sweep - p_text,
+                                    p_loading, tick)
 
             matrix.SetImage(img)
 

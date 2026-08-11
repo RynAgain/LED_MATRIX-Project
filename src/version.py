@@ -1,4 +1,5 @@
 """Project version derived from git tag, commit hash, or fallback VERSION file."""
+import re
 import subprocess
 import os
 
@@ -51,6 +52,27 @@ def get_version() -> str:
     return _FALLBACK_VERSION
 
 
+def _describe_to_version(described: str) -> str:
+    """Collapse `git describe` output into an auto-bumping version.
+
+    Every commit bumps the visible version with zero release discipline:
+    the commits-since-tag count becomes the PATCH number.
+
+        "v1.1.0-18-g95c876a" -> "1.1.18"   (tag patch + 18 commits)
+        "v1.1.0"             -> "1.1.0"    (exactly on the tag)
+        "95c876a"            -> "95c876a"  (no tag at all: bare hash)
+
+    Tagging a new release (e.g. v1.2.0) resets the count naturally.
+    """
+    text = described.lstrip("v")
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?", text)
+    if not m:
+        return text
+    major, minor, patch, commits = m.groups()
+    total_patch = int(patch) + int(commits or 0)
+    return f"{major}.{minor}.{total_patch}"
+
+
 def _try_git_describe() -> str:
     """Try `git describe --tags --always` for a tag-based version."""
     try:
@@ -62,8 +84,7 @@ def _try_git_describe() -> str:
         if result.returncode == 0:
             tag = result.stdout.strip()
             if tag:
-                # Strip leading 'v' prefix if present for cleaner display
-                return tag.lstrip("v") if tag.startswith("v") else tag
+                return _describe_to_version(tag)
     except Exception:
         pass
     return ""
