@@ -141,6 +141,7 @@ _GAME_LABELS = {
     "portal_arena": "PORTAL",
     "pinball": "PINBALL",
     "galaga": "GALAGA",
+    "missile_command": "MISSILES",
     "space_invaders": "INVADERS",
     "tanks": "TANKS",
 }
@@ -148,7 +149,8 @@ _GAME_LABELS = {
 # A stable display order for games so the menu does not jitter run-to-run
 # (PLAYABLE_GAMES is a set, which is unordered).
 _GAME_ORDER = ["snake", "tetris", "pong", "pinball", "starfox", "galaga",
-               "space_invaders", "tanks", "barricade", "package_boy",
+               "missile_command", "space_invaders", "tanks", "barricade",
+               "package_boy",
                "death_ball", "breakout", "super_breakout", "portal_arena"]
 
 
@@ -191,6 +193,7 @@ _DEMO_LABELS = {
     "month_calendar": "CALENDAR",
     "bitcoin_price": "BITCOIN",
     "space_invaders": "INVADERS",
+    "missile_command": "MISSILES",
     "hail_mary_clock": "HAIL MARY",
     "logo_wholefoods": "WFM LOGO",
     "system_stats": "SYS STATS",

@@ -58,6 +58,7 @@
 - [x] Tanks (artillery combat)
 - [x] Tetris (AI-driven falling blocks)
 - [x] Pinball (Lost World-style scrolling table, 128x500 playfield)
+- [x] Missile Command (six cities, MIRV warheads, crosshair interceptors, chain explosions, wave bonuses, demo AI leads its targets)
 
 ### Original Displays (1 video + 2 utility)
 - [x] Time Display (clock)
