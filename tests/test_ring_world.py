@@ -124,6 +124,65 @@ class TestScene:
         assert sum(night) < 60      # behind the shadow square
 
 
+class TestSmoothness:
+    """Anti-jank regressions: cached rows, connected arch, gentle motion."""
+
+    def test_rows_cached_between_identical_draws(self):
+        scene = RingWorldScene()
+        scene.draw()
+        renders_after_first = scene._row_renders
+        scene.draw()   # same t: every row must come from cache
+        assert scene._row_renders == renders_after_first
+
+    def test_row_rerendered_only_on_scroll_step(self):
+        scene = RingWorldScene()
+        scene.draw()
+        before = scene._row_renders
+        scene.step(0.001)  # far too small to advance any row's scroll step
+        scene.draw()
+        assert scene._row_renders == before
+
+    def test_steady_state_render_rate_bounded(self):
+        """Per second of scene time, each row re-renders about FLY_SPEED
+        times -- not once per frame (that was the shimmer)."""
+        scene = RingWorldScene()
+        scene.draw()
+        start = scene._row_renders
+        frames = int(1.0 / FRAME_DUR)
+        for _ in range(frames):
+            scene.step()
+            scene.draw()
+        renders = scene._row_renders - start
+        from src.display.ring_world import GROUND_ROWS, FLY_SPEED
+        expected_max = GROUND_ROWS * (FLY_SPEED + 2)
+        assert renders <= expected_max
+        assert renders < frames * GROUND_ROWS * 0.5  # far below per-frame
+
+    def test_arch_band_covers_every_column_without_gaps(self):
+        """The arch is a connected band: every screen column it spans must
+        have at least one lit pixel above the horizon (regression for the
+        disconnected column-slice rendering)."""
+        from PIL import Image, ImageDraw
+        scene = RingWorldScene()
+        img = Image.new("RGB", (SIZE, SIZE), (0, 0, 0))
+        scene._draw_arch(ImageDraw.Draw(img), day=1.0)
+        for x in range(SIZE):
+            column = [img.getpixel((x, y)) for y in range(HORIZON_Y)]
+            assert any(sum(px) > 40 for px in column), f"gap at column {x}"
+
+    def test_terrain_changes_gently_per_scroll_step(self):
+        """Adjacent scroll steps must be similar (smooth flow, not static)."""
+        scene = RingWorldScene()
+        deltas = []
+        for x in range(0, SIZE, 4):
+            for zq in range(0, 40, 5):
+                c0 = scene._terrain_color(float(x - 32), zq, row=10)
+                c1 = scene._terrain_color(float(x - 32), zq + 1, row=10)
+                deltas.append(sum(abs(a - b) for a, b in zip(c0, c1)))
+        avg = sum(deltas) / len(deltas)
+        assert avg < 60  # mostly small changes; band edges may jump
+
+
 class TestRunSmoke:
     def test_run_draws_frames(self):
         from src.display import ring_world
