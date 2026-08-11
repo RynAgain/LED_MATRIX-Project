@@ -50,6 +50,31 @@ def _get_branch() -> str:
         return "main"
 
 
+def _fix_dubious_ownership(work_dir) -> bool:
+    """Self-heal git's "dubious ownership" refusal.
+
+    The display service runs as root (GPIO requirement) but the repo is
+    owned by the login user, so git >= 2.35.2 refuses every command with
+    "fatal: detected dubious ownership". safe.directory is only honored
+    from the SYSTEM or global scope, and as root we can write the system
+    config -- so register the repo there and let the caller retry.
+
+    Returns True if the config write succeeded.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "config", "--system", "--add", "safe.directory", work_dir],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            logger.info("Registered %s as git safe.directory (system)", work_dir)
+            return True
+        logger.error("safe.directory fix failed: %s", result.stderr.strip()[:200])
+    except Exception as e:  # noqa: BLE001 - never let the fixer crash the menu
+        logger.error("safe.directory fix error: %s", e)
+    return False
+
+
 def run_force_update(matrix) -> None:
     """Pull latest code from GitHub and restart the display service.
 
@@ -111,6 +136,16 @@ def run_force_update(matrix) -> None:
             cwd=work_dir,
             capture_output=True, text=True, timeout=60
         )
+        if (fetch_result.returncode != 0 and
+                "dubious ownership" in (fetch_result.stderr or "")):
+            # Root vs user-owned repo: register safe.directory and retry once.
+            _show_message(matrix, "FIX GIT..", WARN_COLOR)
+            if _fix_dubious_ownership(work_dir):
+                fetch_result = subprocess.run(
+                    ["git", "fetch", "origin", _branch],
+                    cwd=work_dir,
+                    capture_output=True, text=True, timeout=60
+                )
         if fetch_result.returncode != 0:
             logger.error("git fetch failed: %s", fetch_result.stderr.strip()[:200])
             _show_message(matrix, "FETCH FAIL", ERR_COLOR)
@@ -145,7 +180,7 @@ def run_force_update(matrix) -> None:
     time.sleep(1.0)
 
     # --- Step 2: Restart the display service ---
-    _show_message(matrix, "RESTARTING..", TEXT_COLOR)
+    _show_message(matrix, "RESTART..", TEXT_COLOR)
     time.sleep(0.5)
 
     try:
@@ -158,7 +193,7 @@ def run_force_update(matrix) -> None:
         logger.info("Restart command issued")
     except Exception as e:
         logger.error("Failed to restart service: %s", e)
-        _show_message(matrix, "RESTART FAIL", ERR_COLOR)
+        _show_message(matrix, "NO RESTART", ERR_COLOR)
         time.sleep(2.0)
         return
 

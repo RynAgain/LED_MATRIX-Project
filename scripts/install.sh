@@ -291,6 +291,12 @@ STEP=$((STEP + 1))
 log_info "Step $STEP/$TOTAL_STEPS: Installing systemd services..."
 
 # Display service (runs as root for GPIO/hardware access)
+# The root-run service uses git in this user-owned repo (menu UPDATE,
+# git-describe versioning); register it as a system-level safe.directory
+# so git >= 2.35.2 does not refuse with "dubious ownership".
+if ! git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$PROJECT_ROOT"; then
+    git config --system --add safe.directory "$PROJECT_ROOT" || true
+fi
 cp "$PROJECT_ROOT/services/led-matrix.service" /etc/systemd/system/led-matrix.service
 sed -i "s|/home/ryn/LED_MATRIX-Project|$PROJECT_ROOT|g" /etc/systemd/system/led-matrix.service
 sed -i "s|HOME=/home/ryn|HOME=$ACTUAL_HOME|g" /etc/systemd/system/led-matrix.service

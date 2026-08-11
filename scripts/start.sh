@@ -39,6 +39,19 @@ else
     log "Dependencies OK"
 fi
 
+# --- Git safe.directory (service runs as root, repo is user-owned) ---
+# git >= 2.35.2 refuses to touch a repo owned by another user ("dubious
+# ownership"), which broke the menu's UPDATE fetch and git-describe
+# versioning. Register the project in the SYSTEM config (the only scope
+# git trusts for safe.directory). Idempotent: only adds if missing.
+if command -v git >/dev/null 2>&1; then
+    if ! git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$PROJECT_ROOT"; then
+        git config --system --add safe.directory "$PROJECT_ROOT" 2>/dev/null \
+            && log "Registered $PROJECT_ROOT as a git safe.directory" \
+            || log "WARNING: could not register git safe.directory"
+    fi
+fi
+
 # --- Launch the display service ---
 log "Starting LED matrix display service..."
 exec "$VENV_PYTHON" "$PROJECT_ROOT/src/main.py"
