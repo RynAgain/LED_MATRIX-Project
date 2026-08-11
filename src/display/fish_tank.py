@@ -16,7 +16,7 @@ import time
 import math
 import random
 import logging
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 from src.display._shared import should_stop
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,16 @@ FISH_PALETTES = [
 BUBBLE_COLOR = (100, 180, 255)
 BUBBLE_HIGHLIGHT = (200, 230, 255)
 
+# Food flakes (feeding events)
+FLAKE_COLORS = [(220, 170, 80), (200, 140, 60), (230, 190, 110)]
+FEED_INTERVAL_MIN = 15 * FPS   # ticks between feeding events
+FEED_INTERVAL_MAX = 35 * FPS
+FLAKE_SEEK_RADIUS = 28.0       # fish notice food within this distance
+FLAKE_EAT_RADIUS = 2.5
+
+# Light rays / caustics
+RAY_COLOR = (36, 55, 75)       # additive tint, strongest at the surface
+
 
 class Fish:
     """A single fish swimming in the tank."""
@@ -84,17 +94,43 @@ class Fish:
         # Eye position relative to body front
         self.eye_offset = max(1, self.size - 2)
 
-    def update(self, tick, other_fish):
+    def update(self, tick, other_fish, flakes=None):
         """Update fish position and behavior."""
         # Tail animation
         self.tail_phase += 0.4
 
+        # Food seeking: dart toward the nearest flake in range and eat it.
+        seeking = False
+        if flakes:
+            best, best_d2 = None, FLAKE_SEEK_RADIUS * FLAKE_SEEK_RADIUS
+            for flake in flakes:
+                if flake.eaten:
+                    continue
+                fdx = flake.x - self.x
+                fdy = flake.y - self.y
+                d2 = fdx * fdx + fdy * fdy
+                if d2 < best_d2:
+                    best, best_d2 = flake, d2
+            if best is not None:
+                seeking = True
+                if best_d2 <= FLAKE_EAT_RADIUS * FLAKE_EAT_RADIUS:
+                    best.eaten = True
+                    seeking = False
+                else:
+                    if abs(best.x - self.x) > 1.0:
+                        self.direction = 1 if best.x > self.x else -1
+                    # Swim harder toward food, pull vertically toward it
+                    self.x += self.speed * 0.8 * self.direction
+                    dy = best.y - self.y
+                    self.y += max(-0.5, min(0.5, dy * 0.12))
+
         # Horizontal movement
         self.x += self.speed * self.direction
 
-        # Gentle vertical drift (sinusoidal)
+        # Gentle vertical drift (sinusoidal) -- skipped while chasing food
         self.drift_phase += 0.03
-        self.y += math.sin(self.drift_phase) * 0.15 + self.vy
+        if not seeking:
+            self.y += math.sin(self.drift_phase) * 0.15 + self.vy
 
         # Boundary avoidance (turn around before hitting walls)
         margin = self.size + 2
@@ -431,6 +467,163 @@ class Angelfish:
             draw_ctx.point((eye_x, iy), fill=(0, 0, 0))
 
 
+class Flake:
+    """A food flake sinking from the surface during a feeding event."""
+
+    def __init__(self, x, y=1.0):
+        self.x = float(x)
+        self.y = float(y)
+        self.vy = random.uniform(0.10, 0.22)
+        self.drift_phase = random.uniform(0, math.pi * 2)
+        self.color = random.choice(FLAKE_COLORS)
+        self.eaten = False
+
+    def update(self):
+        """Sink slowly. Returns False when eaten or settled on the sand."""
+        if self.eaten:
+            return False
+        self.y += self.vy
+        self.drift_phase += 0.08
+        self.x += math.sin(self.drift_phase) * 0.12
+        return self.y < HEIGHT - 9  # vanishes when it reaches the sand
+
+    def draw(self, draw_ctx):
+        ix, iy = int(self.x), int(self.y)
+        if 0 <= ix < WIDTH and 0 <= iy < HEIGHT:
+            draw_ctx.point((ix, iy), fill=self.color)
+
+
+class School:
+    """A tight school of tiny minnows that dart around as one."""
+
+    SIZE_MIN, SIZE_MAX = 6, 9
+
+    def __init__(self):
+        n = random.randint(self.SIZE_MIN, self.SIZE_MAX)
+        cx = random.uniform(16, WIDTH - 16)
+        cy = random.uniform(12, HEIGHT - 22)
+        self.minnows = [
+            [cx + random.uniform(-4, 4), cy + random.uniform(-3, 3)]
+            for _ in range(n)
+        ]
+        angle = random.uniform(0, math.pi * 2)
+        self.vx = math.cos(angle) * 0.9
+        self.vy = math.sin(angle) * 0.3
+        self.color = random.choice([
+            (150, 200, 255),   # silver-blue
+            (200, 220, 180),   # pale green
+            (255, 210, 150),   # sandy gold
+        ])
+        self.turn_timer = random.randint(FPS * 2, FPS * 6)
+
+    def _centroid(self):
+        n = len(self.minnows)
+        return (sum(m[0] for m in self.minnows) / n,
+                sum(m[1] for m in self.minnows) / n)
+
+    def update(self, flakes=None):
+        cx, cy = self._centroid()
+
+        # Steer toward food if any is in range
+        target = None
+        if flakes:
+            best_d2 = FLAKE_SEEK_RADIUS * FLAKE_SEEK_RADIUS
+            for flake in flakes:
+                if flake.eaten:
+                    continue
+                d2 = (flake.x - cx) ** 2 + (flake.y - cy) ** 2
+                if d2 < best_d2:
+                    target, best_d2 = flake, d2
+        if target is not None:
+            dx, dy = target.x - cx, target.y - cy
+            dist = math.hypot(dx, dy) or 1.0
+            self.vx += (dx / dist) * 0.12
+            self.vy += (dy / dist) * 0.08
+        else:
+            # Occasional random dart in a new direction
+            self.turn_timer -= 1
+            if self.turn_timer <= 0:
+                angle = random.uniform(0, math.pi * 2)
+                self.vx = math.cos(angle) * random.uniform(0.6, 1.1)
+                self.vy = math.sin(angle) * random.uniform(0.15, 0.4)
+                self.turn_timer = random.randint(FPS * 2, FPS * 6)
+
+        # Clamp speed
+        speed = math.hypot(self.vx, self.vy)
+        if speed > 1.2:
+            self.vx *= 1.2 / speed
+            self.vy *= 1.2 / speed
+
+        # Bounce the whole school off walls
+        if cx < 8 and self.vx < 0:
+            self.vx = abs(self.vx)
+        elif cx > WIDTH - 8 and self.vx > 0:
+            self.vx = -abs(self.vx)
+        if cy < 8 and self.vy < 0:
+            self.vy = abs(self.vy)
+        elif cy > HEIGHT - 16 and self.vy > 0:
+            self.vy = -abs(self.vy)
+
+        for m in self.minnows:
+            # Shared velocity + cohesion pull toward centroid + jitter
+            m[0] += self.vx + (cx - m[0]) * 0.03 + random.uniform(-0.15, 0.15)
+            m[1] += self.vy + (cy - m[1]) * 0.03 + random.uniform(-0.1, 0.1)
+            m[1] = max(6.0, min(float(HEIGHT - 12), m[1]))
+
+            # Minnows eat too
+            if flakes:
+                for flake in flakes:
+                    if (not flake.eaten and
+                            abs(flake.x - m[0]) <= FLAKE_EAT_RADIUS and
+                            abs(flake.y - m[1]) <= FLAKE_EAT_RADIUS):
+                        flake.eaten = True
+
+    def draw(self, draw_ctx):
+        d = 1 if self.vx >= 0 else -1
+        tail = tuple(c // 2 for c in self.color)
+        for m in self.minnows:
+            ix, iy = int(m[0]), int(m[1])
+            if 0 <= ix < WIDTH and 0 <= iy < HEIGHT:
+                draw_ctx.point((ix, iy), fill=self.color)
+            tx = ix - d
+            if 0 <= tx < WIDTH and 0 <= iy < HEIGHT:
+                draw_ctx.point((tx, iy), fill=tail)
+
+
+def _build_rays_image(bg_image):
+    """Pre-render the background WITH light rays baked in.
+
+    Per frame the tank blends between the plain background and this one
+    (single C-level Image.blend), which makes the rays swell and fade with
+    zero per-pixel Python work at draw time.
+    """
+    rays = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
+    rdraw = ImageDraw.Draw(rays)
+    ray_defs = [(10, 5, 0.55), (30, 7, 0.4), (50, 4, 0.5)]  # (top_x, width, slope)
+    for top_x, width, slope in ray_defs:
+        for y in range(HEIGHT - 8):
+            depth = 1.0 - y / float(HEIGHT - 8)   # fade with depth
+            x0 = int(top_x + y * slope)
+            for i in range(width):
+                x = x0 + i
+                if 0 <= x < WIDTH:
+                    # Soft edges: dimmer at the sides of the beam
+                    edge = 1.0 - abs((i - (width - 1) / 2.0) / (width / 2.0)) * 0.6
+                    c = tuple(int(v * depth * edge) for v in RAY_COLOR)
+                    rdraw.point((x, y), fill=c)
+    return ImageChops.add(bg_image, rays)
+
+
+def _draw_surface_shimmer(draw, tick):
+    """Animated light ripple along the water surface (top two rows)."""
+    for x in range(WIDTH):
+        v = math.sin(x * 0.45 + tick * 0.18) + math.sin(x * 0.13 - tick * 0.07)
+        if v > 1.0:
+            draw.point((x, 0), fill=(70, 130, 190))
+        elif v > 0.4:
+            draw.point((x, 1), fill=(30, 70, 120))
+
+
 def _draw_background(draw):
     """Draw the tank background: water gradient + sand bottom."""
     # Water gradient (top to bottom)
@@ -479,13 +672,21 @@ def run(matrix, duration=60):
         ph = random.randint(5, 12)
         plants.append(Plant(px, ph))
 
-    # Bubbles list
-    bubbles = []
+    # Minnow school
+    school = School()
 
-    # Pre-render background (static, only computed once)
+    # Bubbles and food flakes
+    bubbles = []
+    flakes = []
+    next_feed_tick = random.randint(FEED_INTERVAL_MIN // 3, FEED_INTERVAL_MAX)
+
+    # Pre-render background (static, only computed once) and a second copy
+    # with light rays baked in; per-frame we blend between the two so the
+    # rays breathe without any per-pixel work.
     bg_image = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
     bg_draw = ImageDraw.Draw(bg_image)
     _draw_background(bg_draw)
+    bg_rays = _build_rays_image(bg_image)
 
     try:
         while time.time() - start_time < duration:
@@ -494,13 +695,32 @@ def run(matrix, duration=60):
             frame_start = time.time()
             tick += 1
 
-            # Start with the pre-rendered background
-            image = bg_image.copy()
+            # Start with the background, rays breathing via a single blend
+            ray_alpha = 0.35 + 0.3 * math.sin(tick * 0.02) + 0.15 * math.sin(tick * 0.047)
+            ray_alpha = max(0.0, min(1.0, ray_alpha))
+            image = Image.blend(bg_image, bg_rays, ray_alpha)
             draw = ImageDraw.Draw(image)
+
+            # Surface shimmer
+            _draw_surface_shimmer(draw, tick)
 
             # Draw plants (behind fish)
             for plant in plants:
                 plant.draw(draw, tick)
+
+            # Feeding events: sprinkle flakes from the surface now and then
+            if tick >= next_feed_tick:
+                feed_x = random.uniform(10, WIDTH - 10)
+                for _ in range(random.randint(6, 10)):
+                    flakes.append(Flake(feed_x + random.uniform(-5, 5),
+                                        y=random.uniform(0, 3)))
+                next_feed_tick = tick + random.randint(FEED_INTERVAL_MIN,
+                                                       FEED_INTERVAL_MAX)
+
+            # Update and draw flakes
+            flakes = [f for f in flakes if f.update()]
+            for flake in flakes:
+                flake.draw(draw)
 
             # Update and draw bubbles
             bubbles = [b for b in bubbles if b.update()]
@@ -521,11 +741,21 @@ def run(matrix, duration=60):
                 crab.update(tick)
                 crab.draw(draw, tick)
 
+            # Update and draw the minnow school (behind the big fish)
+            school.update(flakes)
+            school.draw(draw)
+
             # Update and draw fish
             for fish in fish_list:
-                fish.update(tick, fish_list)
+                fish.update(tick, fish_list, flakes)
             for fish in fish_list:
                 fish.draw(draw, tick)
+
+            # Fish occasionally blow a bubble from the mouth
+            if fish_list and random.random() < 0.02:
+                fish = random.choice(fish_list)
+                nose_x = fish.x + fish.direction * (fish.size // 2 + 1)
+                bubbles.append(Bubble(x=nose_x, y=fish.y - 1))
 
             # Update and draw angelfish (in front of regular fish)
             for angel in angelfish_list:
