@@ -93,6 +93,8 @@
 - [x] GitHub Stats (contribution heatmap)
 - [x] System Stats (CPU, RAM, disk usage)
 - [x] Logo Wholefoods (branded logo display)
+- [x] Flight Radar (live ADS-B aircraft on an Austin street-map scope)
+- [x] Rain Radar (RainViewer precipitation history + nowcast animated over the same Austin basemap)
 
 ---
 

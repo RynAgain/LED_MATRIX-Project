@@ -190,6 +190,7 @@ def build_games_menu(playable=None) -> Menu:
 _DEMO_LABELS = {
     "big_eye": "BIG EYE",
     "flight_radar": "AIR RADAR",
+    "rain_radar": "RAINRADAR",
     "month_calendar": "CALENDAR",
     "bitcoin_price": "BITCOIN",
     "space_invaders": "INVADERS",

@@ -93,6 +93,7 @@ DISPLAY_MODULES = [
     "src.display.fractal",
     "src.display.big_eye",
     "src.display.flight_radar",
+    "src.display.rain_radar",
 ]
 
 
@@ -356,6 +357,16 @@ class TestDisplayModuleInterface:
             mod.run(matrix, duration=2)
         tracker.stop()
         assert tracker.had_output, "sp500_heatmap produced no visual output"
+
+    def test_rain_radar_runs_briefly(self, matrix):
+        """Rain radar should draw its basemap even with the network down."""
+        tracker = _PixelTracker(matrix).start()
+        with patch("src.display.rain_radar.requests.get",
+                   side_effect=Exception("mocked network")):
+            mod = importlib.import_module("src.display.rain_radar")
+            mod.run(matrix, duration=2)
+        tracker.stop()
+        assert tracker.had_output, "rain_radar produced no visual output"
 
     # ----------------------------------------------------------------
     # Execution tests: special modules
