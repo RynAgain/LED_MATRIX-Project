@@ -77,6 +77,7 @@
 - [x] Wireframe (rotating 3D polygon shapes)
 - [x] Maze 3D (first-person maze walker)
 - [x] Terrain Ball (rolling ball on procedural terrain)
+- [x] Ring World (Niven Ring flyover: scrolling terrain, ring arch overhead, shadow-square day/night, arch stays lit at night)
 
 ### Utilities (13)
 - [x] Weather (live weather display)

@@ -60,6 +60,7 @@ DISPLAY_MODULES = [
     "src.display.pong",
     "src.display.breakout",
     "src.display.missile_command",
+    "src.display.ring_world",
     "src.display.billiards",
     "src.display.time_display",
     "src.display.bitcoin_price",

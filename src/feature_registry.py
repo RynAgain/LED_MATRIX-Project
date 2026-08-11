@@ -34,6 +34,7 @@ FEATURE_MODULES = {
     "slideshow": "src.display.slideshow",
     "galaga": "src.display.galaga",
     "missile_command": "src.display.missile_command",
+    "ring_world": "src.display.ring_world",
     "space_invaders": "src.display.space_invaders",
     "logo_wholefoods": "src.display.logo_wholefoods",
     "github_stats": "src.display.github_stats",

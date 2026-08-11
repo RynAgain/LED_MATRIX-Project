@@ -209,6 +209,7 @@ _DEMO_LABELS = {
     "base6_clock": "BASE6 CLK",
     "time_display": "CLOCK",
     "living_world": "WORLD",
+    "ring_world": "RINGWORLD",
     "moon_tracker": "MOON",
     "game_of_life": "LIFE",
     "matrix_rain": "MATRIX",
