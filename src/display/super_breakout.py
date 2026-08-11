@@ -267,6 +267,8 @@ class SuperBreakoutGame:
 
         # Rotation animation state
         self.rotating = False
+        self.paddle_rot_from = self.paddle_x
+        self.paddle_rot_target = self.paddle_x
         self.rotation_frame = 0
         self.rotation_dir = 0
         self.old_face = 0
@@ -353,6 +355,13 @@ class SuperBreakoutGame:
         self.rotation_dir = direction
         self.old_face = self.current_face
         self.new_face = (self.current_face + direction) % 4
+        # Paddle continuity: the view shifts one full face-width, so carry the
+        # paddle's world position across the rotation and clamp it on-screen.
+        # Rotating right lands the paddle at the LEFT edge -- exactly where a
+        # ball that exited the right edge re-enters on the new face.
+        self.paddle_rot_from = self.paddle_x
+        self.paddle_rot_target = max(
+            0.0, min(float(SIZE - PADDLE_WIDTH), self.paddle_x - direction * SIZE))
         # Spawn edge particles for the rotation
         self._spawn_rotation_particles(direction)
 
@@ -498,10 +507,18 @@ class SuperBreakoutGame:
         # Handle rotation animation
         if self.rotating:
             self.rotation_frame += 1
+            # Slide the paddle with the world (same easing as the face slide)
+            # so it stays continuous instead of freezing at its old screen x.
+            t = _ease_in_out_cubic(
+                min(1.0, self.rotation_frame / float(ROTATION_FRAMES)))
+            self.paddle_x = _lerp(self.paddle_rot_from, self.paddle_rot_target, t)
+            if self.ball and self.ball.stuck:
+                self.ball.x = self.paddle_x + PADDLE_WIDTH / 2.0
             if self.rotation_frame >= ROTATION_FRAMES:
                 self.rotating = False
                 self.current_face = self.new_face
                 self.rotation_frame = 0
+                self.paddle_x = self.paddle_rot_target
             # Update particles during rotation
             self.particles = [p for p in self.particles if p.update()]
             return "playing"
