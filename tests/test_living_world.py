@@ -4369,3 +4369,46 @@ class TestWorldResetCommand:
                                     [[0] * WORLD_WIDTH for _ in range(DISPLAY_HEIGHT)],
                                     [], 0, 0)
         assert getattr(weather, "_reset_requested", False) is False
+
+
+class TestMatureSaveStillRuns:
+    """Regression: a saved world whose accumulated 'elapsed' exceeded the
+    demo duration used to exit before drawing a single frame, because the
+    duration check ran against the wound-back world-time epoch instead of
+    this run's wall clock ("living world crashes immediately")."""
+
+    def _run_with_saved_elapsed(self, tmp_path, monkeypatch, elapsed):
+        from unittest.mock import MagicMock, patch
+        from src.display.living_world import persistence, simulation
+
+        save_path = str(tmp_path / "living_world_save.json")
+        monkeypatch.setattr(persistence, "_SAVE_PATH", save_path)
+
+        # Build a real save by running once from scratch, then age it.
+        matrix = MagicMock()
+        with patch("src.display.living_world.simulation.should_stop",
+                   return_value=False):
+            simulation.run(matrix, duration=0.5)
+        import json
+        with open(save_path) as fp:
+            data = json.load(fp)
+        data["elapsed"] = elapsed
+        with open(save_path, "w") as fp:
+            json.dump(data, fp)
+
+        matrix = MagicMock()
+        with patch("src.display.living_world.simulation.should_stop",
+                   return_value=False):
+            simulation.run(matrix, duration=0.5)
+        return matrix
+
+    def test_world_older_than_duration_still_draws(self, tmp_path, monkeypatch):
+        # 10 hours of accumulated world time vs a 0.5s demo slot
+        matrix = self._run_with_saved_elapsed(tmp_path, monkeypatch,
+                                              elapsed=36000.0)
+        assert matrix.SetImage.call_count >= 2
+
+    def test_fresh_world_still_draws(self, tmp_path, monkeypatch):
+        matrix = self._run_with_saved_elapsed(tmp_path, monkeypatch,
+                                              elapsed=0.0)
+        assert matrix.SetImage.call_count >= 2

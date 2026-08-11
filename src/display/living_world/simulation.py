@@ -267,11 +267,18 @@ def run(matrix, duration=900):
             if 0 <= sy < DISPLAY_HEIGHT and world[sy][x] == GRASS:
                 if not any(f.x == x for f in flowers):
                     flowers.append(Flower(x, sy, random.choice(FLOWER_COLORS)))
+    # World-time epoch: wound back by the saved elapsed so the day/night
+    # phase resumes where it left off. This clock ages across sessions, so
+    # it must never gate the run duration -- once a saved world had lived
+    # longer than one demo slot, the old check exited before drawing a
+    # single frame ("living world crashes immediately").
     start_time = time.time() - _saved_elapsed
+    # Wall-clock start of THIS run: the only clock the duration check uses.
+    run_start = time.time()
     image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     try:
         while not should_stop():
-            if duration > 0 and time.time() - start_time >= duration:
+            if duration > 0 and time.time() - run_start >= duration:
                 break
             # --- Check for world reset request (e.g. from web UI) ---
             if getattr(weather, '_reset_requested', False):
