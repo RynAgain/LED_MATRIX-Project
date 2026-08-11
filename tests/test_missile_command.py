@@ -275,3 +275,72 @@ class TestRunSmoke:
             missile_command.run(matrix, duration=0.5)
         assert matrix.SetImage.call_count >= 2
         matrix.Clear.assert_called()
+
+
+class TestAIFireDiscipline:
+    def _lone_enemy_game(self, tx=32, speed=0.3):
+        game = MissileCommandGame()
+        game._to_spawn = 0
+        game._spawn_timer = 10**9
+        enemy = EnemyMissile(tx, 0, tx, CITY_Y, speed=speed)
+        enemy.y = 12.0
+        game.enemies = [enemy]
+        return game
+
+    def test_ai_does_not_double_target_a_covered_enemy(self):
+        """One warhead must cost at most one round (plus one miss retry)."""
+        game = self._lone_enemy_game(tx=25)
+        ammo0 = game.ammo
+        for _ in range(600):
+            if game.step(ai_mode=True) != "playing":
+                break
+        assert not game.enemies, "AI never dealt with the lone warhead"
+        assert ammo0 - game.ammo <= 2, (
+            f"AI wasted {ammo0 - game.ammo} rounds on one warhead")
+
+    def test_ai_intercepts_a_lone_threat_before_impact(self):
+        game = self._lone_enemy_game(tx=CITY_XS[2])
+        alive0 = sum(1 for c in game.cities if c["alive"])
+        for _ in range(600):
+            if game.step(ai_mode=True) != "playing":
+                break
+        assert sum(1 for c in game.cities if c["alive"]) == alive0
+
+    def test_ai_holds_fire_on_dead_ground_when_ammo_is_tight(self):
+        """A warhead falling on rubble is not worth one of the last rounds."""
+        game = MissileCommandGame()
+        game._to_spawn = 0
+        game._spawn_timer = 10**9
+        dead_x = CITY_XS[0]
+        for c in game.cities:
+            if c["x"] == dead_x:
+                c["alive"] = False
+        game.ammo = 2
+        enemy = EnemyMissile(dead_x, 0, dead_x, CITY_Y, speed=0.3)
+        enemy.y = 12.0
+        game.enemies = [enemy]
+        for _ in range(600):
+            if game.step(ai_mode=True) != "playing":
+                break
+        assert game.ammo == 2, "AI wasted scarce ammo on a dud"
+
+    def test_ai_survival_benchmark(self):
+        """Seeded end-to-end run: the AI must hold the line for many waves.
+
+        The pre-discipline AI died on wave 4 with 3 cities on this seed;
+        anything below wave 6 with 2 cities is a regression.
+        """
+        import random as _random
+        _random.seed(11)
+        game = MissileCommandGame()
+        for _ in range(30 * 60 * 6):    # up to six simulated minutes
+            result = game.step(ai_mode=True)
+            if result == "wave_clear":
+                game.next_wave()
+                if game.wave >= 6:
+                    break
+            elif result == "game_over":
+                break
+        assert not game.game_over
+        assert game.wave >= 6
+        assert sum(1 for c in game.cities if c["alive"]) >= 2

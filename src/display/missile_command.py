@@ -353,28 +353,101 @@ class MissileCommandGame:
     # Demo AI
     # ------------------------------------------------------------------
 
+    def _ai_covered(self, enemy):
+        """Is this warhead already dealt with by a round in the air?
+
+        A second interceptor spent on a covered warhead is a wasted round,
+        and wasted rounds are what lose the late waves (20 rounds vs up to
+        22 warheads).
+        """
+        for it in self.interceptors:
+            eta = math.hypot(it.target_x - it.x,
+                             it.target_y - it.y) / INTERCEPTOR_SPEED
+            ex = enemy.x + enemy.vx * eta
+            ey = enemy.y + enemy.vy * eta
+            if math.hypot(ex - it.target_x,
+                          ey - it.target_y) <= EXPLOSION_MAX_RADIUS - 1.5:
+                return True
+        # About to fall through a live fireball anyway.
+        for e in self.explosions:
+            if e.phase != "shrink" and e.contains(enemy.x + enemy.vx * 2,
+                                                  enemy.y + enemy.vy * 2):
+                return True
+        return False
+
+    def _ai_threatens_structure(self, enemy):
+        """Will this warhead actually destroy something that is alive?"""
+        tx = enemy.target_x
+        if self.battery_alive and abs(BATTERY_X - tx) <= 3:
+            return True
+        return any(c["alive"] and abs(c["x"] - tx) <= 3 for c in self.cities)
+
+    def _ai_intercept_point(self, enemy):
+        """(aim_x, aim_y, eta, t_pass): where and when to detonate.
+
+        eta counts both the crosshair travel and the interceptor flight;
+        t_pass is when the warhead reaches the aim point. The shot only
+        works if the fireball is up by then (eta <= t_pass, plus the hold
+        the explosion lingers for).
+        """
+        aim_x, aim_y = enemy.x, enemy.y
+        eta = 0.0
+        for _ in range(3):
+            move = math.hypot(aim_x - self.cursor_x,
+                              aim_y - self.cursor_y) / CURSOR_SPEED
+            fly = math.hypot(aim_x - BATTERY_X,
+                             aim_y - BATTERY_TIP_Y) / INTERCEPTOR_SPEED
+            eta = move + fly
+            aim_x = enemy.x + enemy.vx * eta
+            aim_y = enemy.y + enemy.vy * eta
+        aim_x = max(2.0, min(float(SIZE - 3), aim_x))
+        aim_y = max(float(CURSOR_MIN_Y), min(float(CURSOR_MAX_Y), aim_y))
+        if enemy.vy > 0.001:
+            t_pass = (aim_y - enemy.y) / enemy.vy
+        else:
+            t_pass = eta
+        return aim_x, aim_y, eta, t_pass
+
+    def _ai_pick_target(self):
+        """The most urgent warhead worth a round, or None.
+
+        Priorities, in order: not already covered; can actually be reached
+        in time; threatens a live structure (or is a MIRV bus, which is
+        cheapest to kill before it splits); least time left to impact.
+        Duds falling on dead ground are only engaged for points when there
+        is ammo to spare.
+        """
+        best = None
+        best_key = None
+        for enemy in self.enemies:
+            if enemy.dead or enemy.y < 4:
+                continue
+            if self._ai_covered(enemy):
+                continue
+            vital = self._ai_threatens_structure(enemy) or enemy.can_split
+            if not vital and self.ammo <= len(self.enemies) + self._to_spawn + 2:
+                continue        # keep the magazine for real threats
+            aim_x, aim_y, eta, t_pass = self._ai_intercept_point(enemy)
+            if eta > t_pass + EXPLOSION_HOLD * 0.5:
+                continue        # cannot get a fireball there in time
+            frames_left = (enemy.target_y - enemy.y) / max(0.01, enemy.vy)
+            if t_pass > frames_left:
+                continue        # it lands before it reaches the aim point
+            key = (0 if vital else 1, frames_left)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (aim_x, aim_y)
+        return best
+
     def _ai_defend(self):
-        """Lead the most threatening warhead and fire when lined up."""
+        """Pick the most urgent uncovered warhead, lead it, fire once."""
         if self._ai_fire_cooldown > 0:
             self._ai_fire_cooldown -= 1
 
-        # Most threatening: closest to the ground
-        threat = None
-        for enemy in self.enemies:
-            if enemy.dead or enemy.y < 6:
-                continue
-            if threat is None or enemy.y > threat.y:
-                threat = enemy
-        if threat is None:
+        pick = self._ai_pick_target()
+        if pick is None:
             return
-
-        # Lead: where will it be when an interceptor could arrive?
-        flight_frames = math.hypot(threat.x - BATTERY_X,
-                                   threat.y - BATTERY_TIP_Y) / INTERCEPTOR_SPEED
-        aim_x = threat.x + threat.vx * flight_frames
-        aim_y = threat.y + threat.vy * flight_frames
-        aim_x = max(2.0, min(float(SIZE - 3), aim_x))
-        aim_y = max(float(CURSOR_MIN_Y), min(float(CURSOR_MAX_Y), aim_y))
+        aim_x, aim_y = pick
 
         # Slide the crosshair toward the aim point
         dx = aim_x - self.cursor_x
@@ -386,7 +459,7 @@ class MissileCommandGame:
         else:
             self.cursor_x, self.cursor_y = aim_x, aim_y
             if self._ai_fire_cooldown <= 0 and self.fire():
-                self._ai_fire_cooldown = int(FPS * 0.4)
+                self._ai_fire_cooldown = int(FPS * 0.25)
 
     # ------------------------------------------------------------------
     # Drawing
