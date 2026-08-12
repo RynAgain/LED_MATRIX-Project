@@ -61,7 +61,14 @@ POLL_SECONDS = 300.0        # RainViewer publishes every ~10 minutes
 FRAME_DWELL = 0.5           # seconds per animation frame
 HOLD_DWELL = 2.0            # extra dwell on the newest observed frame
 
-ECHO_MIN_ALPHA = 25         # below this the resampled echo is noise
+ECHO_MIN_ALPHA = 40         # below this the resampled echo is noise
+
+# RainViewer's composite paints large fields of near-transparent khaki
+# over dry air (verified live: ~5% of the Austin box on a rain-free day,
+# alpha 32-95). Those pixels rank 0.05-0.08 in _intensity; anything below
+# this floor is dropped instead of rendered as drizzle. Real echoes
+# (blues and up) rank 0.15+.
+RAIN_MIN_RANK = 0.10
 
 # Intensity rank (0..1, from _intensity) -> LED colour ramp.
 RAIN_BANDS = [
@@ -164,7 +171,10 @@ def _colorize(rgb, alpha):
             a = ap[x, y]
             if a < ECHO_MIN_ALPHA:
                 continue
-            r, g, b = _color_for(_intensity(*rp[x, y][:3]))
+            rank = _intensity(*rp[x, y][:3])
+            if rank < RAIN_MIN_RANK:
+                continue    # dry-air khaki / grey haze, not rain
+            r, g, b = _color_for(rank)
             op[x, y] = (r, g, b, min(255, int(a * 2.2)))
     return out
 

@@ -121,6 +121,23 @@ def test_colorize_maps_echo_and_keeps_silence_transparent():
     assert out.getpixel((0, 0)) == (0, 0, 0, 0)
 
 
+def test_colorize_drops_dry_air_khaki_clutter():
+    """RainViewer paints translucent khaki over dry air; it must not
+    render as drizzle even when its alpha clears the noise floor."""
+    rgb = Image.new("RGB", (8, 8), (0, 0, 0))
+    alpha = Image.new("L", (8, 8), 0)
+    rgb.putpixel((1, 1), (210, 196, 139))        # khaki haze, live-sampled
+    alpha.putpixel((1, 1), 90)                   # well above ECHO_MIN_ALPHA
+    rgb.putpixel((3, 3), (150, 150, 150))        # grey haze
+    alpha.putpixel((3, 3), 90)
+    rgb.putpixel((6, 6), (0, 98, 149))           # dark blue: real rain
+    alpha.putpixel((6, 6), 90)
+    out = _colorize(rgb, alpha)
+    assert out.getpixel((1, 1)) == (0, 0, 0, 0)
+    assert out.getpixel((3, 3)) == (0, 0, 0, 0)
+    assert out.getpixel((6, 6))[3] > 0
+
+
 def test_resample_echo_does_not_dilute_cell_interiors():
     """Alpha-weighted resize must keep a solid cell's colour intact."""
     rgb = Image.new("RGB", (128, 128), (0, 0, 0))
