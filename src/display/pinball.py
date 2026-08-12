@@ -60,6 +60,7 @@ BALL_RADIUS = 2
 BALL_FRICTION = 0.998
 BALL_MAX_SPEED = 9.0
 FLIPPER_POWER = 7.5
+HELD_FLIPPER_FACTOR = 0.85   # a held-up flipper pushes, a live stroke smacks
 FLIP_UP_SPEED = 0.45     # rad/frame during the up-stroke (snappy)
 FLIP_DOWN_SPEED = 0.18   # rad/frame returning to rest
 WALL_RESTITUTION = 0.62  # normal-bounce energy retained off walls
@@ -300,6 +301,7 @@ class Flipper:
         self.side = side
         self.active = False
         self.omega = 0.0
+        self.prev_angle = rest
 
     def set_active(self, state):
         self.active = state
@@ -307,6 +309,7 @@ class Flipper:
     def update(self):
         # Constant angular speed (not a lerp) so omega stays strong through
         # the whole stroke -- hits near the end of travel still have power.
+        self.prev_angle = self.angle
         target = self.up_angle if self.active else self.rest_angle
         diff = target - self.angle
         max_step = FLIP_UP_SPEED if self.active else FLIP_DOWN_SPEED
@@ -319,6 +322,8 @@ class Flipper:
                 self.py + FLIP_LENGTH * math.sin(self.angle))
 
     def hit_ball(self, ball):
+        if self._hit_swept(ball):
+            return True
         tx, ty = self.get_tip()
         dx, dy = tx - self.px, ty - self.py
         seg_len_sq = dx * dx + dy * dy
@@ -349,16 +354,31 @@ class Flipper:
                 rvy -= 2 * dot * ny * 0.85
             ball.vx = rvx + sv_x * 1.6
             ball.vy = rvy + sv_y * 1.6
-            # An active up-stroke guarantees a solid minimum launch, with a
+            # An active flipper guarantees a solid minimum launch, with a
             # power gradient: tip hits (t~1) are stronger than base hits.
             # Only when the contact normal faces upward -- a ball caught on
             # the underside of the arm just gets the reflection.
-            if self.active and abs(self.omega) > 0.05 and ny < 0:
+            #
+            # The launch must NOT require the arm to still be mid-stroke:
+            # the up-stroke lasts ~2 frames, so gating on omega gave a
+            # ~0.15 s timing window and anything pressed earlier produced a
+            # dead rebound (press 8+ frames early and the ball never left
+            # the flipper at all). A flipper HELD up now delivers a firm
+            # reduced-power push, and only a live stroke gets full power.
+            if self.active and ny < 0:
                 power = FLIPPER_POWER * (0.55 + 0.45 * t)
+                if abs(self.omega) <= 0.05:
+                    power *= HELD_FLIPPER_FACTOR
                 launch = ball.vx * nx + ball.vy * ny
                 if launch < power:
                     ball.vx += nx * (power - launch)
                     ball.vy += ny * (power - launch)
+                # The contact normal on a raised arm leans sideways, which
+                # bled most of the launch into vx; guarantee a real upward
+                # kick so the ball actually returns to the playfield.
+                min_vy = -power * 0.7
+                if ball.vy > min_vy:
+                    ball.vy = min_vy
             # Cap the exit speed: hit_ball runs every 2px sub-step, and a
             # ball that stays in contact across several sub-steps would have
             # the surface-velocity term added repeatedly, pumping it to 3-5x
@@ -375,6 +395,65 @@ class Flipper:
                 ball.x = cx + nx * (BALL_RADIUS + 2.5)
                 ball.y = cy + ny * (BALL_RADIUS + 2.5)
             return True
+        return False
+
+    def _hit_swept(self, ball):
+        # Swept-stroke check: the up-stroke turns FLIP_UP_SPEED (0.45 rad,
+        # ~9 px at the tip) per frame while the arm's pose only updates once
+        # per frame, so a fast stroke can rotate clean past the ball between
+        # collision substeps -- the ball then sits UNDER the arm, the normal
+        # points down, and no launch ever fires (the lead-2 dead spot). If
+        # the ball lies inside the arc the arm swept this frame, treat it as
+        # a mid-sweep strike.
+        sweep = self.angle - self.prev_angle
+        if self.active and abs(sweep) > 0.2:
+            rx, ry = ball.x - self.px, ball.y - self.py
+            r = math.hypot(rx, ry)
+            if 1.0 < r < FLIP_LENGTH + BALL_RADIUS + 2:
+                rel = math.atan2(ry, rx)
+                # Angular offset of the ball from the stroke start, taken in
+                # the sweep's own frame so the right flipper's crossing of
+                # the +/-pi branch cut is handled.
+                d = (rel - self.prev_angle + math.pi) % (2 * math.pi) - math.pi
+                frac = d / sweep
+                if -0.1 <= frac <= 1.1:
+                    t = min(1.0, r / FLIP_LENGTH)
+                    arm = t * FLIP_LENGTH
+                    # Surface normal = direction the arm face is moving.
+                    s = 1.0 if sweep > 0 else -1.0
+                    nx = -s * math.sin(rel)
+                    ny = s * math.cos(rel)
+                    sv = abs(self.omega) * arm
+                    rvx = ball.vx - sv * nx
+                    rvy = ball.vy - sv * ny
+                    dot = rvx * nx + rvy * ny
+                    if dot < 0:
+                        rvx -= 2 * dot * nx * 0.85
+                        rvy -= 2 * dot * ny * 0.85
+                    ball.vx = rvx + sv * nx * 1.6
+                    ball.vy = rvy + sv * ny * 1.6
+                    if ny < 0:
+                        power = FLIPPER_POWER * (0.55 + 0.45 * t)
+                        launch = ball.vx * nx + ball.vy * ny
+                        if launch < power:
+                            ball.vx += nx * (power - launch)
+                            ball.vy += ny * (power - launch)
+                        min_vy = -power * 0.7
+                        if ball.vy > min_vy:
+                            ball.vy = min_vy
+                    sp = math.sqrt(ball.vx ** 2 + ball.vy ** 2)
+                    cap = BALL_MAX_SPEED * 1.5
+                    if sp > cap:
+                        k = cap / sp
+                        ball.vx *= k
+                        ball.vy *= k
+                    # Park the ball on the moving side of the arm's END pose
+                    # so the next substep doesn't re-detect it underneath.
+                    ex = -s * math.sin(self.angle)
+                    ey = s * math.cos(self.angle)
+                    ball.x = self.px + arm * math.cos(self.angle) + ex * (BALL_RADIUS + 2.5)
+                    ball.y = self.py + arm * math.sin(self.angle) + ey * (BALL_RADIUS + 2.5)
+                    return True
         return False
 
 
@@ -1225,13 +1304,21 @@ def _run_demo(matrix, duration, start_time):
         fl, fr = False, False
         field = [x for x in game.balls if x.active and not x.in_plunger]
         for b in field:
-            if b.vy > 0 and FLIP_Y - 30 < b.y < FLIP_Y + 5:
-                if b.x < PF_W / 2:
-                    fl = True
-                else:
-                    fr = True
-                if abs(b.x - PF_W / 2) < 15:
-                    fl = fr = True
+            # Time the stroke to the ball: flip when contact is <= 3 frames
+            # out, so the arm is still swinging (full power) when it
+            # connects, instead of holding from 30 px away and batting the
+            # ball with an already-raised flipper.
+            if b.vy <= 0 or b.y > FLIP_Y + 5:
+                continue
+            frames_out = (FLIP_Y - 4 - b.y) / max(0.1, b.vy)
+            if frames_out > 3:
+                continue
+            if b.x < PF_W / 2:
+                fl = True
+            else:
+                fr = True
+            if abs(b.x - PF_W / 2) < 15:
+                fl = fr = True
 
         # Stall guard: nudge the balls if nothing has moved for 2 seconds
         # so the demo doesn't freeze on a pocket.
