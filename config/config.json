@@ -280,6 +280,31 @@
       "name": "flight_radar",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "dungeon",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "missile_command",
+      "type": "game",
+      "enabled": true
+    },
+    {
+      "name": "rain_radar",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "ring_world",
+      "type": "effect",
+      "enabled": true
+    },
+    {
+      "name": "youtube_stream",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

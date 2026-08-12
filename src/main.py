@@ -253,6 +253,7 @@ def load_config():
             raise json.JSONDecodeError("Empty file", "", 0)
         config = json.loads(content)
         logger.info("Loaded config from %s", config_path)
+        _sync_sequence_with_registry(config, config_path)
         return config
     except FileNotFoundError:
         logger.error("Config file not found: %s -- using defaults", config_path)
@@ -261,6 +262,48 @@ def load_config():
         logger.error("Invalid JSON in config: %s -- using defaults", e)
         logger.error("Fix your config/config.json or re-download it from GitHub")
         return _DEFAULT_CONFIG.copy()
+
+
+def _sync_sequence_with_registry(config, config_path):
+    """Append registry features missing from the carousel sequence.
+
+    The updater deliberately preserves the device's local ``config.json``
+    across ``git reset --hard`` (feature toggles must survive updates), so
+    a committed sequence entry never reaches an existing install. Without
+    this merge, every new feature ships into the menus (which enumerate the
+    registry directly) but silently never joins the carousel or its toggle
+    screen -- five features had already drifted out this way.
+
+    New entries default to enabled so a fresh feature appears in rotation
+    after an update; the toggle screen can switch it off as usual.
+    """
+    try:
+        from src.feature_registry import FEATURE_MODULES
+        sequence = config.get("sequence")
+        if not isinstance(sequence, list):
+            return
+        known = {item.get("name") for item in sequence
+                 if isinstance(item, dict)}
+        missing = [name for name in sorted(FEATURE_MODULES)
+                   if name not in known]
+        if not missing:
+            return
+        from src.app_state import PLAYABLE_GAMES
+        for name in missing:
+            sequence.append({
+                "name": name,
+                "type": "game" if name in PLAYABLE_GAMES else "effect",
+                "enabled": True,
+            })
+        logger.info("Added %d new feature(s) to the carousel sequence: %s",
+                    len(missing), ", ".join(missing))
+        tmp_path = config_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(config, f, indent=2)
+        os.replace(tmp_path, config_path)
+    except Exception:
+        # Config sync is a convenience; never let it break boot.
+        logger.warning("Could not sync sequence with registry", exc_info=True)
 
 
 def _create_simulator_matrix(options=None):
