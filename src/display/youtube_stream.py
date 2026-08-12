@@ -1,10 +1,9 @@
 """
 Backward-compatibility wrapper for the former YouTube streaming module.
 
-YouTube support was removed due to YouTube's increasingly aggressive
-anti-bot measures (PO tokens, cookie expiration, constant yt-dlp breakage).
-This module now delegates to video_player.py which supports direct HTTP
-video URLs from any host (archive.org, S3, GitHub Releases, etc.).
+This module delegates to video_player.py, which downloads both direct
+HTTP video URLs (archive.org, S3, GitHub Releases, etc.) and YouTube
+links (via yt-dlp, auto-updated weekly) to the local cache.
 
 All public symbols are re-exported so existing imports continue to work.
 """
@@ -20,6 +19,7 @@ from src.display.video_player import (  # noqa: F401
     _show_status_frame,
     _show_error_frame,
     _BackgroundDownloader,
+    is_youtube_url,
     cleanup_cache,
     FRAME_INTERVAL,
     CACHE_DIR,
@@ -33,10 +33,15 @@ def refresh_youtube_cookies():
     pass
 
 def stream_video(url):
-    """No longer supported. Use direct video URLs instead."""
+    """Live streaming is not supported; videos are cached then played.
+
+    Add the URL (direct MP4 or YouTube link) to config/video_urls.csv
+    and it will be downloaded at boot and played from cache.
+    """
     raise RuntimeError(
-        "YouTube streaming is no longer supported. "
-        "Use direct MP4 URLs in config/video_urls.csv instead."
+        "Streaming is not supported. Add the URL to "
+        "config/video_urls.csv; it will be cached at boot and played "
+        "from disk (YouTube links are handled via yt-dlp)."
     )
 
 def stream_youtube_videos(urls, matrix):

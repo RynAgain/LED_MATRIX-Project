@@ -20,6 +20,11 @@ opencv-python-headless>=4.8.0
 # NumPy must stay <2: opencv-python-headless 4.x is compiled against NumPy 1.x
 # and will fail with "AttributeError: _ARRAY_API not found" on NumPy 2.x.
 numpy>=1.24.0,<2
+# YouTube downloads for the video player. Deliberately unpinned:
+# video_player.py pip-upgrades it weekly at runtime, because a stale
+# yt-dlp is the main way YouTube downloads break.
+yt-dlp
+
 
 # HTTP requests (for Bitcoin price, connectivity checks)
 requests>=2.31.0

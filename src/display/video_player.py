@@ -1,9 +1,11 @@
 """
 Video player for 64x64 LED matrix.
 
-Downloads videos from direct HTTP/HTTPS URLs to local cache, then plays
-from disk. Supports any direct MP4/video link (archive.org, S3, GitHub
-Releases, self-hosted, etc.).
+Downloads videos to a local cache, then plays from disk. Two sources:
+  - Direct HTTP/HTTPS video links (archive.org, S3, GitHub Releases, etc.)
+  - YouTube links (watch/shorts/youtu.be), fetched via yt-dlp, which is
+    auto-updated at most once a week because a stale yt-dlp is the main
+    way YouTube downloads rot.
 
 Replaces the previous youtube_stream module which relied on yt-dlp and
 was subject to constant breakage from YouTube's anti-bot measures.
@@ -22,6 +24,8 @@ import os
 import sys
 import time
 import csv
+import re
+import subprocess
 import hashlib
 import logging
 import threading
@@ -115,11 +119,150 @@ def _check_disk_space(path, min_mb=200):
         return True  # Can't check, proceed anyway
 
 
+# ---------------------------------------------------------------------------
+# YouTube support (yt-dlp)
+# ---------------------------------------------------------------------------
+
+_YOUTUBE_RE = re.compile(
+    r"https?://(www\.|m\.|music\.)?"
+    r"(youtube\.com/(watch|shorts|live|embed)|youtu\.be/)", re.IGNORECASE)
+
+# yt-dlp breaks when it goes stale, so refresh it at most once a week.
+_YT_DLP_UPDATE_STAMP = os.path.join(CACHE_DIR, ".yt_dlp_updated")
+_YT_DLP_UPDATE_DAYS = 7
+
+# Optional Netscape-format cookie file exported from a logged-in
+# browser. If present it is passed to yt-dlp -- the reliable escape
+# hatch when YouTube answers "Sign in to confirm you're not a bot".
+COOKIE_FILE = os.path.join(PROJECT_ROOT, "config", "youtube_cookies.txt")
+
+# Try several player clients: when YouTube blocks one, another often
+# still works. yt-dlp iterates them in order.
+_YT_CLIENTS = "tv,web_embedded,android,web"
+
+# 64x64 panel: 480p is already plenty. Progressive mp4 first so no
+# ffmpeg merge is needed; merge formats are fallbacks for videos YouTube
+# only serves split (those need ffmpeg installed on the Pi).
+_YT_FORMAT = ("b[ext=mp4][height<=480][vcodec!*=av01]/"
+              "b[height<=480]/"
+              "bv*[ext=mp4][height<=480]+ba[ext=m4a]/"
+              "bv*[height<=480]+ba/b")
+
+
+def is_youtube_url(url):
+    """True if the URL is a YouTube video link."""
+    return bool(_YOUTUBE_RE.match(url or ""))
+
+
+def _maybe_update_yt_dlp():
+    """pip-upgrade yt-dlp if the last upgrade was over a week ago.
+
+    Failures are non-fatal: an existing (possibly stale) yt-dlp is still
+    better than nothing, and the Pi may simply be offline.
+    """
+    try:
+        if (os.path.exists(_YT_DLP_UPDATE_STAMP) and
+                time.time() - os.path.getmtime(_YT_DLP_UPDATE_STAMP) <
+                _YT_DLP_UPDATE_DAYS * 86400):
+            return
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        logger.info("Updating yt-dlp (weekly refresh)...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade",
+             "--quiet", "yt-dlp"],
+            capture_output=True, text=True, timeout=180)
+        if result.returncode == 0:
+            with open(_YT_DLP_UPDATE_STAMP, "w") as f:
+                f.write(str(time.time()))
+            logger.info("yt-dlp is up to date")
+        else:
+            logger.warning("yt-dlp update failed (rc=%d): %s",
+                           result.returncode, result.stderr.strip()[-300:])
+    except Exception as e:
+        logger.warning("yt-dlp update skipped: %s", e)
+
+
+def _get_yt_dlp():
+    """Import yt_dlp, refreshing it weekly. Returns the module or None."""
+    _maybe_update_yt_dlp()
+    try:
+        import yt_dlp
+        return yt_dlp
+    except ImportError:
+        logger.error("yt-dlp is not installed -- YouTube links cannot be "
+                     "downloaded. Install with: pip install yt-dlp")
+        return None
+    except Exception as e:
+        logger.error("yt-dlp failed to load: %s", e)
+        return None
+
+
+def _cleanup_partial(cache_path):
+    """Remove a failed download and any yt-dlp .part/.ytdl leftovers."""
+    stem = os.path.basename(cache_path)[:-4]  # strip .mp4
+    try:
+        for f in os.listdir(CACHE_DIR):
+            if f.startswith(stem):
+                try:
+                    os.remove(os.path.join(CACHE_DIR, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def _download_youtube(url, title, cache_path):
+    """Download a YouTube video to cache_path via yt-dlp.
+
+    Returns cache_path on success, None on failure.
+    """
+    yt_dlp = _get_yt_dlp()
+    if yt_dlp is None:
+        return None
+
+    logger.info("Downloading YouTube video '%s' from %s", title, url)
+    start = time.time()
+    opts = {
+        "outtmpl": {"default": cache_path},
+        "format": _YT_FORMAT,
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 3,
+        "socket_timeout": 30,
+        "concurrent_fragment_downloads": 1,
+        "extractor_args": {
+            "youtube": {"player_client": _YT_CLIENTS.split(",")}},
+    }
+    if os.path.exists(COOKIE_FILE):
+        opts["cookiefile"] = COOKIE_FILE
+        logger.info("Using YouTube cookies from %s", COOKIE_FILE)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        logger.error("yt-dlp failed for '%s': %s", title, e)
+        _cleanup_partial(cache_path)
+        return None
+
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 10240:
+        size_mb = os.path.getsize(cache_path) / (1024 * 1024)
+        logger.info("Downloaded '%s' (%.1f MB) in %.1fs",
+                    title, size_mb, time.time() - start)
+        return cache_path
+
+    logger.error("yt-dlp produced no usable file for '%s'", title)
+    _cleanup_partial(cache_path)
+    return None
+
+
 def download_video(url, title="Unknown"):
     """Download a video from a direct URL to local cache.
 
     Supports any direct HTTP/HTTPS link to a video file
-    (archive.org, S3, GitHub Releases, CDN, self-hosted, etc.).
+    (archive.org, S3, GitHub Releases, CDN, self-hosted, etc.)
+    and YouTube links, which are routed through yt-dlp.
 
     Args:
         url: Direct URL to a video file (MP4, WebM, etc.).
@@ -139,6 +282,9 @@ def download_video(url, title="Unknown"):
     if not _check_disk_space(CACHE_DIR):
         logger.error("Insufficient disk space for video download of '%s'", title)
         return None
+
+    if is_youtube_url(url):
+        return _download_youtube(url, title, cache_path)
 
     logger.info("Downloading '%s' from %s", title, url)
     start = time.time()
