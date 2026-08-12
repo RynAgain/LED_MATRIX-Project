@@ -94,6 +94,7 @@ DISPLAY_MODULES = [
     "src.display.big_eye",
     "src.display.flight_radar",
     "src.display.rain_radar",
+    "src.display.dungeon",
 ]
 
 

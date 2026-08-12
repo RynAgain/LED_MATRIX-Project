@@ -191,6 +191,7 @@ _DEMO_LABELS = {
     "big_eye": "BIG EYE",
     "flight_radar": "AIR RADAR",
     "rain_radar": "RAINRADAR",
+    "dungeon": "DUNGEON",
     "month_calendar": "CALENDAR",
     "bitcoin_price": "BITCOIN",
     "space_invaders": "INVADERS",

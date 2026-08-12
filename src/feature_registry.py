@@ -52,6 +52,7 @@ FEATURE_MODULES = {
     "big_eye": "src.display.big_eye",
     "flight_radar": "src.display.flight_radar",
     "rain_radar": "src.display.rain_radar",
+    "dungeon": "src.display.dungeon",
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",
