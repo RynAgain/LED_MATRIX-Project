@@ -55,6 +55,70 @@ FACE_DEFS = {
 
 
 # ---------------------------------------------------------------------------
+# Turn permutations, derived from geometry
+# ---------------------------------------------------------------------------
+# Each sticker slot (face, row, col) has an exact integer 3D center
+# (scaled x3 so 0.66 offsets become the integer 2) and an outward normal --
+# the SAME geometry get_sticker_quads() renders from.  A quarter turn of
+# face F rotates every sticker in F's layer (dot(center, F.normal) >= 2)
+# by +/-90 degrees about that normal; the destination slot is the unique
+# slot whose (center, normal) matches the rotated pair.  Deriving the
+# tables this way makes every move a bijection on the 54 stickers by
+# construction -- the previous hand-written edge cycles were wrong for
+# several faces and produced impossible sticker states.
+
+def _turn_rot90(v, n, sign):
+    """Rotate integer vector v a quarter turn about unit axis n.
+    sign +1: v' = n x v + n(n.v);  sign -1: the inverse rotation."""
+    d = n[0] * v[0] + n[1] * v[1] + n[2] * v[2]
+    if sign > 0:
+        c = (n[1] * v[2] - n[2] * v[1],
+             n[2] * v[0] - n[0] * v[2],
+             n[0] * v[1] - n[1] * v[0])
+    else:
+        c = (v[1] * n[2] - v[2] * n[1],
+             v[2] * n[0] - v[0] * n[2],
+             v[0] * n[1] - v[1] * n[0])
+    return (c[0] + n[0] * d, c[1] + n[1] * d, c[2] + n[2] * d)
+
+
+def _sticker_center(fdef, row, col):
+    n, u, r = fdef['normal'], fdef['up'], fdef['right']
+    return tuple(3 * n[i] + 2 * (col - 1) * r[i] + 2 * (row - 1) * u[i]
+                 for i in range(3))
+
+
+def _build_turn_perms():
+    slots = {}   # (face,row,col) -> (center, normal)
+    lookup = {}  # (center, normal) -> (face,row,col)
+    for fname, fdef in FACE_DEFS.items():
+        for row in range(3):
+            for col in range(3):
+                key = (fname, row, col)
+                geo = (_sticker_center(fdef, row, col), fdef['normal'])
+                slots[key] = geo
+                lookup[geo] = key
+    perms = {}
+    for fname, fdef in FACE_DEFS.items():
+        axis = fdef['normal']
+        for cw in (True, False):
+            sign = -1 if cw else 1
+            mapping = {}  # dst -> src
+            for src, (c, sn) in slots.items():
+                if sum(c[i] * axis[i] for i in range(3)) < 2:
+                    continue  # not in this face's layer
+                dst = lookup[(_turn_rot90(c, axis, sign),
+                              _turn_rot90(sn, axis, sign))]
+                mapping[dst] = src
+            assert len(mapping) == 21  # 9 face + 12 band stickers
+            perms[(fname, cw)] = mapping
+    return perms
+
+
+TURN_PERMS = _build_turn_perms()
+
+
+# ---------------------------------------------------------------------------
 # 3D math helpers
 # ---------------------------------------------------------------------------
 
@@ -115,6 +179,7 @@ class RubiksCube:
 
         # Face turn animation state
         self.turning_face = None
+        self.turning_cw = True
         self.turn_angle = 0.0
         self.turn_target = 0.0
         self.turn_speed = 0.08
@@ -126,108 +191,11 @@ class RubiksCube:
         self.scramble_idx = 0
         self.mode_timer = 0
 
-    def _rotate_face_cw(self, face_name):
-        """Rotate a face's stickers 90° clockwise (internal state only)."""
-        face = self.faces[face_name]
-        self.faces[face_name] = [
-            [face[2][0], face[1][0], face[0][0]],
-            [face[2][1], face[1][1], face[0][1]],
-            [face[2][2], face[1][2], face[0][2]],
-        ]
-
-    def _rotate_face_ccw(self, face_name):
-        """Rotate a face's stickers 90° counter-clockwise."""
-        for _ in range(3):
-            self._rotate_face_cw(face_name)
-
     def apply_move(self, face_name, clockwise=True):
-        """Apply a quarter turn to a face (updates sticker state)."""
-        if clockwise:
-            self._rotate_face_cw(face_name)
-        else:
-            self._rotate_face_ccw(face_name)
-
-        # Cycle adjacent edge stickers
-        # Simplified: we only need visual correctness for the demo
-        # Full cycle logic for each face
-        f = self.faces
-        if face_name == 'U':
-            tmp = f['F'][0][:]
-            if clockwise:
-                f['F'][0] = f['R'][0][:]
-                f['R'][0] = f['B'][0][:]
-                f['B'][0] = f['L'][0][:]
-                f['L'][0] = tmp
-            else:
-                f['F'][0] = f['L'][0][:]
-                f['L'][0] = f['B'][0][:]
-                f['B'][0] = f['R'][0][:]
-                f['R'][0] = tmp
-        elif face_name == 'D':
-            tmp = f['F'][2][:]
-            if clockwise:
-                f['F'][2] = f['L'][2][:]
-                f['L'][2] = f['B'][2][:]
-                f['B'][2] = f['R'][2][:]
-                f['R'][2] = tmp
-            else:
-                f['F'][2] = f['R'][2][:]
-                f['R'][2] = f['B'][2][:]
-                f['B'][2] = f['L'][2][:]
-                f['L'][2] = tmp
-        elif face_name == 'F':
-            if clockwise:
-                tmp = [f['U'][2][0], f['U'][2][1], f['U'][2][2]]
-                f['U'][2] = [f['L'][2][2], f['L'][1][2], f['L'][0][2]]
-                f['L'][0][2], f['L'][1][2], f['L'][2][2] = f['D'][0][0], f['D'][0][1], f['D'][0][2]
-                f['D'][0] = [f['R'][2][0], f['R'][1][0], f['R'][0][0]]
-                f['R'][0][0], f['R'][1][0], f['R'][2][0] = tmp[0], tmp[1], tmp[2]
-            else:
-                tmp = [f['U'][2][0], f['U'][2][1], f['U'][2][2]]
-                f['U'][2] = [f['R'][0][0], f['R'][1][0], f['R'][2][0]]
-                f['R'][0][0], f['R'][1][0], f['R'][2][0] = f['D'][0][2], f['D'][0][1], f['D'][0][0]
-                f['D'][0] = [f['L'][0][2], f['L'][1][2], f['L'][2][2]]
-                f['L'][0][2], f['L'][1][2], f['L'][2][2] = tmp[2], tmp[1], tmp[0]
-        elif face_name == 'R':
-            if clockwise:
-                tmp = [f['F'][0][2], f['F'][1][2], f['F'][2][2]]
-                f['F'][0][2], f['F'][1][2], f['F'][2][2] = f['D'][0][2], f['D'][1][2], f['D'][2][2]
-                f['D'][0][2], f['D'][1][2], f['D'][2][2] = f['B'][2][0], f['B'][1][0], f['B'][0][0]
-                f['B'][0][0], f['B'][1][0], f['B'][2][0] = f['U'][2][2], f['U'][1][2], f['U'][0][2]
-                f['U'][0][2], f['U'][1][2], f['U'][2][2] = tmp[0], tmp[1], tmp[2]
-            else:
-                tmp = [f['F'][0][2], f['F'][1][2], f['F'][2][2]]
-                f['F'][0][2], f['F'][1][2], f['F'][2][2] = f['U'][0][2], f['U'][1][2], f['U'][2][2]
-                f['U'][0][2], f['U'][1][2], f['U'][2][2] = f['B'][2][0], f['B'][1][0], f['B'][0][0]
-                f['B'][0][0], f['B'][1][0], f['B'][2][0] = f['D'][2][2], f['D'][1][2], f['D'][0][2]
-                f['D'][0][2], f['D'][1][2], f['D'][2][2] = tmp[0], tmp[1], tmp[2]
-        # L and B are less commonly visible; simplified
-        elif face_name == 'L':
-            if clockwise:
-                tmp = [f['F'][0][0], f['F'][1][0], f['F'][2][0]]
-                f['F'][0][0], f['F'][1][0], f['F'][2][0] = f['U'][0][0], f['U'][1][0], f['U'][2][0]
-                f['U'][0][0], f['U'][1][0], f['U'][2][0] = f['B'][2][2], f['B'][1][2], f['B'][0][2]
-                f['B'][0][2], f['B'][1][2], f['B'][2][2] = f['D'][2][0], f['D'][1][0], f['D'][0][0]
-                f['D'][0][0], f['D'][1][0], f['D'][2][0] = tmp[0], tmp[1], tmp[2]
-            else:
-                tmp = [f['F'][0][0], f['F'][1][0], f['F'][2][0]]
-                f['F'][0][0], f['F'][1][0], f['F'][2][0] = f['D'][0][0], f['D'][1][0], f['D'][2][0]
-                f['D'][0][0], f['D'][1][0], f['D'][2][0] = f['B'][2][2], f['B'][1][2], f['B'][0][2]
-                f['B'][0][2], f['B'][1][2], f['B'][2][2] = f['U'][2][0], f['U'][1][0], f['U'][0][0]
-                f['U'][0][0], f['U'][1][0], f['U'][2][0] = tmp[0], tmp[1], tmp[2]
-        elif face_name == 'B':
-            if clockwise:
-                tmp = [f['U'][0][2], f['U'][0][1], f['U'][0][0]]
-                f['U'][0] = [f['R'][0][2], f['R'][1][2], f['R'][2][2]]
-                f['R'][0][2], f['R'][1][2], f['R'][2][2] = f['D'][2][0], f['D'][2][1], f['D'][2][2]
-                f['D'][2] = [f['L'][0][0], f['L'][1][0], f['L'][2][0]]
-                f['L'][0][0], f['L'][1][0], f['L'][2][0] = tmp[0], tmp[1], tmp[2]
-            else:
-                tmp = [f['U'][0][0], f['U'][0][1], f['U'][0][2]]
-                f['U'][0] = [f['L'][2][0], f['L'][1][0], f['L'][0][0]]
-                f['L'][0][0], f['L'][1][0], f['L'][2][0] = f['D'][2][2], f['D'][2][1], f['D'][2][0]
-                f['D'][2] = [f['R'][2][2], f['R'][1][2], f['R'][0][2]]
-                f['R'][0][2], f['R'][1][2], f['R'][2][2] = tmp[0], tmp[1], tmp[2]
+        """Apply a quarter turn using the geometry-derived permutation."""
+        old = {f: [row[:] for row in self.faces[f]] for f in self.faces}
+        for (df, dr, dc), (sf, sr, sc) in TURN_PERMS[(face_name, clockwise)].items():
+            self.faces[df][dr][dc] = old[sf][sr][sc]
 
     def get_sticker_quads(self):
         """Generate all visible sticker quads in 3D space.
@@ -236,6 +204,18 @@ class RubiksCube:
         """
         quads = []
         sticker_size = 0.28  # Size of each sticker relative to face
+
+        # Mid-turn: rotate the turning slice's stickers by the animated
+        # angle about the turn axis.  Same rotation (and sign) as the state
+        # permutation in apply_move, so the animation ends exactly where
+        # the sticker state snaps to.  Previously the turn animation was
+        # never rendered at all -- stickers teleported when the invisible
+        # timer completed.
+        turn = None
+        if self.turning_face is not None:
+            axis = FACE_DEFS[self.turning_face]['normal']
+            ang = -self.turn_angle if self.turning_cw else self.turn_angle
+            turn = (axis, math.cos(ang), math.sin(ang))
 
         for face_name, fdef in FACE_DEFS.items():
             nx, ny, nz = fdef['normal']
@@ -263,6 +243,25 @@ class RubiksCube:
                         py = cy + (dc * sticker_size * ry + dr * sticker_size * uy)
                         pz = cz + (dc * sticker_size * rz + dr * sticker_size * uz)
                         corners.append((px, py, pz))
+
+                    if turn is not None:
+                        icen = _sticker_center(fdef, row, col)
+                        ax = turn[0]
+                        if (icen[0] * ax[0] + icen[1] * ax[1]
+                                + icen[2] * ax[2]) >= 2:
+                            ca, sa = turn[1], turn[2]
+                            rot = []
+                            for vx, vy, vz in corners:
+                                d = ax[0] * vx + ax[1] * vy + ax[2] * vz
+                                crx = ax[1] * vz - ax[2] * vy
+                                cry = ax[2] * vx - ax[0] * vz
+                                crz = ax[0] * vy - ax[1] * vx
+                                rot.append((
+                                    vx * ca + crx * sa + ax[0] * d * (1 - ca),
+                                    vy * ca + cry * sa + ax[1] * d * (1 - ca),
+                                    vz * ca + crz * sa + ax[2] * d * (1 - ca),
+                                ))
+                            corners = rot
 
                     quads.append((corners, color))
 
@@ -293,6 +292,7 @@ class RubiksCube:
                 if self.scramble_idx < len(self.scramble_moves):
                     face, cw = self.scramble_moves[self.scramble_idx]
                     self.turning_face = face
+                    self.turning_cw = cw
                     self.turn_angle = 0.0
                     self.turn_target = math.pi / 2
                     self.turn_history.append((face, cw))
@@ -307,10 +307,9 @@ class RubiksCube:
                 # Animate turn
                 self.turn_angle += self.turn_speed
                 if self.turn_angle >= self.turn_target:
-                    # Complete the turn
-                    face, cw = self.turn_history[-1] if self.turn_history else ('F', True)
-                    if self.mode == 'scramble':
-                        self.apply_move(face, cw)
+                    # Snap: the state permutation lands exactly where the
+                    # animated slice ends because both use the same rotation.
+                    self.apply_move(self.turning_face, self.turning_cw)
                     self.turning_face = None
 
         elif self.mode == 'solve':
@@ -318,6 +317,7 @@ class RubiksCube:
                 if self.scramble_idx >= 0:
                     face, cw = self.turn_history[self.scramble_idx]
                     self.turning_face = face
+                    self.turning_cw = not cw  # reverse move
                     self.turn_angle = 0.0
                     self.turn_target = math.pi / 2
                     self.scramble_idx -= 1
@@ -329,8 +329,7 @@ class RubiksCube:
             else:
                 self.turn_angle += self.turn_speed
                 if self.turn_angle >= self.turn_target:
-                    face, cw = self.turn_history[self.scramble_idx + 1]
-                    self.apply_move(face, not cw)  # Reverse move
+                    self.apply_move(self.turning_face, self.turning_cw)
                     self.turning_face = None
 
     def draw(self):
