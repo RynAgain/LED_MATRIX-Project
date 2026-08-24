@@ -304,7 +304,7 @@
     {
       "name": "youtube_stream",
       "type": "effect",
-      "enabled": true
+      "enabled": false
     }
   ]
 }
