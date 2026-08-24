@@ -305,6 +305,11 @@
       "name": "youtube_stream",
       "type": "effect",
       "enabled": false
+    },
+    {
+      "name": "dvd_logo",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

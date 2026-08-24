@@ -64,6 +64,7 @@ FEATURE_MODULES = {
     "super_breakout": "src.display.super_breakout",
     "pinball": "src.display.pinball",
     "month_calendar": "src.display.month_calendar",
+    "dvd_logo": "src.display.dvd_logo",
 }
 
 

@@ -220,6 +220,7 @@ _DEMO_LABELS = {
     "portal_arena": "PORTAL",
     "package_boy": "PKG BOY",
     "death_ball": "DEATHBALL",
+    "dvd_logo": "DVD LOGO",
 }
 
 
