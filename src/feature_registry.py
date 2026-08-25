@@ -65,6 +65,7 @@ FEATURE_MODULES = {
     "pinball": "src.display.pinball",
     "month_calendar": "src.display.month_calendar",
     "dvd_logo": "src.display.dvd_logo",
+    "pumpkin": "src.display.pumpkin",
 }
 
 

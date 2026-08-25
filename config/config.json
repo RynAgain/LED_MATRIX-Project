@@ -310,6 +310,11 @@
       "name": "dvd_logo",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "pumpkin",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }
