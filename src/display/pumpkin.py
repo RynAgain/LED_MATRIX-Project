@@ -30,36 +30,40 @@ WIDTH, HEIGHT = 64, 64
 FRAME_INTERVAL = 1.0 / 24
 
 # --- Sky ---------------------------------------------------------------
-SKY_TOP = (8, 6, 24)
-SKY_BOTTOM = (34, 16, 50)
-MOON_CENTER = (50, 12)
+SKY_TOP = (6, 4, 16)
+SKY_BOTTOM = (22, 11, 36)
+MOON_CENTER = (52, 11)
 MOON_R = 7
-MOON_COLOR = (222, 216, 186)
-MOON_SHADOW = (176, 168, 142)
-STAR_COLOR = (255, 250, 235)
-STARS = [  # fixed positions, seeded once for a stable night sky
+MOON_COLOR = (246, 243, 214)
+MOON_SHADOW = (198, 194, 166)
+STAR_COLOR = (255, 255, 240)
+BAT_COLOR = (96, 84, 120)          # light enough to read against night sky
+STARS = [
     (x, y, phase)
     for x, y, phase in (
-        (4, 6, 0.0), (14, 4, 1.1), (24, 9, 2.3), (36, 5, 0.4),
-        (58, 22, 3.1), (8, 18, 1.7), (46, 6, 2.8), (30, 15, 0.9),
-        (18, 24, 4.2), (60, 8, 5.0), (2, 28, 2.1),
+        (4, 6, 0.0), (14, 3, 1.1), (24, 9, 2.3), (36, 5, 0.4),
+        (60, 24, 3.1), (8, 18, 1.7), (44, 4, 2.8), (30, 15, 0.9),
+        (18, 25, 4.2), (62, 8, 5.0), (2, 29, 2.1),
     )
 ]
 
 # --- Pumpkin body --------------------------------------------------------
-PUMPKIN_CX, PUMPKIN_CY = 32, 40
-PUMPKIN_RX, PUMPKIN_RY = 25, 19
-RIND = (222, 104, 18)
-RIND_SHADOW = (168, 68, 10)
-RIND_HILITE = (250, 158, 60)
-RIND_DARK = (54, 24, 6)          # cavity wall behind the candle
-STEM = (94, 128, 50)
-STEM_SHADOW = (60, 88, 30)
+PUMPKIN_CX, PUMPKIN_CY = 32, 39
+PUMPKIN_RX, PUMPKIN_RY = 24, 18
+# Deep orange body so the lit face reads as much brighter than the rind.
+RIND = (176, 70, 8)
+RIND_SHADOW = (112, 40, 4)         # outer edge, gives the body its roundness
+RIND_HILITE = (214, 104, 20)       # subtle centre sheen (kept off the face)
+CARVE_EDGE = (34, 12, 2)           # dark cut edge: separates glow from rind
+STEM = (96, 132, 52)
+STEM_SHADOW = (58, 86, 30)
 
-GLOW_HOT = (255, 208, 96)        # candle at its brightest
-GLOW_LOW = (110, 34, 4)          # dim ember during a gust
+# Candle: even at its dimmest the face must stay clearly brighter than
+# the rind, so the low end is still a strong orange, not a dark ember.
+GLOW_LOW = (255, 146, 26)
+GLOW_HOT = (255, 246, 176)
 
-FLICKER_MIN, FLICKER_MAX = 0.55, 1.0
+FLICKER_MIN, FLICKER_MAX = 0.72, 1.0
 BLINK_SPEED = 3.2                 # phase units / second
 
 # --- Expressions ---------------------------------------------------------
@@ -67,26 +71,23 @@ BLINK_SPEED = 3.2                 # phase units / second
 # offsets relative to (PUMPKIN_CX, PUMPKIN_CY). Eyes are given for the
 # right side only; the left eye mirrors dx -> -dx.
 EXPRESSIONS = [
-    {  # classic grin
-        "eye": ("poly", [(7, -9), (16, -3), (7, 1)]),
-        "nose": ("poly", [(0, 3), (5, 10), (-5, 10)]),
-        "mouth": ("poly", [
-            (-17, 15), (-12, 21), (-8, 15), (-4, 21), (0, 15),
-            (4, 21), (8, 15), (12, 21), (17, 15), (17, 19), (-17, 19),
-        ]),
+    {   # classic grin: chunky slanted eyes, wide toothy smile
+        "eye": ("poly", [(5, -10), (17, -2), (5, 2)]),
+        "nose": ("poly", [(0, 2), (5, 9), (-5, 9)]),
+        "mouth": ("poly", [(-13, 7), (13, 7), (9, 15), (-9, 15)]),
+        "teeth": [(-6, 7, -3, 11), (2, 7, 5, 11), (-2, 12, 1, 15)],
     },
-    {  # surprised
-        "eye": ("circle", 13, -4, 5),
-        "nose": ("poly", [(0, 4), (3, 9), (-3, 9)]),
-        "mouth": ("circle", 0, 18, 6),
+    {   # surprised: big round eyes and a round "O"
+        "eye": ("circle", 12, -4, 6),
+        "nose": ("poly", [(0, 1), (5, 7), (-5, 7)]),
+        "mouth": ("circle", 0, 10, 5),
+        "teeth": [],
     },
-    {  # angry
-        "eye": ("poly", [(4, -9), (17, -5), (17, 1), (6, -2)]),
-        "nose": ("poly", [(0, 3), (5, 10), (-5, 10)]),
-        "mouth": ("poly", [
-            (-16, 20), (-11, 15), (-6, 19), (-1, 14),
-            (4, 19), (9, 14), (14, 19), (16, 20),
-        ]),
+    {   # angry: heavy downward-slanted brows, jagged frown
+        "eye": ("poly", [(4, -10), (17, -4), (17, 2), (7, -2)]),
+        "nose": ("poly", [(0, 2), (5, 9), (-5, 9)]),
+        "mouth": ("poly", [(-12, 8), (12, 8), (12, 15), (-12, 15)]),
+        "teeth": [(-8, 8, -5, 13), (-1, 8, 2, 13), (6, 8, 9, 13)],
     },
 ]
 
@@ -125,18 +126,23 @@ def _mirror_shape(shape):
     return ("poly", [(-x, y) for x, y in points])
 
 
-def _draw_shape(draw, shape, cx, cy, color):
+def _draw_shape(draw, shape, cx, cy, color, edge=CARVE_EDGE):
+    """Fill a cutout in ``color`` with a 1px dark carved edge around it.
+
+    The edge is what makes the lit face legible: without it the glow
+    bleeds into the rind and the whole pumpkin reads as one orange blob.
+    """
     kind = shape[0]
     if kind == "circle":
         _, dx, dy, r = shape
         x, y = cx + dx, cy + dy
         if r < 0.5:
             return
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=color, outline=edge)
     else:
         _, points = shape
         pts = [(cx + x, cy + y) for x, y in points]
-        draw.polygon(pts, fill=color)
+        draw.polygon(pts, fill=color, outline=edge)
 
 
 # --------------------------------------------------------------------------
@@ -258,31 +264,38 @@ def _build_base():
         t = y / (HEIGHT - 1)
         draw.line([(0, y), (WIDTH - 1, y)], fill=_lerp_color(SKY_TOP, SKY_BOTTOM, t))
 
+    # The moon is built on its own transparent tile and pasted through its
+    # own alpha, so the crescent bite reveals the real sky gradient. Cutting
+    # it with a flat sky colour left a visible disc-shaped patch instead.
     mx, my = MOON_CENTER
-    draw.ellipse([mx - MOON_R, my - MOON_R, mx + MOON_R, my + MOON_R],
-                 fill=MOON_COLOR)
-    draw.ellipse([mx - MOON_R * 0.55, my - MOON_R * 1.1,
-                  mx + MOON_R * 1.3, my + MOON_R * 1.1],
-                 fill=SKY_BOTTOM if my - MOON_R * 1.1 > 0 else SKY_TOP)
-    draw.ellipse([mx - 2, my - 3, mx + 1, my], fill=MOON_SHADOW)
-    draw.ellipse([mx - 3, my + 1, mx, my + 3], fill=MOON_SHADOW)
+    side = MOON_R * 2 + 2
+    moon = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    md = ImageDraw.Draw(moon)
+    c = MOON_R + 1
+    md.ellipse([c - MOON_R, c - MOON_R, c + MOON_R, c + MOON_R],
+               fill=MOON_COLOR + (255,))
+    md.ellipse([c - 2, c - 3, c, c - 1], fill=MOON_SHADOW + (255,))
+    md.ellipse([c - 3, c + 1, c - 1, c + 3], fill=MOON_SHADOW + (255,))
+    # Bite out the crescent: writing alpha 0 erases those pixels outright.
+    md.ellipse([c - MOON_R * 0.5, c - MOON_R * 1.2,
+                c + MOON_R * 1.5, c + MOON_R * 1.2], fill=(0, 0, 0, 0))
+    img.paste(moon, (mx - c, my - c), moon)
 
     cx, cy, rx, ry = PUMPKIN_CX, PUMPKIN_CY, PUMPKIN_RX, PUMPKIN_RY
-    draw.polygon([(cx - 2, cy - ry - 1), (cx + 5, cy - ry - 1),
-                  (cx + 2, cy - ry - 7), (cx - 1, cy - ry - 7)],
-                 fill=STEM_SHADOW)
-    draw.polygon([(cx - 2, cy - ry - 1), (cx + 2, cy - ry - 1),
-                  (cx, cy - ry - 8)], fill=STEM)
 
-    draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=RIND)
-    for i in range(-3, 4):
-        lobe_x = cx + i * (rx * 2 // 7)
-        shade = RIND_HILITE if i < 0 else RIND_SHADOW
-        draw.arc([lobe_x - 3, cy - ry, lobe_x + 3, cy + ry], 0, 360, fill=shade)
-    # Kept clear of the eye row (which starts around cy - ry*0.5) so a
-    # blinking eye is never mistaken for this static sheen.
-    draw.ellipse([cx - rx * 0.6, cy - ry * 0.9, cx - rx * 0.2, cy - ry * 0.6],
-                 fill=RIND_HILITE)
+    draw.polygon([(cx - 3, cy - ry + 1), (cx + 4, cy - ry + 1),
+                  (cx + 2, cy - ry - 7), (cx - 2, cy - ry - 7)],
+                 fill=STEM_SHADOW)
+    draw.polygon([(cx - 2, cy - ry), (cx + 2, cy - ry), (cx, cy - ry - 8)],
+                 fill=STEM)
+
+    # Three concentric tones give the body its roundness. The old version
+    # drew ribbing arcs across the whole rind, which at 64x64 just read as
+    # stripe noise on top of the face.
+    draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=RIND_SHADOW)
+    draw.ellipse([cx - rx + 2, cy - ry + 2, cx + rx - 2, cy + ry - 2],
+                 fill=RIND)
+    draw.ellipse([cx - 7, cy - ry + 3, cx + 7, cy - ry + 9], fill=RIND_HILITE)
 
     return img
 
@@ -294,7 +307,7 @@ def _render(base, state):
 
     for x, y, phase in STARS:
         twinkle = 0.5 + 0.5 * math.sin(time.time() * 2.0 + phase)
-        c = tuple(int(v * (0.4 + 0.6 * twinkle)) for v in STAR_COLOR)
+        c = tuple(int(v * (0.65 + 0.35 * twinkle)) for v in STAR_COLOR)
         draw.point((x, y), fill=c)
 
     if state.bat is not None:
@@ -309,11 +322,12 @@ def _draw_bat(draw, bat):
     x = int(round(bat.x))
     y = int(round(bat.y + math.sin(bat.bob_phase) * 1.5))
     flap = math.sin(bat.flap_phase)
-    wing_lift = 3 + int(round(flap * 3))
-    color = (18, 14, 26)
-    draw.ellipse([x - 1, y - 1, x + 1, y + 1], fill=color)
-    draw.line([(x, y), (x - 4, y - wing_lift)], fill=color)
-    draw.line([(x, y), (x + 4, y - wing_lift)], fill=color)
+    tip = int(round(flap * 4))          # wing tips sweep up and down
+    c = BAT_COLOR
+    draw.ellipse([x - 1, y - 1, x + 1, y + 2], fill=c)
+    for sx in (-1, 1):
+        draw.line([(x + sx, y), (x + sx * 3, y - tip)], fill=c)
+        draw.line([(x + sx * 3, y - tip), (x + sx * 5, y - tip + 2)], fill=c)
 
 
 def _draw_face(draw, state):
@@ -328,6 +342,11 @@ def _draw_face(draw, state):
 
     _draw_shape(draw, expr["nose"], PUMPKIN_CX, PUMPKIN_CY, glow)
     _draw_shape(draw, expr["mouth"], PUMPKIN_CX, PUMPKIN_CY, glow)
+
+    # Teeth are rind left uncut, so they punch out of the lit mouth.
+    for x0, y0, x1, y1 in expr.get("teeth", ()):
+        draw.rectangle([PUMPKIN_CX + x0, PUMPKIN_CY + y0,
+                        PUMPKIN_CX + x1, PUMPKIN_CY + y1], fill=CARVE_EDGE)
 
 
 def run(matrix, duration=60):
