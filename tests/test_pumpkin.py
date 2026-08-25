@@ -167,3 +167,17 @@ def test_render_with_and_without_an_active_bat():
     state.bat = Bat(random.Random(10))
     frame_with_bat = _render(base, state)
     assert frame_with_bat.size == (WIDTH, HEIGHT)
+
+
+def test_unlit_eyes_render_dark_and_lit_eyes_glow():
+    """The hollow-socket expression must draw its eyes in the carved-edge
+    colour, never the candle glow."""
+    from src.display.pumpkin import CARVE_EDGE, _eye_color
+
+    glow = (255, 240, 160)
+    hollow = [e for e in EXPRESSIONS if e.get("eye_unlit")]
+    assert hollow, "expected at least one unlit-eye expression"
+    for expr in hollow:
+        assert _eye_color(expr, glow) == CARVE_EDGE
+    for expr in (e for e in EXPRESSIONS if not e.get("eye_unlit")):
+        assert _eye_color(expr, glow) == glow

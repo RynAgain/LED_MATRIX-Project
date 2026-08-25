@@ -83,6 +83,13 @@ EXPRESSIONS = [
         "mouth": ("circle", 0, 10, 5),
         "teeth": [],
     },
+    {   # hollow: unlit black eye sockets over a lit grin
+        "eye": ("poly", [(5, -10), (17, -2), (5, 2)]),
+        "eye_unlit": True,
+        "nose": ("poly", [(0, 2), (5, 9), (-5, 9)]),
+        "mouth": ("poly", [(-13, 7), (13, 7), (9, 15), (-9, 15)]),
+        "teeth": [(-6, 7, -3, 11), (2, 7, 5, 11), (-2, 12, 1, 15)],
+    },
     {   # angry: heavy downward-slanted brows, jagged frown
         "eye": ("poly", [(4, -10), (17, -4), (17, 2), (7, -2)]),
         "nose": ("poly", [(0, 2), (5, 9), (-5, 9)]),
@@ -124,6 +131,12 @@ def _mirror_shape(shape):
         return ("circle", -dx, dy, r)
     _, points = shape
     return ("poly", [(-x, y) for x, y in points])
+
+
+def _eye_color(expr, glow):
+    """Eye fill for an expression: unlit sockets read as carved-out holes
+    (no candle behind them), everything else glows."""
+    return CARVE_EDGE if expr.get("eye_unlit") else glow
 
 
 def _draw_shape(draw, shape, cx, cy, color, edge=CARVE_EDGE):
@@ -337,8 +350,9 @@ def _draw_face(draw, state):
 
     right_eye = _flatten_shape(expr["eye"], openness)
     left_eye = _mirror_shape(right_eye)
+    eye_color = _eye_color(expr, glow)
     for eye in (left_eye, right_eye):
-        _draw_shape(draw, eye, PUMPKIN_CX, PUMPKIN_CY, glow)
+        _draw_shape(draw, eye, PUMPKIN_CX, PUMPKIN_CY, eye_color)
 
     _draw_shape(draw, expr["nose"], PUMPKIN_CX, PUMPKIN_CY, glow)
     _draw_shape(draw, expr["mouth"], PUMPKIN_CX, PUMPKIN_CY, glow)
