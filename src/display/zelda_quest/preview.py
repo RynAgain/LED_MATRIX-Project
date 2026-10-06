@@ -11,6 +11,8 @@ from .sluice import COURT_ROOM, WHEELS, CROSSINGS, crossing_open
 from .journey import SPIRIT_TILES
 from .pulse import SAFE_RUNES, GUARDIAN_HEALTH
 from .woodland import BROOK_ROOM, BROOK_ERRANDS, BROOK_CROSSINGS, brook_open
+from .woodland import SAWMILL_ROOM, SAWMILL_PLATE, SAWMILL_SHUTTER
+from .watchwood import WATCHWOOD_ROOM, SOURCE, CONTROLS, SENSORS, SHUTTERS, beam_path, reflectors
 from PIL import ImageDraw
 
 
@@ -36,6 +38,10 @@ class CampaignRenderer(Renderer):
             draw.rectangle((x - 3, y - 3, x + 3, y + 3), fill=(133, 141, 150), outline=(225, 226, 214))
         if game.room == BROOK_ROOM:
             self._brook(draw, game)
+        if game.room == SAWMILL_ROOM:
+            self._sawmill(draw, game)
+        if game.room == WATCHWOOD_ROOM:
+            self._watchwood(draw, game)
         if game.room == COURT_ROOM:
             self._canals(draw, game)
         if game.room == 1:
@@ -59,6 +65,43 @@ class CampaignRenderer(Renderer):
             for cell in ((4, 4), (6, 4), (9, 4), (11, 4)):
                 x, y = _center(cell)
                 _sprite(draw, "hero", x, y)
+
+    def _watchwood(self, draw, game):
+        beam = beam_path(game.watchwood_stage)
+        for index, shutter in enumerate(SHUTTERS):
+            x, y = _center(shutter)
+            opened = SENSORS[index] in beam
+            draw.rectangle((x - 4, y - 4, x + 3, y + 3), fill=(141, 119, 70) if opened else (54, 66, 71))
+            if not opened:
+                for offset in (-2, 1):
+                    draw.line((x + offset, y - 4, x + offset, y + 3), fill=(207, 197, 135))
+        if len(beam) > 1:
+            draw.line([_center(cell) for cell in beam], fill=(253, 222, 110))
+        for cell, orientation in reflectors(game.watchwood_stage).items():
+            x, y = _center(cell)
+            dy = 2 if orientation == "/" else -2
+            draw.rectangle((x - 3, y - 3, x + 3, y + 3), fill=(55, 91, 102))
+            draw.line((x - 2, y + dy, x + 2, y - dy), fill=(182, 241, 250))
+        for cell in SENSORS + (SOURCE,):
+            x, y = _center(cell)
+            color = (253, 222, 110) if cell in beam else (79, 92, 72)
+            draw.ellipse((x - 2, y - 2, x + 2, y + 2), fill=color)
+        if game.watchwood_stage < len(CONTROLS):
+            x, y = _center(CONTROLS[game.watchwood_stage])
+            draw.rectangle((x - 2, y - 2, x + 2, y + 2), outline=(190, 239, 236))
+
+    def _sawmill(self, draw, game):
+        x, y = _center(SAWMILL_PLATE)
+        draw.rectangle((x - 3, y - 3, x + 3, y + 3), outline=(235, 195, 95))
+        x, y = _center(game.sawmill_log)
+        draw.rectangle((x - 3, y - 2, x + 3, y + 2), fill=(155, 99, 47), outline=(225, 171, 88))
+        draw.line((x - 2, y, x + 2, y), fill=(88, 58, 34))
+        x, y = _center(SAWMILL_SHUTTER)
+        opened = game.sawmill_log == SAWMILL_PLATE
+        draw.rectangle((x - 4, y - 4, x + 3, y + 3), fill=(113, 123, 65) if opened else (69, 63, 56))
+        if not opened:
+            for offset in (-3, 0, 3):
+                draw.line((x + offset, y - 4, x + offset, y + 3), fill=(196, 184, 150))
 
     def _brook(self, draw, game):
         for position in BROOK_CROSSINGS:

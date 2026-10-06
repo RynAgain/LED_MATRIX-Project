@@ -12,7 +12,10 @@ from .campaign import CampaignGame
 from .game import MAX_HEARTS, STEP_TIME
 from .world import BLOCKED
 from .woodland import BROOK_ROOM, BROOK_ERRANDS, brook_open
+from .woodland import SAWMILL_ROOM, SAWMILL_LOG, SAWMILL_PLATE, SAWMILL_SHUTTER
+from .woodland import SAWMILL_LOG_POSITIONS
 from .journal import VillageJournal, VILLAGE_ERRANDS
+from .watchwood import WATCHWOOD_ROOM, CONTROLS, LABELS as WATCH_LABELS, watchwood_passable
 from .puzzle import STONE_START, STONE_PLATE, walking_route
 from .sluice import COURT_ROOM, WHEELS, LABELS, crossing_open
 from .journey import JOURNEY, LOCAL_FIELDS, RETURN_ERRANDS, departed_rooms, first_visit
@@ -21,7 +24,7 @@ from .pulse import RootPulse, GUARDIAN_POSITION, GUARDIAN_HEALTH
 logger = logging.getLogger(__name__)
 SAVE_PATH = Path(__file__).resolve().parents[3] / "config" / "zelda_campaign_save.json"
 SAVE_VERSION = 1
-CONTENT_VERSION = "forest-brook-9"
+CONTENT_VERSION = "forest-watchwood-11"
 MAX_SAVE_BYTES = 65536
 PHASES = {"interact", "explore", "key", "boots", "rune", "lost", "roar",
           "enter", "victory", "defeat", "complete"}
@@ -89,6 +92,19 @@ def _state(state, game, cached=False):
     if ((visit < brook_visit and brook_stage != 0)
             or (visit > brook_visit and brook_stage != len(BROOK_ERRANDS))):
         raise ValueError("Brook progression skipped")
+    _position(state["sawmill_log"], game.areas[SAWMILL_ROOM])
+    sawmill_log = tuple(state["sawmill_log"])
+    sawmill_visit = first_visit(SAWMILL_ROOM)
+    if (sawmill_log not in SAWMILL_LOG_POSITIONS
+            or (visit < sawmill_visit and sawmill_log != SAWMILL_LOG)
+            or (visit > sawmill_visit and sawmill_log != SAWMILL_PLATE)):
+        raise ValueError("Invalid sawmill log progression")
+    watchwood_stage = state["watchwood_stage"]
+    watchwood_visit = first_visit(WATCHWOOD_ROOM)
+    if (type(watchwood_stage) is not int or not 0 <= watchwood_stage <= len(CONTROLS)
+            or (visit < watchwood_visit and watchwood_stage != 0)
+            or (visit > watchwood_visit and watchwood_stage != len(CONTROLS))):
+        raise ValueError("Invalid Watchwood progression")
     stage = state["sluice_stage"]
     if type(stage) is not int or not 0 <= stage <= len(WHEELS):
         raise ValueError("Invalid sluice stage")
@@ -102,7 +118,8 @@ def _state(state, game, cached=False):
     if not isinstance(state["journal"], list):
         raise ValueError("Invalid journal")
     VillageJournal(state["journal"])
-    labels = {""} | set(LABELS) | {errand.label for errand in VILLAGE_ERRANDS + RETURN_ERRANDS + BROOK_ERRANDS}
+    labels = ({"", "MILL OPEN"} | set(LABELS) | set(WATCH_LABELS)
+              | {errand.label for errand in VILLAGE_ERRANDS + RETURN_ERRANDS + BROOK_ERRANDS})
     if state["interaction_label"] not in labels:
         raise ValueError("Unknown interaction")
     if state["phase"] not in PHASES:
@@ -153,6 +170,27 @@ def _state(state, game, cached=False):
         if active and (tuple((guardians[0]["x"], guardians[0]["y"])) != GUARDIAN_POSITION
                        or guardians[0]["hp"] != GUARDIAN_HEALTH - pulse.cycle):
             raise ValueError("Root guardian position or health inconsistent")
+    if room == WATCHWOOD_ROOM:
+        hero = state["hero"]
+        if (any(not watchwood_passable(cell, watchwood_stage) for cell in positions)
+                or walking_route(area.start, (hero["x"], hero["y"]), None,
+                                 lambda cell: watchwood_passable(cell, watchwood_stage)) is None):
+            raise ValueError("Invalid Watchwood actor position")
+        if state["chest_open"] and watchwood_stage != len(CONTROLS):
+            raise ValueError("Watchwood treasury opened before light")
+    if room == SAWMILL_ROOM:
+        def mill_passable(cell):
+            x, y = cell
+            return (0 <= y < len(area.tiles) and 0 <= x < len(area.tiles[0])
+                    and area.tiles[y][x] not in BLOCKED and cell != sawmill_log
+                    and (cell != SAWMILL_SHUTTER or sawmill_log == SAWMILL_PLATE))
+
+        hero = state["hero"]
+        if (not all(mill_passable(cell) for cell in positions)
+                or walking_route(area.start, (hero["x"], hero["y"]), sawmill_log, mill_passable) is None):
+            raise ValueError("Invalid sawmill actor position")
+        if state["chest_open"] and sawmill_log != SAWMILL_PLATE:
+            raise ValueError("Sawmill treasury opened before plate")
     if room == BROOK_ROOM:
         def brook_passable(cell):
             x, y = cell
@@ -185,6 +223,10 @@ def _state(state, game, cached=False):
         if not isinstance(pickup, list) or len(pickup) != 3 or pickup[2] not in ("heart", "rupee"):
             raise ValueError("Invalid pickup")
         _position(pickup[:2], area)
+        if room == WATCHWOOD_ROOM and not watchwood_passable(tuple(pickup[:2]), watchwood_stage):
+            raise ValueError("Pickup inside Watchwood shutter")
+        if room == SAWMILL_ROOM and not mill_passable(tuple(pickup[:2])):
+            raise ValueError("Pickup inside sawmill obstacle")
         if room == BROOK_ROOM and not brook_open(tuple(pickup[:2]), brook_stage):
             raise ValueError("Pickup inside lowered brook bridge")
         if room == COURT_ROOM and not crossing_open(tuple(pickup[:2]), stage):

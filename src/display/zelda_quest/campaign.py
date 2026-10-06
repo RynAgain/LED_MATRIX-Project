@@ -5,7 +5,9 @@ import copy
 from .game import MAX_HEARTS, QuestGame, Actor
 from .world import FOREST_REGION
 from .woodland import WOODLAND_AREAS, BROOK_ROOM, BROOK_ERRANDS, brook_open
+from .woodland import SAWMILL_ROOM, SAWMILL_LOG, SAWMILL_PLATE, SAWMILL_SHUTTER
 from .journal import VillageJournal
+from .watchwood import WATCHWOOD_ROOM, CONTROLS, LABELS as WATCH_LABELS, watchwood_passable
 from .puzzle import STONE_START, STONE_PLATE, next_stone_action
 from .sluice import COURT_ROOM, WHEELS, LABELS, crossing_open
 from .journey import JOURNEY, LOCAL_FIELDS, SPIRIT_TILES
@@ -15,6 +17,8 @@ from .pulse import RootPulse, GUARDIAN_POSITION, GUARDIAN_HEALTH
 class CampaignGame(QuestGame):
     def __init__(self):
         self.brook_stage = 0
+        self.watchwood_stage = 0
+        self.sawmill_log = SAWMILL_LOG
         self.root_pulse = RootPulse()
         self.visit_index = 0
         self.area_states = [None] * len(FOREST_REGION + WOODLAND_AREAS)
@@ -44,6 +48,7 @@ class CampaignGame(QuestGame):
             "has_boots": self.has_boots, "sigils_lit": self.sigils_lit,
             "boss_reinforced": self.boss_reinforced, "stone": list(self.stone),
             "sluice_stage": self.sluice_stage, "brook_stage": self.brook_stage,
+            "sawmill_log": list(self.sawmill_log), "watchwood_stage": self.watchwood_stage,
             "phase": self.phase, "phase_time": self.phase_time,
             "swing": self.swing, "hero_clock": self.hero_clock,
             "enemy_clock": self.enemy_clock, "enemy_turns": self.enemy_turns,
@@ -59,6 +64,7 @@ class CampaignGame(QuestGame):
         state = copy.deepcopy(state)
         state["journal"] = VillageJournal(state["journal"])
         state["stone"] = tuple(state["stone"])
+        state["sawmill_log"] = tuple(state["sawmill_log"])
         state["root_pulse"] = RootPulse(**state["root_pulse"])
         for key in ("hero", "enemies"):
             actors = [state[key]] if key == "hero" else state[key]
@@ -89,6 +95,13 @@ class CampaignGame(QuestGame):
         return "RESTORED"
 
     def passable(self, position):
+        if self.room == WATCHWOOD_ROOM and not watchwood_passable(position, self.watchwood_stage):
+            return False
+        if self.room == SAWMILL_ROOM:
+            if position == self.sawmill_log:
+                return False
+            if position == SAWMILL_SHUTTER and self.sawmill_log != SAWMILL_PLATE:
+                return False
         if self.room == BROOK_ROOM and not brook_open(position, self.brook_stage):
             return False
         if self.room == 1 and position in SPIRIT_TILES and not self.has_boots:
@@ -108,6 +121,29 @@ class CampaignGame(QuestGame):
         return None
 
     def _hero_turn(self):
+        if self.room == SAWMILL_ROOM and self.sawmill_log != SAWMILL_PLATE:
+            targets = [enemy.position for enemy in self.enemies]
+            if not any(cell == self.hero.position or self.path(self.hero.position, cell) for cell in targets):
+                routes = [self.path(self.hero.position, cell) for cell in self.pickups]
+                route = min((route for route in routes if route), key=len, default=[])
+                if route:
+                    self.hero.move(route[0])
+                    return
+                action = next_stone_action(self.hero.position, self.sawmill_log, SAWMILL_PLATE,
+                                           lambda cell: cell != SAWMILL_SHUTTER
+                                           and super(CampaignGame, self).passable(cell))
+                if action:
+                    kind, target = action
+                    if kind == "push":
+                        previous = self.sawmill_log
+                        self.sawmill_log = target
+                        self.hero.move(previous)
+                        if target == SAWMILL_PLATE:
+                            self.interaction_label = "MILL OPEN"
+                            self._set_phase("interact", 0.8)
+                    else:
+                        self.hero.move(target)
+                return
         if self.root_guardian and self.root_pulse.mode == "warning":
             route = self.path(self.hero.position, self.root_pulse.safe_tile, {self.root_guardian.position})
             if route:
@@ -141,6 +177,8 @@ class CampaignGame(QuestGame):
             super()._enemy_turn()
 
     def _objective(self):
+        if self.room == WATCHWOOD_ROOM and self.watchwood_stage < len(CONTROLS):
+            return CONTROLS[self.watchwood_stage]
         if self.room == BROOK_ROOM and self.brook_stage < len(BROOK_ERRANDS):
             return BROOK_ERRANDS[self.brook_stage].position
         if self.visit.exit:
@@ -185,6 +223,12 @@ class CampaignGame(QuestGame):
                 self.brook_stage += 1
                 self.interaction_label = errand.label
                 self._set_phase("interact", 0.8)
+        if (self.room == WATCHWOOD_ROOM and self.phase == "explore" and self.hero.hp > 0
+                and self.watchwood_stage < len(CONTROLS)
+                and self.hero.position == CONTROLS[self.watchwood_stage]):
+            self.interaction_label = WATCH_LABELS[self.watchwood_stage]
+            self.watchwood_stage += 1
+            self._set_phase("interact", 0.8)
         if self.room == 2 and self.has_boots and self.root_pulse.mode == "dormant":
             self.enemies.append(Actor(*GUARDIAN_POSITION, kind="guardian", hp=GUARDIAN_HEALTH))
             self.root_pulse.warn()

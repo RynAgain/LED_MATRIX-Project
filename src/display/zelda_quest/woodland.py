@@ -1,6 +1,7 @@
 """Authored woodland subareas and their spatial objective dependencies."""
 from .world import Area
 from .journal import Errand
+from .watchwood import WATCHWOOD
 
 
 BROOK_ROOM = 5
@@ -31,7 +32,38 @@ BROOK = Area("BROOK", (
     ("guard", 7, 13, 2), ("slime", 13, 16, 1), ("guard", 26, 14, 2),
     ("slime", 10, 4, 1), ("guard", 25, 4, 2),
 ), chest=(26, 4), gate=(29, 7), gate_approach=(28, 7))
-WOODLAND_AREAS = (BROOK,)
+SAWMILL_ROOM = 6
+SAWMILL = Area("SAWMILL", (
+    '##############################',
+    '##############################',
+    '##.........##########........#',
+    '##..HH.....##########........#',
+    '##.........##########........#',
+    '##.........##########.....C..#',
+    '##.....HH..##########........#',
+    '##.........##########........#',
+    '##.........##########...HHH..#',
+    '##.........##########...HHH..#',
+    '##..........##.######........#',
+    '###########..........=.......#',
+    '###########....######........#',
+    '#####################........#',
+    '#####################........#',
+    '#####################...HH...#',
+    '#####################........#',
+    '#####################........#',
+    '#####################......G.#',
+    '#####################........#',
+    '#####################........#',
+    '##############################',
+), (3, 9), (("slime", 4, 4, 1), ("guard", 8, 8, 2),
+            ("guard", 24, 12, 2), ("slime", 25, 6, 1)),
+    chest=(26, 5), gate=(27, 18), gate_approach=(26, 18))
+SAWMILL_LOG = (12, 11)
+SAWMILL_PLATE = (14, 10)
+SAWMILL_SHUTTER = (21, 11)
+SAWMILL_LOG_POSITIONS = (SAWMILL_LOG, (13, 11), (14, 11), SAWMILL_PLATE)
+WOODLAND_AREAS = (BROOK, SAWMILL, WATCHWOOD)
 
 BROOK_ERRANDS = (
     Errand("dam_request", (5, 15), "talk", label="DAM BROKE"),

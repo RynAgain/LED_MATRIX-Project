@@ -2,7 +2,8 @@
 from dataclasses import dataclass
 
 from .journal import Errand
-from .woodland import BROOK, BROOK_ROOM
+from .watchwood import WATCHWOOD, WATCHWOOD_ROOM
+from .woodland import BROOK, BROOK_ROOM, SAWMILL, SAWMILL_ROOM
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,8 @@ JOURNEY = (
     Visit(0, (1, 12)),
     Visit(1, (1, 14)),
     Visit(BROOK_ROOM, BROOK.start),
+    Visit(SAWMILL_ROOM, SAWMILL.start),
+    Visit(WATCHWOOD_ROOM, WATCHWOOD.start),
     Visit(2, (1, 10)),
     Visit(3, (1, 14)),
     Visit(2, (15, 10), (1, 10)),

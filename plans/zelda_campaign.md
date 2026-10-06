@@ -2,10 +2,10 @@
 
 ## Current checkpoint, 2026-10-06
 - **Roadmap:** all eight regions planned, with mandatory review after each complete region. See "Eight-region roadmap and stopping points" below.
-- **Active scope:** M1 only, a complete 20-minute opening chapter. Later regions are planning-only. Ryan authorized publishing the current interim slice on 2026-10-06, then continuing locally; see interim release section.
-- **Measured delivered content:** 4m58.45s at normal speed, zero deaths. Remaining M1 content gap: 15m01.55s. No padding or replay counted.
-- **Latest completed content:** Brook Crossing. Fresh-process stages, actual simulator autosaves, lint/compile and visual checks pass. Current full suite: 1,524 passed with unchanged config bytes. Independent read-only review completed; no blocking Brook correctness findings after lead triage.
-- **Next authored content:** geometry-proven Old Sawmill and Watchwood, followed by the connected inner shrine. Designs/allocations are not delivered minutes.
+- **Active scope:** Publish current 5m57s slice, then pause at Ryan's request. M1 remains incomplete; no further region authoring while paused.
+- **Measured release content:** 5m57.48s at normal speed, zero deaths, including Sawmill and Watchwood. Remaining M1 gap: 14m02.52s. No padding or replay counted.
+- **Current release:** Watchwood/Sawmill added to ZELDA WOODS. Focused tests, fresh-process stages, actual simulator autosaves, lint/compile and visual checks pass. Final shipping suite/review and push receipt are recorded at the end. Real local configuration remains preserved.
+- **After the break:** Connected inner shrine is next, beginning with a constrained simultaneous-plate Seed Vault. Only temporary geometry experiments exist; no shrine content or later region implemented.
 - **History below:** earlier durations and test totals describe their own snapshots, not current acceptance. M1 is not complete.
 
 ## Goal and release gate
@@ -270,3 +270,62 @@ These are planning allocations, not measured content. The 125-minute outline lea
 
 - Corrected exact shipping snapshot passed **1,525 tests in 241.42s**, lint and compile; config hashes unchanged. Count excludes eight unrelated local Skeleton tests and includes nine live-demo tests. First snapshot had precisely one failure, missing zelda_woods in shipped defaults; corrected without touching local config or weakening assertion.
 - Final bridge/guardian/WOODS END contact sheet inspected from shipping source. Measured route still 298.450s, zero deaths. Full continuous two-playthrough simulator soak remains in flight before push.
+
+### Interim publication receipt, pending push approval
+- Release committed locally as a1b3b10 (feat: publish resumable Zelda Woods forest demo). Exact source/tests match the verified shipping snapshot; unrelated config/Skeleton hashes and registry hunk unchanged.
+- Full registered Lock Demo soak passed: 18,300 rendered frames across 610 simulated wall seconds, two complete 298.450s playthroughs with zero deaths, then seven seconds of the third run saved correctly.
+- Push preflight was blocked by the explicit Bash(*git push*) approval rule: its approval prompt expired unanswered. No remote mutation occurred; origin/main remains 4ff00b4. Need approval for git push origin a1b3b10c4cd43735d383c6e89af97029e0dbe7a6:refs/heads/main. Do not bypass the rule with another transport or tool.
+- Only publication is blocked. Local M1 continuation remains authorized; keep future content out of the exact a1b3b10 release commit.
+
+### Local Sawmill integration repair, not part of interim release
+- Initial focused integration run failed (6 failed, 37 passed, 56 errors): campaign stalled in Sawmill before its first push, so downstream journey fixtures could not finish.
+- Reproduced room 6, hero (6,6), HP 4, heart at (6,7), log (12,11), two unreachable eastern enemies. The Sawmill override deferred because a pickup was reachable, but base AI only pursues ordinary pickups when there are no threats anywhere. Neither layer chose a reachable action.
+- Scoped repair: when no Sawmill enemy is reachable, collect a reachable pickup before solving the log. Keep base/legacy AI unchanged. Regress both pickup kinds at low/normal/full health, then rerun focused tests, lint, compile, fresh-process stage verification and serial full suite. No further publication or release-commit changes.
+
+### Sawmill batch verification, local only
+- Repaired focused suite: 71 passed in 4.01s, including six direct pickup-stall regressions. Two lint formatting errors were corrected; all Zelda-source/test full-style lint and whole-source compileall now pass. No standalone build target exists.
+- Complete route: 321.266666667 content seconds (5m21.27s), zero deaths at 24/30/60 FPS. Sawmill adds 22.816666667 seconds, not multiple minutes. Remaining M1 gap: 878.733333333 seconds (14m38.73s).
+- All four log-position saves resumed in actual fresh processes with exact state equality. Whole-route audit: 510 distinct tiles, 71 exact JSON roundtrips, final save reload exact, approximately 0.250ms per sampled rendered frame. Inspected sawmill-stages.png and regions.png; current region.gif regenerated.
+- Actual 31-second RGBMatrix preview began mid-push, solved/departed the mill, and saved at 174.5667 and 175.5500 active seconds; final disk reload matched the final write. No live updater/device calls.
+- A genuine 60-second forest-brook-9 save generated from the corrected release snapshot was rejected by the local forest-sawmill-10 build and preserved byte-for-byte; writes remain disabled for that file. Before publishing any later content, decide and verify a migration/reset path. Current checkpoint publication is independent and unchanged.
+- Serial input-first full-suite verification and independent read-only review remain in progress. Do not equate earlier release test results with acceptance of this working tree.
+
+### Sawmill final-review and verification qualification
+- Independent read-only review found no blocking Sawmill correctness/save-safety defect. Its occupied-enemy reachability concern does not reproduce here: before the shutter opens all reachable western enemies are ordinary threats; if a path to a farther enemy crosses another, the first enemy on that route is itself reachable. No speculative legacy-AI rewrite is justified.
+- Manual review corrected new regression health values from [2,4,6] to [2,4,MAX_HEARTS], where MAX_HEARTS is 5. All 20 Sawmill tests, lint and compile pass afterward; production source unchanged.
+- Full working-directory suite returned 1 failed, 1,553 passed in 196.21s; config hashes unchanged. The only failure was the preserved local config lacking zelda_woods, although a1b3b10 already contains the correct shipping default. Do not overwrite unrelated local config to hide this discrepancy.
+- An isolated exact-source snapshot is now running the full suite with only the committed zelda_woods default added to temporary config; retains local Skeleton source/test/config, audits both configs and compares source bytes afterward. This is candidate evidence, not an unqualified green working-directory suite.
+- Remote refs/heads/main was checked directly and remains 4ff00b4ff574c6dd1be810989b18df10f3395c43. Release a1b3b10 is still not pushed; original tool approval expired. All unrelated config/Skeleton file hashes match the pre-release audit.
+
+### Next local M1 batch: Watchwood proof before integration
+- Keep the next batch inside Greenwood and reserve appended area ID 7. Preserve the exact a1b3b10 release and do not publish local Sawmill/Watchwood automatically.
+- Intended causal chain: a sunlight source reaches a first adjustable reflector; its redirected beam lights a side-path sensor, physically opening access to a second reflector. Aligning the second reflector routes that same beam to the tower sensor and opens the treasury path. This must be visible light routing, not two labeled switches with a timer.
+- Before implementation, prove on one actual rectangular Area grid: first control reachable initially, second blocked until first sensor, treasury blocked until both controls, every required interaction on a walkable adjacent tile, and an actual source-to-reflector-to-sensor beam path at each stage. Reject disconnected routes or coordinate-only sketches before touching campaign state.
+- Use existing patterns: woodland.BROOK/SAWMILL for stable appended areas; journey.Visit/first_visit for route milestones; campaign._objective/_contacts for real-position interactions; preview._brook/_sawmill for world-layer state art; persistence._state/SaveStore for exact flags, connectivity and byte-preserved invalid saves. New beam geometry belongs in a small content-specific function only if proven necessary, no generic framework for later regions.
+- Test prereqs/no-bypass, wrong-position interactions, changing beam pixels and physical passability, reachable combat/pickups, actual autonomous completion, checkpoint rollback, exact fresh-process stage resumes and preserved incompatible saves. Measure normal-speed action time and remaining M1 gap; do not assign minutes to this room by name.
+
+- Final Sawmill candidate verification: 1,554 passed in 205.07s, exit 0, repository/snapshot config changes [], source_matches true. Snapshot sawmill-candidate-1exjmepc differs only by adding the already-committed zelda_woods default to temporary config. Together with lint, compile, simulator, exact resume and independent review, this closes the local Sawmill batch. No push or device update occurred. Watchwood proof helper is prepared but not executed or integrated.
+
+### Watchwood integration plan, proof passed
+- Executed temporary geometry proof: stage 0/1/2 reaches 220/401/561 tiles and beam lengths 9/34/33; second control is blocked until first sensor lights and treasury until tower sensor lights. Both controls are adjacent to their reflectors. This is feasibility, not delivered playtime.
+- Add watchwood.py with authored rectangular map, two reflector orientations and finite beam tracing (walls stop light, the water aperture transmits light but blocks feet). Actual beam sensor hits determine shutter passability; stage alone must not directly open a shutter. Decorate rooms without blocking required beam lines; six ordinary encounters, not added HP or waves.
+- Compose WATCHWOOD after stable woodland IDs (area 7) and insert its Visit after Sawmill. Persist watchwood_stage globally like brook_stage, capture checkpoints, and reject before/after-visit inconsistencies, closed-shutter actors/pickups, inaccessible hero and premature treasury. Shared watchwood_passable helper defines both gameplay and save geometry. Bump local content version, keep incompatible saves untouched.
+- Campaign uses existing real-position objective/contact hooks to rotate reflectors. Renderer draws the actual traced beam, orientations, sensor glow and shutters under actors. Keep legacy game, release commit, normal cadence and unrelated Skeleton/config untouched.
+- Add Watchwood tests modeled on test_zelda_woodland (stages/gates), test_zelda_sawmill (spatial validation/cache), test_zelda_journey (progression), test_zelda_campaign (save preservation) and renderer tests. Verify focused serial tests/lint/compile, measured route and fresh-process resumes, actual simulator, then isolated full suite with committed default only.
+
+### Watchwood local implementation and measured verification
+- Added authored 32x22 Watchwood with six ordinary enemies, two adjustable reflectors plus fixed elbow, a water light-aperture, side-path sensor and tower sensor. Shutters derive from actual traced beam hits; light and walking use different aperture rules. Stage0/1/2 geometry/no-bypass, correct-position/order/death contacts and renderer state changes are tested.
+- Integration regression suite: 89 passed. New Watchwood suite: 27 passed, 100% statement coverage of watchwood.py; full-style Zelda lint and source/tests compileall pass. Coverage run emitted one NumPy reimport warning from pygame surfarray during fixture setup, not silenced; full-suite non-coverage check remains pending.
+- Actual complete route at 24/30/60 FPS: 357.483333333 seconds (5m57.48s), zero deaths. Watchwood adds 36.216666667s. M1 still lacks 842.516666667 seconds (14m02.52s); no multi-minute-room claim.
+- Three fresh-process stage continuations matched exactly. Full route has 602 distinct tiles and 79 JSON roundtrips, final disk reload exact, approximately 0.299ms per sampled frame. Actual stage contact sheet inspected; first/second reflector beams and labels visible. Actual simulator, isolated serial full suite and independent review remain running.
+- Release a1b3b10 and real local config are untouched. Local content version forest-watchwood-11 rejects/preserves older content saves; later publication still requires a migration/reset decision. Next implementation is inner shrine after elder-tree restoration, before Treant, new stable IDs8 onward.
+
+## Publish current slice and pause, Ryan requested 2026-10-06
+- Ryan requested publishing/pushing what exists now and taking a break. Stop expansion and cancel speculative shrine design. Autonomous region-completion goal cleared, not completed; 20-minute M1 remains unmet.
+- Publish the latest 357.483s Watchwood/Sawmill slice, not only the earlier a1b3b10 Brook checkpoint. Remote main confirmed still 4ff00b4, so no prior forest-save version was released through this repo; this release introduces forest-watchwood-11. Preserve any incompatible local development save, never delete or overwrite it.
+- Stage only Zelda content/test files, README duration and this tracker. Keep original short ZELDA QUEST, baseline shipping defaults and unrelated local Skeleton/config intact. Finish active verification/review, test exact staged shipping snapshot excluding unrelated work, then normal fast-forward push (explicit git-push approval still applies). Stop after receipt; do not resume region work.
+
+### Final shipping verification for requested pause release
+- Exact shipping tree 890406dfc2d25ec90cd3bdaece660bedb2f565ef passed 1,574 tests in 201.11s, full Zelda lint and source/tests compilation, config hashes unchanged. Count excludes eight unrelated Skeleton tests; candidate with them passed 1,582. Later changes are tracker documentation only.
+- Independent Watchwood review found no blocking geometry/navigation/persistence/rendering defects. Reviewer wording corrected: incompatible saves are preserved, not discarded; reachability is enforced for hero, passability for enemy/pickup positions. Actual 31-second stage1 simulator saved twice at 197.3667/198.3500 seconds and reloaded with Watchwood solved/departed.
+- Scope audit confirms original short-demo source unchanged from earlier verified release, no unrelated registry/config/Skeleton staging, and all unrelated byte hashes preserved. Full registered two-loop soak is still running; push receipt follows separately. Development remains paused.
