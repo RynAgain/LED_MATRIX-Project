@@ -73,3 +73,9 @@ config/.backup/
 
 # Auto-updater failure counter (runtime state, never commit)
 .update_failures
+
+# Zelda preview and live-demo runtime saves
+config/zelda_campaign_save.json
+config/zelda_campaign_save.json.*.tmp
+config/zelda_woods_save.json
+config/zelda_woods_save.json.*.tmp

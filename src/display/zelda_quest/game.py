@@ -4,6 +4,8 @@ from collections import deque
 from dataclasses import dataclass
 import random
 
+from .world import Area, BLOCKED
+
 TILE = 8
 HUD = 8
 WIDTH = HEIGHT = 64
@@ -76,8 +78,19 @@ def distance(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+LEGACY_AREAS = (
+    Area("FOREST", ROOMS[0], (1, 5),
+         (("slime", 3, 1, 1), ("slime", 2, 3, 1), ("guard", 6, 3, 2)),
+         chest=CHEST, gate=GATE, gate_approach=(6, 4), shuffle_enemies=True),
+    Area("TEMPLE", ROOMS[1], (3, 5),
+         (("guard", 1, 2, 2), ("guard", 6, 3, 2), ("guardian", 3, 2, 8)),
+         theme=1, relic=RELIC),
+)
+
+
 class QuestGame:
-    def __init__(self, rng=None):
+    def __init__(self, rng=None, areas=LEGACY_AREAS):
+        self.areas = areas
         self.rng = rng or random.Random()
         self.elapsed = 0.0
         self.runs = 0
@@ -86,11 +99,12 @@ class QuestGame:
 
     def _restart(self):
         self.runs += 1
-        self.hero = Actor(1, 5)
+        self.hero = Actor(*self.areas[0].start)
         self.rupees = 0
         self.has_key = False
         self.chest_open = False
         self.gate_open = False
+        self.has_boots = False
         self._load_room(0)
 
     def _load_room(self, room):
@@ -101,25 +115,30 @@ class QuestGame:
         self.hero_clock = STEP_TIME
         self.enemy_clock = 0.75
         self.pickups = {}
-        self.hero.x, self.hero.y = (1, 5) if room == 0 else (3, 5)
+        self.enemy_turns = 0
+        self.sigils_lit = 0
+        self.boss_reinforced = False
+        self.hero.x, self.hero.y = self.area.start
         self.hero.previous = self.hero.position
         self.hero.motion = 0.0
-        if room == 0:
-            positions = [(3, 1), (2, 3), (6, 3)]
+        positions = [(x, y) for _, x, y, _ in self.area.spawns]
+        if self.area.shuffle_enemies:
             self.rng.shuffle(positions)
-            self.enemies = [Actor(*p, kind="slime" if i < 2 else "guard", hp=i // 2 + 1)
-                            for i, p in enumerate(positions)]
-        else:
-            self.enemies = [Actor(1, 2, kind="guard", hp=2),
-                            Actor(6, 3, kind="guard", hp=2),
-                            Actor(3, 2, kind="guardian", hp=8)]
+        self.enemies = [Actor(*position, kind=spawn[0], hp=spawn[3])
+                        for position, spawn in zip(positions, self.area.spawns)]
+
+    @property
+    def area(self):
+        return self.areas[self.room]
 
     def passable(self, position):
         x, y = position
-        if not (0 <= y < len(ROOMS[self.room]) and 0 <= x < len(ROOMS[self.room][0])):
+        if not (0 <= y < len(self.area.tiles) and 0 <= x < len(self.area.tiles[0])):
             return False
-        tile = ROOMS[self.room][y][x]
-        return tile not in "#~" and (tile != "G" or self.gate_open)
+        tile = self.area.tiles[y][x]
+        if tile in BLOCKED or (tile == "V" and not self.has_boots):
+            return False
+        return position != self.area.gate or self.gate_open
 
     def path(self, start, goal, blocked=()):
         if start == goal:
@@ -142,6 +161,23 @@ class QuestGame:
                 queue.append(cell)
         return []
 
+    @property
+    def boss(self):
+        return next((e for e in self.enemies if e.kind == self.area.boss), None)
+
+    @property
+    def boss_armored(self):
+        """The treant's bark holds while any sapling is still rooted."""
+        return self.boss is not None and any(e.kind == "sapling" for e in self.enemies)
+
+    @property
+    def next_sigil(self):
+        sigils = self.area.sigils
+        return sigils[self.sigils_lit] if self.sigils_lit < len(sigils) else None
+
+    def _wrong_sigils(self):
+        return {sigil for index, sigil in enumerate(self.area.sigils) if index > self.sigils_lit}
+
     def _set_phase(self, phase, seconds):
         self.phase = phase
         self.phase_time = seconds
@@ -149,48 +185,80 @@ class QuestGame:
     def _strike(self, enemy):
         self.hero.facing = (enemy.x - self.hero.x, enemy.y - self.hero.y)
         self.swing = 0.20
+        if enemy is self.boss and self.boss_armored:
+            enemy.flash = 0.18
+            return
         enemy.hp -= 1
         enemy.flash = 0.18
+        if enemy is self.boss and enemy.hp <= 4 and not self.boss_reinforced:
+            self._reinforce()
         if enemy.hp <= 0:
             self.enemies.remove(enemy)
             self.pickups[enemy.position] = "heart" if self.hero.hp < MAX_HEARTS else "rupee"
 
+    def _objective(self):
+        """Ordered goals: boots first, then the sigil order, the key, then the exit."""
+        if self.area.boots and not self.has_boots:
+            return self.area.boots
+        if self.next_sigil:
+            return self.next_sigil
+        if self.area.chest and not self.chest_open:
+            return self.area.chest
+        return self.area.gate or self.area.relic
+
+    def _reinforce(self):
+        """At half health the treant roars one sapling back out of the roots."""
+        taken = {self.hero.position} | {e.position for e in self.enemies}
+        candidates = self.area.reachable() - taken
+        candidates = [cell for cell in candidates if self.passable(cell)]
+        if not candidates:
+            return
+        position = min(candidates, key=lambda cell: (distance(cell, self.area.sapling), cell))
+        self.enemies.append(Actor(*position, kind="sapling", hp=2))
+        self.boss_reinforced = True
+        self._set_phase("roar", 0.9)
+
     def _hero_turn(self):
         occupied = {e.position for e in self.enemies}
+        taboo = self._wrong_sigils()
         if self.hero.hp <= 2:
-            routes = [self.path(self.hero.position, p, occupied)
+            routes = [self.path(self.hero.position, p, occupied | taboo)
                       for p, kind in self.pickups.items() if kind == "heart"]
             route = min((r for r in routes if r), key=len, default=[])
             if route:
                 self.hero.move(route[0])
                 return
-        adjacent = [e for e in self.enemies if distance(self.hero.position, e.position) == 1]
+        threats = [e for e in self.enemies if not (e is self.boss and self.boss_armored)]
+        adjacent = [e for e in threats if distance(self.hero.position, e.position) == 1]
         if adjacent:
             self._strike(adjacent[0])
             return
-        if self.enemies:
-            routes = [self.path(self.hero.position, e.position, occupied - {e.position})
-                      for e in self.enemies]
+        route = []
+        if threats:
+            routes = [self.path(self.hero.position, e.position, occupied - {e.position} | taboo)
+                      for e in threats]
             routes = [r for r in routes if r]
             route = min(routes, key=len) if routes else []
         elif self.pickups:
-            routes = [self.path(self.hero.position, p) for p in self.pickups]
+            routes = [self.path(self.hero.position, p, taboo) for p in self.pickups]
             route = min((r for r in routes if r), key=len, default=[])
-        else:
-            goal = CHEST if self.room == 0 and not self.chest_open else GATE if self.room == 0 else RELIC
-            if goal == GATE and self.has_key and distance(self.hero.position, GATE) == 1:
+        if not route:
+            goal = self._objective()
+            if goal == self.area.gate and self.has_key and distance(self.hero.position, goal) == 1:
                 self.has_key = False
                 self.gate_open = True
-            # Approach the locked gate without treating it as walkable.
-            target = (6, 4) if goal == GATE and not self.gate_open else goal
-            route = self.path(self.hero.position, target)
+            target = self.area.gate_approach if goal == self.area.gate and not self.gate_open else goal
+            route = self.path(self.hero.position, target, taboo - {target})
         if route and route[0] not in occupied:
             self.hero.move(route[0])
 
     def _enemy_turn(self):
         occupied = {e.position for e in self.enemies}
+        self.enemy_turns += 1
         for enemy in self.enemies:
-            if distance(enemy.position, self.hero.position) <= 1:
+            if enemy.kind == "sapling" or distance(enemy.position, self.hero.position) <= 1:
+                continue
+            if enemy.kind == "treant" and self.enemy_turns % 2:
                 continue
             blocked = occupied - {enemy.position}
             route = self.path(enemy.position, self.hero.position, blocked)
@@ -207,20 +275,47 @@ class QuestGame:
             self.rupees += 1
         for enemy in self.enemies:
             if distance(enemy.position, self.hero.position) == 1 and enemy.cooldown <= 0:
-                enemy.cooldown = 1.05 if enemy.kind != "guardian" else 0.85
+                enemy.cooldown = 0.85 if enemy.kind == "guardian" else 1.05
                 if self.hero.flash <= 0 and self.swing <= 0:
                     self.hero.hp = max(0, self.hero.hp - 1)
                     self.hero.flash = 0.65
         if self.hero.hp <= 0:
             self._set_phase("defeat", 2.0)
-        elif self.room == 0 and self.hero.position == CHEST and not self.chest_open and not self.enemies:
+        elif self.area.boots and self.hero.position == self.area.boots and not self.has_boots:
+            self.has_boots = True
+            self._set_phase("boots", 1.2)
+        elif self.hero.position in self.area.sigils:
+            self._touch_sigil(self.area.sigils.index(self.hero.position))
+        elif self.area.chest and self.hero.position == self.area.chest and not self.chest_open and not self.enemies:
             self.chest_open = self.has_key = True
             self._set_phase("key", 1.2)
-        elif self.room == 0 and self.hero.position == GATE and self.gate_open:
+        elif self.area.gate and self.hero.position == self.area.gate and self.gate_open:
             self._set_phase("enter", 0.7)
-        elif self.room == 1 and self.hero.position == RELIC and not self.enemies:
+        elif self.area.relic and self.hero.position == self.area.relic and not self.enemies:
             self.wins += 1
             self._set_phase("victory", 2.5)
+
+    def _touch_sigil(self, index):
+        """Sigils must be woken in order; a wrong stone sends the hero back out."""
+        if index == self.sigils_lit:
+            self.sigils_lit += 1
+            self._set_phase("rune", 0.8)
+            if self.sigils_lit == len(self.area.sigils):
+                self.gate_open = True
+        elif index > self.sigils_lit:
+            self.sigils_lit = 0
+            self.hero.x, self.hero.y = self.area.start
+            self.hero.previous = self.hero.position
+            self.hero.motion = 0.0
+            self._set_phase("lost", 1.2)
+
+    def _phase_expired(self):
+        if self.phase == "enter":
+            self._load_room(1)
+        elif self.phase in ("victory", "defeat"):
+            self._restart()
+        else:
+            self.phase = "explore"
 
     def update(self, dt):
         dt = max(0.0, min(dt, 0.1))
@@ -234,12 +329,7 @@ class QuestGame:
         if self.phase != "explore":
             self.phase_time -= dt
             if self.phase_time <= 0:
-                if self.phase == "enter":
-                    self._load_room(1)
-                elif self.phase in ("victory", "defeat"):
-                    self._restart()
-                else:
-                    self.phase = "explore"
+                self._phase_expired()
             return
         self.hero_clock -= dt
         self.enemy_clock -= dt

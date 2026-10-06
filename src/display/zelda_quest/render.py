@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 
 from src.display._fonts import _draw_text, _text_width
 from src.display._utils import _draw_number
-from .game import CHEST, GATE, RELIC, HUD, TILE, WIDTH, HEIGHT, MAX_HEARTS, ROOMS
+from .game import HUD, TILE, WIDTH, HEIGHT, MAX_HEARTS, LEGACY_AREAS
 
 PALETTE = {
     "o": (22, 29, 38), "g": (62, 171, 65), "G": (128, 222, 87),
@@ -24,6 +24,10 @@ SPRITES = {
     "rupee": ("..c..", ".cwc.", ".cgc.", ".cgc.", "..c.."),
     "key": (".yy..", ".y.y.", "..y..", "..yy.", "..y.."),
     "relic": ("...y...", "..yyy..", ".yyyyy.", "...o...", "..yyy..", ".yy.yy.", "yyy.yyy"),
+    "boots": ("b...b", "bb.bb", "bbbbb", "yyyyy", ".y.y."),
+    "sapling": (".......", "..GgG..", ".GgGgG.", "..bob..", "..bbb..", "..b.b..", "......."),
+    "treant": ("..GGGGG..", ".GGgGgGG.", "GGgGGGgGG", ".GbbbbbG.", "..bwowb..",
+               "..bbbbb..", ".b.bbb.b.", "b..bbb..b", "..b...b.."),
 }
 
 
@@ -36,8 +40,32 @@ def _sprite(draw, kind, x, y, flash=False, flip=False):
                 draw.point((x + dx - len(row) // 2, y + dy - len(rows) // 2), fill=color)
 
 
-def _tile(draw, room, tile, x, y):
-    if room == 0:
+def _hut(draw, x, y):
+    draw.rectangle((x, y, x + 7, y + 7), fill=(126, 84, 56))
+    draw.rectangle((x, y, x + 7, y + 2), fill=(92, 52, 44))
+    draw.line((x, y + 3, x + 7, y + 3), fill=(63, 38, 33))
+    draw.point((x + 3, y + 5), fill=(255, 219, 89))
+
+
+def _shrine_tile(draw, tile, x, y):
+    draw.rectangle((x, y, x + 7, y + 7), fill=(43, 54, 48))
+    draw.line((x, y + 7, x + 7, y + 7), fill=(31, 40, 36))
+    draw.line((x + 7, y, x + 7, y + 7), fill=(31, 40, 36))
+    if tile == "#":
+        draw.rectangle((x, y, x + 7, y + 6), fill=(84, 96, 83))
+        draw.line((x, y, x + 7, y), fill=(123, 140, 112))
+        draw.line((x + 2, y + 1, x + 5, y + 4), fill=(58, 88, 55))
+    elif tile == "~":
+        draw.rectangle((x + 1, y + 1, x + 6, y + 6), fill=(96, 66, 32))
+        draw.point((x + 3, y + 3), fill=(173, 124, 54))
+    else:
+        draw.rectangle((x + 2, y + 2, x + 5, y + 5), fill=(52, 65, 57))
+
+
+def _tile(draw, theme, tile, x, y):
+    if theme == 2:
+        _shrine_tile(draw, tile, x, y)
+    elif theme == 0:
         draw.rectangle((x, y, x + 7, y + 7), fill=(40, 98, 51))
         draw.point((x + 1, y + 2), fill=(73, 127, 61))
         draw.point((x + 6, y + 6), fill=(58, 116, 57))
@@ -45,6 +73,8 @@ def _tile(draw, room, tile, x, y):
             draw.rectangle((x + 3, y + 4, x + 4, y + 7), fill=(98, 65, 40))
             draw.polygon([(x + 4, y), (x + 7, y + 5), (x, y + 5)], fill=(19, 58, 40))
             draw.polygon([(x + 3, y), (x + 6, y + 3), (x + 1, y + 3)], fill=(56, 137, 61))
+        elif tile == "H":
+            _hut(draw, x, y)
         elif tile in "~=":
             draw.rectangle((x, y, x + 7, y + 7), fill=(27, 77, 132))
             if tile == "=":
@@ -67,44 +97,104 @@ def _center(cell):
     return cell[0] * TILE + TILE // 2, cell[1] * TILE + TILE // 2 + HUD
 
 
+def camera_origin(game):
+    x, y = game.hero.screen_position
+    map_width = len(game.area.tiles[0]) * TILE
+    map_height = len(game.area.tiles) * TILE + HUD
+    return (int(max(0, min(x - WIDTH / 2, map_width - WIDTH))),
+            int(max(0, min(y - (HEIGHT + HUD) / 2, map_height - HEIGHT))))
+
+
 class Renderer:
-    def __init__(self):
+    guardian_health = 8
+
+    def __init__(self, areas=LEGACY_AREAS):
         self.backgrounds = []
-        for room, rows in enumerate(ROOMS):
-            image = Image.new("RGB", (WIDTH, HEIGHT))
+        for area in areas:
+            rows = area.tiles
+            image = Image.new("RGB", (len(rows[0]) * TILE, len(rows) * TILE + HUD))
             draw = ImageDraw.Draw(image)
             for y, row in enumerate(rows):
                 for x, tile in enumerate(row):
-                    _tile(draw, room, tile, x * TILE, y * TILE + HUD)
+                    _tile(draw, area.theme, tile, x * TILE, y * TILE + HUD)
             self.backgrounds.append(image)
 
+    def _sigil(self, draw, game, position):
+        index = game.area.sigils.index(position)
+        x, y = _center(position)
+        draw.rectangle((x - 2, y - 3, x + 2, y + 3), fill=(92, 97, 104), outline=(52, 57, 64))
+        lit = index < game.sigils_lit
+        if lit:
+            color = (255, 219, 89)
+        elif position == game.next_sigil and int(game.elapsed * 3) % 2:
+            color = (129, 220, 255)
+        else:
+            color = (63, 70, 78)
+        draw.line((x, y - 2, x, y + 2), fill=color)
+        draw.line((x - 1, y, x + 1, y), fill=color)
+        if lit:
+            draw.point((x, y - 4), fill=(255, 245, 190))
+
+    def _vines(self, draw, game, x, y):
+        """Thorns bar the way until the boots trample them flat."""
+        if game.has_boots:
+            draw.line((x, y + 6, x + 7, y + 6), fill=(58, 92, 48))
+            draw.line((x, y + 7, x + 7, y + 7), fill=(44, 70, 38))
+            return
+        draw.rectangle((x, y, x + 7, y + 7), fill=(29, 58, 35))
+        for offset in (0, 3, 6):
+            draw.line((x + offset, y, x + offset + 3, y + 7), fill=(86, 148, 68))
+            draw.line((x + 7 - offset, y, x + 4 - offset, y + 7), fill=(58, 112, 52))
+        draw.point((x + 3, y + 3), fill=(213, 63, 70))
+
+    def _region(self, draw, game):
+        for position in game.area.sigils:
+            self._sigil(draw, game, position)
+        for y, row in enumerate(game.area.tiles):
+            for x, tile in enumerate(row):
+                if tile == "V":
+                    self._vines(draw, game, x * TILE, y * TILE + HUD)
+        if game.area.boots and not game.has_boots:
+            x, y = _center(game.area.boots)
+            draw.rectangle((x - 3, y + 2, x + 3, y + 3), fill=(63, 52, 40))
+            _sprite(draw, "boots", x, y - 1 + int(math.sin(game.elapsed * 3)))
+
     def _scenery(self, draw, game):
-        if game.room == 0:
-            for y, row in enumerate(ROOMS[0]):
+        if game.area.theme == 2:
+            for y, row in enumerate(game.area.tiles):
+                for x, tile in enumerate(row):
+                    if tile == "~":
+                        glow = int(game.elapsed * 3 + x + y) % 3
+                        draw.point((x * TILE + 2 + glow, y * TILE + HUD + 4), fill=(222, 170, 76))
+        elif game.area.theme == 0:
+            for y, row in enumerate(game.area.tiles):
                 for x, tile in enumerate(row):
                     if tile == "~":
                         wave = int(game.elapsed * 4 + y) % 5
                         draw.line((x * TILE + wave, y * TILE + HUD + 3,
                                    x * TILE + wave + 2, y * TILE + HUD + 3), fill=(83, 155, 181))
-            x, y = _center(CHEST)
-            draw.rectangle((x - 3, y - 2, x + 3, y + 2), fill=(111, 65, 32), outline=(237, 180, 67))
-            draw.line((x - 2, y - 1, x + 2, y - 1), fill=(24, 27, 30) if game.chest_open else (255, 218, 106))
-            draw.point((x, y + 1), fill=(255, 218, 106))
-            x, y = _center(GATE)
-            draw.rectangle((x - 4, y - 4, x + 3, y + 3), fill=(136, 132, 137))
-            draw.rectangle((x - 2, y - 3, x + 2, y + 3), fill=(18, 24, 36))
-            if not game.gate_open:
-                draw.line((x - 1, y - 2, x - 1, y + 3), fill=(209, 178, 95))
-                draw.line((x + 1, y - 2, x + 1, y + 3), fill=(209, 178, 95))
         else:
             for x, y in ((12, 20), (52, 20), (12, 52), (52, 52)):
                 draw.rectangle((x - 1, y, x + 1, y + 2), fill=(149, 97, 46))
                 flame = int(game.elapsed * 9 + x) % 2
                 draw.polygon([(x, y - 4 - flame), (x + 2, y - 1), (x - 2, y - 1)],
                              fill=(255, 157 + flame * 40, 67))
-            if not game.enemies and game.phase != "victory":
-                x, y = _center(RELIC)
-                _sprite(draw, "relic", x, y + int(math.sin(game.elapsed * 4)))
+        if game.area.chest:
+            x, y = _center(game.area.chest)
+            draw.rectangle((x - 3, y - 2, x + 3, y + 2), fill=(111, 65, 32), outline=(237, 180, 67))
+            draw.line((x - 2, y - 1, x + 2, y - 1), fill=(24, 27, 30) if game.chest_open else (255, 218, 106))
+            draw.point((x, y + 1), fill=(255, 218, 106))
+        if game.area.gate:
+            x, y = _center(game.area.gate)
+            draw.rectangle((x - 4, y - 4, x + 3, y + 3), fill=(136, 132, 137))
+            draw.rectangle((x - 2, y - 3, x + 2, y + 3), fill=(18, 24, 36))
+            if not game.gate_open:
+                draw.line((x - 1, y - 2, x - 1, y + 3), fill=(209, 178, 95))
+                draw.line((x + 1, y - 2, x + 1, y + 3), fill=(209, 178, 95))
+        if game.area.relic and not game.enemies and game.phase != "victory":
+            x, y = _center(game.area.relic)
+            _sprite(draw, "relic", x, y + int(math.sin(game.elapsed * 4)))
+        self._region(draw, game)
 
     def _actors(self, draw, game):
         for actor in sorted([game.hero] + game.enemies, key=lambda a: a.screen_position[1]):
@@ -119,9 +209,14 @@ class Renderer:
                     draw.line((x - 1, y - 1, x + 1, y - 1), fill=PALETTE["g"])
                 if game.swing > 0:
                     self._sword(draw, game, x, y)
+            elif actor.kind == "treant":
+                draw.line((x - 5, y - 7, x + 5, y - 7), fill=(61, 24, 40))
+                draw.line((x - 5, y - 7, x - 5 + int(10 * actor.hp / 8), y - 7), fill=PALETTE["r"])
+                if game.boss_armored:
+                    draw.rectangle((x - 5, y - 5, x + 5, y + 4), outline=(154, 196, 148))
             elif actor.kind == "guardian":
                 draw.line((x - 3, y - 5, x + 3, y - 5), fill=(61, 24, 40))
-                draw.line((x - 3, y - 5, x - 3 + int(6 * actor.hp / 8), y - 5), fill=PALETTE["r"])
+                draw.line((x - 3, y - 5, x - 3 + int(6 * actor.hp / self.guardian_health), y - 5), fill=PALETTE["r"])
 
     def _sword(self, draw, game, x, y):
         dx, dy = game.hero.facing
@@ -141,9 +236,17 @@ class Renderer:
                 draw.point((x, 4), fill=(88, 53, 62))
         _sprite(draw, "rupee", 36, 3)
         _draw_number(image, game.rupees, 40, 1, (165, 237, 199))
+        if game.has_boots:
+            draw.rectangle((47, 3, 50, 5), fill=(176, 137, 208))
+            draw.line((46, 6, 51, 6), fill=(255, 219, 89))
         if game.has_key:
             _sprite(draw, "key", 53, 3)
-        draw.rectangle((59, 2, 62, 5), fill=(87, 178, 79) if game.room == 0 else (154, 118, 202))
+        elif game.area.sigils:
+            for index in range(len(game.area.sigils)):
+                lit = (255, 219, 89) if index < game.sigils_lit else (70, 76, 84)
+                draw.rectangle((52 + index * 2, 3, 52 + index * 2, 4), fill=lit)
+        swatch = {0: (87, 178, 79), 2: (118, 186, 128)}.get(game.area.theme, (154, 118, 202))
+        draw.rectangle((59, 2, 62, 5), fill=swatch)
 
     def render(self, game):
         image = self.backgrounds[game.room].copy()
@@ -152,10 +255,18 @@ class Renderer:
         for position, kind in game.pickups.items():
             _sprite(draw, kind, *_center(position))
         self._actors(draw, game)
-        if game.phase in ("key", "victory"):
+        camera_x, camera_y = camera_origin(game)
+        image = image.crop((camera_x, camera_y, camera_x + WIDTH, camera_y + HEIGHT))
+        draw = ImageDraw.Draw(image)
+        if game.phase in ("key", "boots", "victory"):
             x, y = game.hero.screen_position
-            _sprite(draw, "key" if game.phase == "key" else "relic", int(x), int(y) - 9)
-        labels = {"key": "KEY!", "enter": "TEMPLE", "victory": "CLEAR!", "defeat": "RETRY"}
+            symbol = {"key": "key", "boots": "boots"}.get(game.phase, "relic")
+            symbol_y = max(HUD + 3, int(y) - camera_y - 9)
+            _sprite(draw, symbol, int(x) - camera_x, symbol_y)
+        labels = {"key": "KEY!", "boots": "BOOTS!", "rune": "RUNE", "lost": "LOST!",
+                  "roar": "ROAR!", "victory": "CLEAR!", "defeat": "RETRY"}
+        if game.phase == "enter" and game.room + 1 < len(game.areas):
+            labels["enter"] = game.areas[game.room + 1].name
         if game.phase in labels:
             label = labels[game.phase]
             draw.rectangle((4, 53, 59, 63), fill=(16, 21, 34))

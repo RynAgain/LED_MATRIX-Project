@@ -320,6 +320,11 @@
       "name": "zelda_quest",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "zelda_woods",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }
