@@ -315,6 +315,11 @@
       "name": "pumpkin",
       "type": "effect",
       "enabled": true
+    },
+    {
+      "name": "zelda_quest",
+      "type": "effect",
+      "enabled": true
     }
   ]
 }

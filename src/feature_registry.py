@@ -53,6 +53,7 @@ FEATURE_MODULES = {
     "flight_radar": "src.display.flight_radar",
     "rain_radar": "src.display.rain_radar",
     "dungeon": "src.display.dungeon",
+    "zelda_quest": "src.display.zelda_quest",
     "barricade": "src.display.barricade",
     "package_boy": "src.display.package_boy",
     "death_ball": "src.display.death_ball",

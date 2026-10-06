@@ -18,6 +18,9 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | Space Invaders | Retro alien invasion game |
 | Tanks | Tank battle simulation |
 | Tetris | AI-driven falling blocks with line clears |
+| Zelda Quest | Self-playing forest and temple adventure with sword combat, a key chest, and a guardian |
+
+**Zelda Quest** runs entirely on its own. Select **Demos > ZELDA QUEST**, or leave it enabled in the carousel. The hero explores the forest, collects a key, unlocks the temple, defeats its guardian, and restarts after victory or defeat until the configured demo duration ends. No controller input or external game assets are required.
 
 ### Visual Effects
 | Feature | Description |

@@ -192,6 +192,7 @@ _DEMO_LABELS = {
     "flight_radar": "AIR RADAR",
     "rain_radar": "RAINRADAR",
     "dungeon": "DUNGEON",
+    "zelda_quest": "ZELDA QUEST",
     "month_calendar": "CALENDAR",
     "bitcoin_price": "BITCOIN",
     "space_invaders": "INVADERS",
