@@ -40,7 +40,7 @@ import time
 import math
 from collections import deque
 from PIL import Image, ImageDraw
-from src.display._shared import should_stop, show_banner, safe_rumble, read_direction
+from src.display._shared import should_stop, show_banner, safe_rumble
 from src.display._fonts import _draw_text, _text_width
 
 logger = logging.getLogger(__name__)
@@ -160,12 +160,12 @@ ROLLOVERS_TOP = [(44 + i * 16, 40) for i in range(4)]
 ROLLOVERS_MID = [(35 + i * 20, 280) for i in range(4)]
 ROLLOVERS_BOT = [(45 + i * 12, FLIP_Y - 55) for i in range(3)]
 ALL_ROLLOVERS = ROLLOVERS_TOP + ROLLOVERS_MID + ROLLOVERS_BOT
-ROLLOVER_GROUPS       = [ROLLOVERS_TOP, ROLLOVERS_MID, ROLLOVERS_BOT]
+ROLLOVER_GROUPS = [ROLLOVERS_TOP, ROLLOVERS_MID, ROLLOVERS_BOT]
 ROLLOVER_GROUP_STARTS = [0, len(ROLLOVERS_TOP),
                          len(ROLLOVERS_TOP) + len(ROLLOVERS_MID)]
-ROLLOVER_GROUP_BONUS  = 3000   # awarded when an entire lane group is lit
+ROLLOVER_GROUP_BONUS = 3000   # awarded when an entire lane group is lit
 
-TILT_LIMIT   = 3       # max nudges per ball before TILT kills the flippers
+TILT_LIMIT = 3       # max nudges per ball before TILT kills the flippers
 ORBIT_WINDOW = FPS * 4  # ticks to complete an orbit shot after entry
 
 # Spinner
@@ -233,6 +233,9 @@ class Ball:
         # Previous substep position (per-ball anchor for the swept wall test)
         self.sub_px = None
         self.sub_py = None
+        self.spinner_contact = False
+        self.orbit_entry_side = None
+        self.orbit_expires = 0
 
     def reset_to_plunger(self):
         self.x = float(PLUNGER_LANE_X)
@@ -244,6 +247,9 @@ class Ball:
         self.trail.clear()
         self.sub_px = None
         self.sub_py = None
+        self.spinner_contact = False
+        self.orbit_entry_side = None
+        self.orbit_expires = 0
 
     def launch(self, power):
         self.vy = -power
@@ -270,15 +276,15 @@ class Ball:
             s = BALL_MAX_SPEED / speed
             self.vx *= s
             self.vy *= s
-            speed = BALL_MAX_SPEED
         # Substep: move <=2px per step; run collision callback each step so
         # fast balls cannot tunnel through walls or flippers between frames.
-        steps = max(1, int(math.ceil(speed / 2.0)))
-        step_x = self.vx / steps
-        step_y = self.vy / steps
-        for _ in range(steps):
-            self.x += step_x
-            self.y += step_y
+        remaining = 1.0
+        while remaining > 1e-9 and self.active and not self.in_plunger:
+            speed = math.hypot(self.vx, self.vy)
+            step = min(remaining, 2.0 / speed) if speed > 0 else remaining
+            self.x += self.vx * step
+            self.y += self.vy * step
+            remaining -= step
             if collide_fn is not None:
                 collide_fn()
         # One trail point per frame (deque maxlen handles eviction)
@@ -489,9 +495,6 @@ class PinballGame:
         self.tilt = False
         self.tilt_timer = 0
         # --- Orbit ---
-        self.orbit_active = False
-        self.orbit_timer = 0
-        self.orbit_entry_side = None  # 'L' or 'R'
         self.orbit_flash = 0          # display frames for completion banner
         # --- End-of-ball bonus ---
         self.bonus_units = 0   # earned per ball; tallied x100 x mult on drain
@@ -504,6 +507,7 @@ class PinballGame:
         # --- Haptics: per-frame impact strength (0..1), read by the
         # interactive loop after update() to drive controller rumble ---
         self.impact = 0.0
+        self._pending_impact = 0.0
         # --- Generic event banner (LOCK / MULTIBALL / BONUS / KICKBACK) ---
         self.banner_text = None
         self.banner_color = (255, 255, 255)
@@ -523,6 +527,11 @@ class PinballGame:
     def score_mult(self):
         """Effective scoring multiplier: bonus mult, doubled during multiball."""
         return self.bonus_mult * (2 if len(self.balls) > 1 else 1)
+
+    @property
+    def orbit_active(self):
+        return any(b.active and not b.in_plunger and b.orbit_entry_side is not None
+                   and self.tick < b.orbit_expires for b in self.balls)
 
     @staticmethod
     def _render_static_bg():
@@ -712,9 +721,11 @@ class PinballGame:
 
     def _collide_spinner(self, b):
         sx, sy = SPINNER_POS
-        if abs(b.x - sx) < 8 and abs(b.y - sy) < 6:
+        touching = abs(b.x - sx) < 8 and abs(b.y - sy) < 6
+        if touching and not b.spinner_contact:
             self.spinner_spinning = 20
             self.score += SPINNER_PTS * self.score_mult
+        b.spinner_contact = touching
 
     def _step_collide(self, b):
         """Per-substep wall + flipper collision (invoked from Ball.update callback).
@@ -781,42 +792,28 @@ class PinballGame:
         """
         ex, ey = ORBIT_ENTRY_L
         rx, ry = ORBIT_EXIT_R
-        if not self.orbit_active:
+        if self.tick >= b.orbit_expires:
+            b.orbit_entry_side = None
+        if b.orbit_entry_side is None:
             if abs(b.x - ex) < 10 and abs(b.y - ey) < 15 and b.vx > 1.0:
-                self.orbit_active = True
-                self.orbit_timer = ORBIT_WINDOW
-                self.orbit_entry_side = 'L'
+                b.orbit_entry_side = "L"
             elif abs(b.x - rx) < 10 and abs(b.y - ry) < 15 and b.vx < -1.0:
-                self.orbit_active = True
-                self.orbit_timer = ORBIT_WINDOW
-                self.orbit_entry_side = 'R'
-        else:
-            self.orbit_timer -= 1
-            if self.orbit_timer <= 0:
-                self.orbit_active = False
+                b.orbit_entry_side = "R"
+            else:
                 return
-            if (self.orbit_entry_side == 'L'
-                    and abs(b.x - rx) < 10 and abs(b.y - ry) < 15):
-                self.score += ORBIT_PTS * self.score_mult
-                self.bonus_units += 5
-                self.orbit_flash = 25
-                self.orbit_active = False
-                for _ in range(8):
-                    self.particles.append(Particle(
-                        rx, ry,
-                        random.uniform(-3, 3), random.uniform(-3, 0),
-                        (180, 100, 255), life=18))
-            elif (self.orbit_entry_side == 'R'
-                    and abs(b.x - ex) < 10 and abs(b.y - ey) < 15):
-                self.score += ORBIT_PTS * self.score_mult
-                self.bonus_units += 5
-                self.orbit_flash = 25
-                self.orbit_active = False
-                for _ in range(8):
-                    self.particles.append(Particle(
-                        ex, ey,
-                        random.uniform(-3, 3), random.uniform(-3, 0),
-                        (180, 100, 255), life=18))
+            b.orbit_expires = self.tick + ORBIT_WINDOW
+            return
+        exit_x, exit_y = ORBIT_EXIT_R if b.orbit_entry_side == "L" else ORBIT_ENTRY_L
+        if abs(b.x - exit_x) < 10 and abs(b.y - exit_y) < 15:
+            self.score += ORBIT_PTS * self.score_mult
+            self.bonus_units += 5
+            self.orbit_flash = 25
+            b.orbit_entry_side = None
+            for _ in range(8):
+                self.particles.append(Particle(
+                    exit_x, exit_y,
+                    random.uniform(-3, 3), random.uniform(-3, 0),
+                    (180, 100, 255), life=18))
 
     def _show_banner_text(self, text, color):
         self.banner_text = text
@@ -897,8 +894,11 @@ class PinballGame:
                     KICKBACK_COLOR, life=12))
 
     def update(self, flip_l=False, flip_r=False):
+        self.impact = self._pending_impact
+        self._pending_impact = 0.0
+        if self.game_over:
+            return
         self.tick += 1
-        self.impact = 0.0  # per-frame haptic strength (read after update)
         if self.banner_timer > 0:
             self.banner_timer -= 1
         if self.kickback_flash > 0:
@@ -965,6 +965,7 @@ class PinballGame:
                     self.balls_left -= 1
                     if self.balls_left <= 0:
                         self.game_over = True
+                        b.active = False
                     else:
                         b.reset_to_plunger()
                         self.ball_save_timer = FPS * 3
@@ -1041,13 +1042,14 @@ class PinballGame:
     def nudge(self, dx, dy):
         """Apply a nudge impulse; counts toward the per-ball TILT limit."""
         field = [b for b in self.balls if b.active and not b.in_plunger]
-        if self.tilt or not field:
+        if self.game_over or self.tilt or not field:
             return
         self.nudge_count += 1
         if self.nudge_count >= TILT_LIMIT:
             self.tilt = True
             self.tilt_timer = FPS * 3
             self.impact = max(self.impact, 1.0)
+            self._pending_impact = 1.0
             logger.debug("Pinball TILT after %d nudges", self.nudge_count)
             return
         for b in field:
@@ -1261,7 +1263,7 @@ class PinballGame:
         if self.tilt and self.tick % 6 < 4:
             tw = _text_width("TILT", scale=1, spacing=0)
             draw.rectangle([(DISPLAY_W // 2 - tw // 2 - 1, 24),
-                             (DISPLAY_W // 2 + tw // 2 + 1, 33)], fill=(80, 0, 0))
+                            (DISPLAY_W // 2 + tw // 2 + 1, 33)], fill=(80, 0, 0))
             _draw_text(draw, "TILT", DISPLAY_W // 2 - tw // 2, 25,
                        (255, 60, 60), scale=1, spacing=0)
 
@@ -1372,14 +1374,9 @@ def _run_interactive(matrix, controller, start_time):
         if wants_quit(controller):
             return
 
-        fl, fr = False, False
-        # L/R flippers use held direction for analog feel
-        d = read_direction(controller, cardinal_only=False)
-        if d:
-            if d[0] < 0:
-                fl = True
-            if d[0] > 0:
-                fr = True
+        # Opposite held directions cancel in get_direction(), but both flippers must stay up.
+        fl = controller.is_pressed(Button.LEFT)
+        fr = controller.is_pressed(Button.RIGHT)
 
         for ev in events:
             if ev.type is EventType.PRESSED:

@@ -13,7 +13,7 @@ import random
 
 import pytest
 
-from src.display.pinball import PinballGame, Flipper, FLIP_Y, FLIP_LENGTH
+from src.display.pinball import PinballGame, FLIP_Y, FLIP_LENGTH
 
 
 def drop_onto_left_flipper(lead_frames, drop_x=48, drop_h=40, tail=120):

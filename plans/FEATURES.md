@@ -422,3 +422,17 @@ Feature batch: multiball, kickback, bonus, haptics (2026-08-01):
 - [x] Flipper exit-speed cap (1.5x game speed cap): per-substep contact was re-adding surface velocity, pumping balls to 30-45 px/frame teleports (found by the new test suite)
 - [x] Headless test suite `tests/test_pinball_sim.py`: 16 tests -- seeded no-clipping/OOB/speed sims, gameplay-alive, flipper impulse + passive no-energy-gain, swept wall test, kickback, lock/multiball lifecycle, bonus tally, ball save, tilt, haptics
 - [x] Verified: 60,000-frame soak across 10 seeds -- zero overlaps, zero out-of-bounds, zero speed violations, 171 launches, 21 games, high score 248,950
+
+Pinball correctness review (2026-10-08):
+- [x] Physics substeps use collision-updated velocity and recompute the remaining time slice, preserving the 2px motion limit even after acceleration; docking/deactivation stops remaining motion.
+- [x] Spinner scoring is edge-triggered per ball instead of awarded every frame spent inside the gate.
+- [x] Orbit entry/deadline belongs to each ball: other multiball balls cannot finish the shot, timeout is measured in game frames, and docking clears shot state.
+- [x] Game-over is terminal: no repeated drain or negative remaining-ball count on later updates.
+- [x] Independent held-button queries keep both flippers raised when LEFT and RIGHT are held together.
+- [x] Tilt impact survives the input-to-update boundary and rumbles once, not zero times or every frame.
+- [x] Added 17 regression cases, including actual interactive-loop rendering with autospecced Controller/RGBMatrix contracts; all 44 pinball tests pass. Loading the original pinball implementation reproduces 13 failures in the new suite (4 invariant cases already passed).
+- [x] Pinball lint (repository flake8 options) and full Python compileall pass. No standalone package build is defined.
+- [x] 120,000-frame soak across 10 seeds: zero wall overlaps, out-of-bounds frames, or speed violations; rendering smoke passes across the playfield.
+- [x] Pinball coverage: 83.3% overall; all 48 changed executable lines covered.
+- [x] Independent read-only diff review: no blocking findings.
+- [ ] Full repository suite is not green: 1,587 passed, 12 failed. Eleven existing input tests fail after simulator initialization (reproduced with original pinball); one sequence-sync test fails because the pre-existing local config omits zelda_woods. These unrelated files were left unchanged.
