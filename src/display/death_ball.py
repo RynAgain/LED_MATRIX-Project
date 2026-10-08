@@ -32,12 +32,11 @@ from PIL import Image, ImageDraw
 from src.display._shared import (
     read_direction,
     should_stop,
-    interruptible_sleep,
     safe_rumble,
     show_banner,
 )
-from src.display._fonts import _draw_text, _text_width
-from src.display._utils import _draw_digit, _draw_number, _scale_color
+from src.display._fonts import _draw_text
+from src.display._utils import _draw_digit
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +211,8 @@ class Wizard:
         # Platform collisions (one-way: land on top only)
         if self.vy > 0:  # only when falling
             for px_start, px_end, py in PLATFORMS:
-                if (self.x >= px_start - 1 and self.x <= px_end + 1 and
-                        self.y >= py - 1 and self.y <= py + 1):
+                if (self.x >= px_start - 1 and self.x <= px_end + 1
+                        and self.y >= py - 1 and self.y <= py + 1):
                     self.y = py - 1
                     self.vy = 0
                     self.on_ground = True
@@ -238,66 +237,59 @@ class Ball:
         self.trail = []
         self.speed_mult = 1.0
 
+    def limit_speed(self):
+        speed = self.get_speed()
+        max_speed = BALL_MAX_SPEED * self.speed_mult
+        if speed > max_speed:
+            self.vx *= max_speed / speed
+            self.vy *= max_speed / speed
+
     def update_physics(self):
         self.vy += BALL_GRAVITY * self.speed_mult
-        self.x += self.vx
-        self.y += self.vy
-
-        # Clamp speed
-        speed = math.sqrt(self.vx * self.vx + self.vy * self.vy)
-        max_spd = BALL_MAX_SPEED * self.speed_mult
-        if speed > max_spd:
-            scale = max_spd / speed
-            self.vx *= scale
-            self.vy *= scale
-
-        # Friction
+        self.limit_speed()
+        steps = max(1, math.ceil(self.get_speed() / 0.5))
+        for _ in range(steps):
+            self._move_step(1.0 / steps)
+            if self.check_goal() >= 0:
+                break
         self.vx *= BALL_FRICTION
         self.vy *= BALL_FRICTION
-
-        # Trail
         self.trail.append((int(self.x), int(self.y)))
-        if len(self.trail) > 4:
-            self.trail.pop(0)
+        self.trail = self.trail[-4:]
 
-        # Bounce off floor
+    def _move_step(self, dt):
+        old_x, old_y = self.x, self.y
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+
         if self.y >= FLOOR_Y - 2:
             self.y = FLOOR_Y - 2
             self.vy = -abs(self.vy) * BALL_BOUNCE
-
-        # Bounce off ceiling
         if self.y <= CEILING_Y + 1:
             self.y = CEILING_Y + 1
             self.vy = abs(self.vy) * BALL_BOUNCE
 
-        # Bounce off walls (but pass through goal zones)
-        # Left wall
-        if self.x <= WALL_LEFT + GOAL_DEPTH:
-            if self.y < GOAL_TOP or self.y > GOAL_BOTTOM:
+        if not GOAL_TOP <= self.y <= GOAL_BOTTOM:
+            if self.x <= WALL_LEFT + GOAL_DEPTH:
                 self.x = WALL_LEFT + GOAL_DEPTH
                 self.vx = abs(self.vx) * BALL_BOUNCE
-        # Right wall
-        if self.x >= WALL_RIGHT - GOAL_DEPTH:
-            if self.y < GOAL_TOP or self.y > GOAL_BOTTOM:
+            elif self.x >= WALL_RIGHT - GOAL_DEPTH:
                 self.x = WALL_RIGHT - GOAL_DEPTH
                 self.vx = -abs(self.vx) * BALL_BOUNCE
 
-        # Defensive wall bounces (ball bounces off the vertical walls in front of goals)
-        if DEFENSE_WALL_TOP <= self.y <= DEFENSE_WALL_BOTTOM:
-            # Left defensive wall
-            if self.vx < 0 and abs(self.x - DEFENSE_WALL_LEFT_X) < 1.5:
-                self.x = DEFENSE_WALL_LEFT_X + 1.5
-                self.vx = abs(self.vx) * BALL_BOUNCE
-            # Right defensive wall
-            if self.vx > 0 and abs(self.x - DEFENSE_WALL_RIGHT_X) < 1.5:
-                self.x = DEFENSE_WALL_RIGHT_X - 1.5
-                self.vx = -abs(self.vx) * BALL_BOUNCE
+        for wall_x in (DEFENSE_WALL_LEFT_X, DEFENSE_WALL_RIGHT_X):
+            # Resolve both faces, including entry around the wall's endpoints.
+            if DEFENSE_WALL_TOP <= self.y <= DEFENSE_WALL_BOTTOM:
+                if abs(self.x - wall_x) < 1.5:
+                    side = 1 if old_x >= wall_x else -1
+                    self.x = wall_x + side * 1.5
+                    if self.vx * side < 0:
+                        self.vx = -self.vx * BALL_BOUNCE
 
-        # Platform bounces
         if self.vy > 0:
             for px_start, px_end, py in PLATFORMS:
-                if (self.x >= px_start - 1 and self.x <= px_end + 1 and
-                        self.y >= py - 2 and self.y <= py + 1):
+                if (px_start - 1 <= self.x <= px_end + 1
+                        and old_y <= py - 2 <= self.y):
                     self.y = py - 2
                     self.vy = -abs(self.vy) * BALL_BOUNCE
                     break
@@ -344,6 +336,7 @@ class DeathBallGame:
     def __init__(self):
         self.wizard1 = Wizard(16, FLOOR_Y - 1, 1, 0)
         self.wizard2 = Wizard(48, FLOOR_Y - 1, -1, 1)
+        self.wizard1.on_ground = self.wizard2.on_ground = True
         self.ball = Ball()
         self.scores = [0, 0]
         self.timer = ROUND_TIME
@@ -355,16 +348,33 @@ class DeathBallGame:
 
     def reset_round(self):
         """Reset positions after a goal."""
-        self.wizard1.x = 16
-        self.wizard1.y = FLOOR_Y - 1
-        self.wizard1.vx = 0
-        self.wizard1.vy = 0
-        self.wizard2.x = 48
-        self.wizard2.y = FLOOR_Y - 1
-        self.wizard2.vx = 0
-        self.wizard2.vy = 0
+        for wizard, x, facing in ((self.wizard1, 16, 1), (self.wizard2, 48, -1)):
+            wizard.x = x
+            wizard.y = FLOOR_Y - 1
+            wizard.vx = wizard.vy = 0
+            wizard.on_ground = True
+            wizard.jumps_left = 2
+            wizard.facing = facing
         self.ball.reset()
-        self.round_pause = 20
+        if self.sudden_death:
+            self.ball.speed_mult = 2.0
+        self.round_pause = FPS
+
+    def apply_controls(self, controls1, controls2):
+        if self.round_pause > 0 or self.check_winner() >= 0:
+            return
+        controls = ((self.wizard1, controls1), (self.wizard2, controls2))
+        # Resolve movement and jumps before blasts add opponent knockback.
+        for wizard, (dx, _, _, _) in controls:
+            wizard.move(dx)
+        for wizard, (_, jump, _, fast_fall) in controls:
+            if jump:
+                wizard.jump()
+            if fast_fall:
+                wizard.fast_fall()
+        for wizard, (_, _, blast, _) in controls:
+            if blast:
+                self.magic_blast(wizard)
 
     def kick_ball(self, wizard):
         """Wizard kicks the ball if close enough."""
@@ -378,6 +388,7 @@ class DeathBallGame:
             self.ball.vy = -KICK_POWER * 0.7 * self.ball.speed_mult
             # Add wizard momentum
             self.ball.vx += wizard.vx * 0.3
+            self.ball.limit_speed()
             # Sparks
             for _ in range(4):
                 self.particles.append(Particle(
@@ -395,7 +406,7 @@ class DeathBallGame:
         - The ball (away from caster)
         - The opponent wizard (away from caster, but NOT the caster themselves)
         """
-        if not wizard.can_blast():
+        if self.round_pause > 0 or self.check_winner() >= 0 or not wizard.can_blast():
             return False
         wizard.mana -= BLAST_COST
         wizard.blast_cooldown = 10
@@ -408,6 +419,7 @@ class DeathBallGame:
         push_y = (dy / dist) * BLAST_POWER * self.ball.speed_mult
         self.ball.vx += push_x
         self.ball.vy += push_y
+        self.ball.limit_speed()
 
         # Push opponent wizard away (not the caster)
         opponent = self.wizard2 if wizard.player_id == 0 else self.wizard1
@@ -434,6 +446,8 @@ class DeathBallGame:
 
     def update(self):
         """Update one frame of game logic."""
+        if self.check_winner() >= 0:
+            return
         self.tick += 1
 
         if self.round_pause > 0:
@@ -443,7 +457,10 @@ class DeathBallGame:
         # Timer
         if not self.sudden_death:
             self.timer -= 1
-            if self.timer <= 0 and self.scores[0] == self.scores[1]:
+            if self.timer <= 0:
+                self.timer = 0
+                if self.scores[0] != self.scores[1]:
+                    return
                 self.sudden_death = True
                 self.ball.speed_mult = 2.0
 
@@ -475,7 +492,7 @@ class DeathBallGame:
             return 0
         if self.scores[1] >= WIN_SCORE:
             return 1
-        if self.sudden_death and self.scores[0] != self.scores[1]:
+        if (self.sudden_death or self.timer <= 0) and self.scores[0] != self.scores[1]:
             return 0 if self.scores[0] > self.scores[1] else 1
         return -1
 
@@ -628,8 +645,8 @@ def _ai_control(game, wizard, opponent):
 
     # Determine ball direction
     ball_heading_to_me = (
-        (wizard.player_id == 0 and ball.vx < -0.5) or
-        (wizard.player_id == 1 and ball.vx > 0.5)
+        (wizard.player_id == 0 and ball.vx < -0.5)
+        or (wizard.player_id == 1 and ball.vx > 0.5)
     )
 
     # My goal x position
@@ -701,15 +718,15 @@ def _ai_control(game, wizard, opponent):
     # --- Priority 4: Attack - push ball toward opponent goal ---
     else:
         opp_goal_x = SIZE - GOAL_DEPTH if wizard.player_id == 0 else GOAL_DEPTH
-        if ball.x < opp_goal_x:
+        if (opp_goal_x - ball.x) * (1 if wizard.player_id == 0 else -1) > 0:
             move_dx = 1 if wizard.player_id == 0 else -1
         # Blast to redirect ball toward goal
-        if (dist_ball < 10 and wizard.can_blast() and
-                abs(ball.y - (GOAL_TOP + GOAL_BOTTOM) / 2) < 18):
+        if (dist_ball < 10 and wizard.can_blast()
+                and abs(ball.y - (GOAL_TOP + GOAL_BOTTOM) / 2) < 18):
             # Only blast if it'll push ball toward opponent goal
             push_dir = ball.x - wizard.x
-            if ((wizard.player_id == 0 and push_dir > 0) or
-                    (wizard.player_id == 1 and push_dir < 0)):
+            if ((wizard.player_id == 0 and push_dir > 0)
+                    or (wizard.player_id == 1 and push_dir < 0)):
                 do_blast = True
 
     # Fast fall if above ball and ball is below (only if far above)
@@ -737,24 +754,9 @@ def _run_demo(matrix, duration, start_time):
         if should_stop():
             return
 
-        # AI for both wizards
-        dx1, j1, b1, ff1 = _ai_control(game, game.wizard1, game.wizard2)
-        dx2, j2, b2, ff2 = _ai_control(game, game.wizard2, game.wizard1)
-
-        game.wizard1.move(dx1)
-        game.wizard2.move(dx2)
-        if j1:
-            game.wizard1.jump()
-        if j2:
-            game.wizard2.jump()
-        if b1:
-            game.magic_blast(game.wizard1)
-        if b2:
-            game.magic_blast(game.wizard2)
-        if ff1:
-            game.wizard1.fast_fall()
-        if ff2:
-            game.wizard2.fast_fall()
+        controls1 = _ai_control(game, game.wizard1, game.wizard2)
+        controls2 = _ai_control(game, game.wizard2, game.wizard1)
+        game.apply_controls(controls1, controls2)
 
         game.update()
 
@@ -787,43 +789,29 @@ def _run_interactive(matrix, controller, start_time):
     show_banner(matrix, ["DEATH BALL", "A:JUMP B:BLAST"],
                 color=BALL_COLOR, hold=1.2)
 
-    jump_pressed = False  # edge detection for jump
-
     while time.time() - start_time < _MAX_SECONDS:
         if should_stop():
             return
-        controller.poll_events()
+        events = controller.poll_events()
         if wants_quit(controller):
             return
 
-        events = controller.poll_events()
-
-        # Player input
         move_dx = 0
+        jump = blast = fast_fall = False
         d = read_direction(controller, cardinal_only=False)
         if d:
             move_dx = d[0]
-            if d[1] > 0:  # DOWN
-                game.wizard1.fast_fall()
+            fast_fall = d[1] > 0
 
         for ev in events:
             if ev.type is EventType.PRESSED:
                 if ev.button in (Button.UP, Button.A):
-                    game.wizard1.jump()
+                    jump = True
                 elif ev.button is Button.B:
-                    game.magic_blast(game.wizard1)
-
-        game.wizard1.move(move_dx)
-
-        # AI for P2
-        dx2, j2, b2, ff2 = _ai_control(game, game.wizard2, game.wizard1)
-        game.wizard2.move(dx2)
-        if j2:
-            game.wizard2.jump()
-        if b2:
-            game.magic_blast(game.wizard2)
-        if ff2:
-            game.wizard2.fast_fall()
+                    blast = True
+        controls1 = (move_dx, jump, blast, fast_fall)
+        controls2 = _ai_control(game, game.wizard2, game.wizard1)
+        game.apply_controls(controls1, controls2)
 
         game.update()
 

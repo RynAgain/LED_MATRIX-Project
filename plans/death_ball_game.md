@@ -177,3 +177,56 @@ src/display/death_ball.py    # Single file (~600-700 lines)
 - PLAYABLE_GAMES: add `"death_ball"`
 - Menu label: `"DEATHBALL"`
 - Config sequence: `{"name": "death_ball", "type": "game", "enabled": true}`
+
+
+## Correctness pass (2026-10-08)
+
+Scope approved: controls, ball collision, match rules, AI attack symmetry, and kickoff state.
+Keep the current open arena, tiny sprites, and global ball-blast reach unchanged.
+The platform/sprite descriptions above are historical, not instructions to restore them.
+
+References: single-poll input in package_boy.py and portal_arena.py; physics and
+real-loop regression patterns in test_pinball_sim.py and test_pinball_regressions.py.
+
+- [x] Poll controller once per frame; combine UP/A edges into one jump.
+- [x] Limit ball speed before movement and after kicks/blasts; use <=0.5px
+  substeps with collision-updated velocity, both defense-wall faces, and goal checks.
+- [x] At timeout the leader wins; a tie enters sudden death. Finished games stop updating.
+- [x] Mirror AI attack direction for both sides.
+- [x] Reset facing/jump/ground state; freeze controls during kickoff while allowing quit.
+  Preserve mana and blast cooldown between rounds, as before.
+- [x] Both players move/jump/fast-fall before blasts apply knockback; demo and interactive share control ordering.
+- [x] 49 focused tests pass, including real demo/interactive run() rendering and lifecycle.
+- [x] Repository-option flake8 and full Python compileall pass. No standalone package build is defined.
+- [x] Death Ball coverage: 95.9%; all 80 changed executable lines covered.
+- [x] 120,000-frame soak across 10 seeds: 634 goals, 161 completed matches,
+  zero wall overlaps, out-of-bounds balls, or speed-cap violations.
+- [x] Original implementation loaded in memory fails all 16 selected regressions.
+  Three controller cases detect extra polling by exhausting the input batches;
+  the initial review also directly reproduced discarded A/B events.
+- [x] First full suite: 1,654 passed, 11 failed. Failure IDs exactly match the
+  prior Star Fox baseline in artifacts/starfox/full-suite-results.txt (input/event-order tests).
+- [x] Independent review found asymmetric vertical knockback when jumping;
+  staged both players' jumps before blasts and added mirrored regressions.
+- [x] Independent reviewer re-ran mirrored jump/blast cases and confirmed closure; no open blockers.
+- [x] Input tests pass alone (26/26), consistent with the existing suite-order failure.
+- [x] Recorded 400 frames through real demo run(); inspected six-frame contact sheet.
+  Preview: artifacts/death_ball_preview.gif.
+- [x] Final full suite completed: 1,663 passed, 11 failed, no new failing IDs versus
+  the pre-change baseline. The full repository is not green; failures are in test_input.py.
+  Results: artifacts/death_ball_final_suite.log and artifacts/death_ball_final_suite.xml.
+- [x] Restored three initially clean configs truncated by overlapping test-fixture
+  backup/restore runs. Do not run pytest processes concurrently in this checkout;
+  preserve_config_files rewrites shared config files on every test.
+- [ ] Hardware playtest and device installation remain unverified.
+
+Deferred: blast-radius balance, AI route planning, mana/clock visibility, and visual redesign.
+
+
+## Publication
+
+User approved pushing on 2026-10-08. Publish only death_ball.py, its dedicated tests,
+and this plan as a normal fast-forward of origin/main, preserving published Pinball
+and Star Fox commits. Use an isolated Git index; do not change the current checkout
+or its staging area. Main is the device auto-update branch, so devices may pick up
+this update automatically. No forced push or direct device restart is included.
