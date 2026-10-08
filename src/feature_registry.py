@@ -68,6 +68,7 @@ FEATURE_MODULES = {
     "month_calendar": "src.display.month_calendar",
     "dvd_logo": "src.display.dvd_logo",
     "pumpkin": "src.display.pumpkin",
+    "skeleton": "src.display.skeleton",
 }
 
 
