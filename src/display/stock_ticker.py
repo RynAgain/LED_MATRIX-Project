@@ -2,7 +2,7 @@
 """Stock ticker display for 64x64 LED matrix using Yahoo Finance API.
 
 Features:
-- Top 5 movers of the day (biggest % change, market cap > $1B)
+- Top N by market cap, or top movers of the day (set in config/stocks.json)
 - Industry label clearly displayed for each stock
 - Crisp bitmap font rendering (5x7 from _fonts.py)
 - Mini sparkline chart showing intraday price movement
@@ -57,10 +57,11 @@ MIN_MARKET_CAP = 1_000_000_000
 # Batch quote endpoint for fetching many symbols at once
 BATCH_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols}"
 
-# S&P 500 constituents (approximate, ordered roughly by market cap).
+# S&P 500 constituents, ordered roughly by market cap, one ticker per company
+# (GOOG is omitted so Alphabet does not take two of the top 10 slots).
 # Used to build the "top N by market cap" universe.
 SP500_SYMBOLS = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "BRK-B", "LLY", "AVGO",
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "LLY", "AVGO",
     "JPM", "TSLA", "UNH", "XOM", "V", "MA", "PG", "COST", "JNJ", "HD",
     "ABBV", "WMT", "NFLX", "BAC", "CRM", "MRK", "CVX", "KO", "ORCL", "AMD",
     "PEP", "TMO", "ACN", "LIN", "CSCO", "MCD", "ADBE", "ABT", "WFC", "DHR",
@@ -76,6 +77,34 @@ SP500_SYMBOLS = [
     "ROP", "PSA", "TFC", "NSC", "KMB", "SRE", "FDX", "DLR", "MPC", "GM",
     "AZO", "HUM", "F", "COR", "ALL", "AEP", "D", "FAST", "ROST", "CPRT",
 ]
+
+
+# Yahoo's quoteSummary endpoint now answers 401 without a session crumb, so the
+# industry row would read "N/A" on every card. These are the mega caps that can
+# reach the top of the market-cap list; labels stay under the 58px row. Anything
+# deeper still falls back to "N/A".
+INDUSTRY_FALLBACK = {
+    "AAPL": "Devices",
+    "MSFT": "Software",
+    "NVDA": "Chips",
+    "AMZN": "Retail",
+    "GOOGL": "Search",
+    "META": "Social",
+    "BRK-B": "Insurance",
+    "LLY": "Pharma",
+    "AVGO": "Chips",
+    "JPM": "Banking",
+    "TSLA": "Autos",
+    "UNH": "Health",
+    "XOM": "Oil/Gas",
+    "V": "Payments",
+    "MA": "Payments",
+    "PG": "Household",
+    "COST": "Retail",
+    "JNJ": "Pharma",
+    "HD": "Retail",
+    "WMT": "Retail",
+}
 
 
 def _fetch_top_market_cap(count=100, min_cap_billions=1):
@@ -247,11 +276,11 @@ def _fetch_industry(symbol):
         profile = result.get("assetProfile", {})
         industry = profile.get("industry", "")
         if not industry:
-            industry = profile.get("sector", "N/A")
-        return industry
+            industry = profile.get("sector", "")
+        return industry or INDUSTRY_FALLBACK.get(symbol, "N/A")
     except Exception as e:
         logger.debug("Failed to fetch industry for %s: %s", symbol, e)
-        return "N/A"
+        return INDUSTRY_FALLBACK.get(symbol, "N/A")
 
 
 def _fetch_quote(symbol):
@@ -554,14 +583,14 @@ def _render_stock(quote, tick, rank=None):
     return image
 
 
-def _render_loading():
+def _render_loading(count=None):
     """Render a loading screen."""
     image = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(image)
     text = "LOADING"
     tw = _text_width(text, scale=1)
     _draw_text(draw, text, (WIDTH - tw) // 2, 12, LABEL_COLOR, scale=1)
-    text2 = "TOP 100"
+    text2 = f"TOP {count}" if count else "STOCKS"
     tw2 = _text_width(text2, scale=1)
     _draw_text(draw, text2, (WIDTH - tw2) // 2, 24, INDUSTRY_COLOR, scale=1)
     text3 = "SP500 CAP"
@@ -571,13 +600,14 @@ def _render_loading():
 
 
 def run(matrix, duration=60):
-    """Run the stock ticker showing top 5 movers of the day."""
+    """Run the stock ticker over the symbol set selected in config/stocks.json."""
     start_time = time.time()
     config = _load_config()
     mode = config.get("mode", "top_movers")
     top_count = config.get("top_movers_count", 5)
     top_cap_count = config.get("top_market_cap_count", 100)
     min_cap_billions = config.get("min_market_cap_billions", 1)
+    loading_count = top_cap_count if mode == "top_market_cap" else top_count
 
     quotes = {}
     industries = {}
@@ -672,7 +702,7 @@ def run(matrix, duration=60):
 
     try:
         # Show loading screen while fetching
-        matrix.SetImage(_render_loading())
+        matrix.SetImage(_render_loading(loading_count))
 
         while time.time() - start_time < duration:
             if should_stop():
@@ -686,7 +716,7 @@ def run(matrix, duration=60):
                 _fetch_due.set()
 
             if not quotes:
-                matrix.SetImage(_render_loading())
+                matrix.SetImage(_render_loading(loading_count))
                 if not interruptible_sleep(1):
                     break
                 continue
