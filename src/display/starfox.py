@@ -42,6 +42,7 @@ from src.display._shared import (
     show_banner,
 )
 from src.display._fonts import _draw_text, _text_width
+from src.display.starfox_scene import draw_arwing, draw_corneria
 from src.input import Button, EventType, wants_quit
 
 logger = logging.getLogger(__name__)
@@ -195,38 +196,8 @@ class _Ship:
 
     def draw(self, draw_ctx, frame):
         sx, sy = self.screen_x, self.screen_y
-        roll_cos = math.cos(self.barrel_roll * self.roll_dir) if self.barrel_rolling else 1.0
-        roll_sin = math.sin(self.barrel_roll * self.roll_dir) if self.barrel_rolling else 0.0
-
-        # Fuselage
-        draw_ctx.line([(sx, sy - 6), (sx - 2, sy - 1)], fill=SHIP_BODY)
-        draw_ctx.line([(sx, sy - 6), (sx + 2, sy - 1)], fill=SHIP_BODY)
-        draw_ctx.line([(sx - 2, sy - 1), (sx, sy + 3)], fill=SHIP_BODY)
-        draw_ctx.line([(sx + 2, sy - 1), (sx, sy + 3)], fill=SHIP_BODY)
-        draw_ctx.line([(sx - 2, sy - 1), (sx + 2, sy - 1)], fill=SHIP_ACCENT)
-
-        # Wings
-        ws = int(11 * roll_cos)
-        wy = int(3 * roll_sin)
-        bp = int(self.bank * 2.5)
-        lt = (sx - ws + bp, sy + 1 + wy)
-        rt = (sx + ws + bp, sy + 1 - wy)
-        draw_ctx.line([(sx - 3, sy - 2), lt], fill=SHIP_WING)
-        draw_ctx.line([lt, (sx - 3, sy + 2)], fill=SHIP_WING)
-        draw_ctx.line([(sx + 3, sy - 2), rt], fill=SHIP_WING)
-        draw_ctx.line([rt, (sx + 3, sy + 2)], fill=SHIP_WING)
-        if abs(roll_cos) > 0.3:
-            draw_ctx.point(lt, fill=SHIP_ACCENT)
-            draw_ctx.point(rt, fill=SHIP_ACCENT)
-
-        # Engines
-        flicker = 0.5 + 0.5 * math.sin(frame * 0.6)
-        eng = tuple(min(255, int(c * (flicker + self.boost * 0.4))) for c in SHIP_ENGINE)
-        for dx in [-2, 0, 2]:
-            if 0 <= sx + dx < WIDTH and 0 <= sy + 4 < HEIGHT:
-                draw_ctx.point((sx + dx, sy + 4), fill=eng)
-        if 0 <= sy + 5 < HEIGHT:
-            draw_ctx.point((sx, sy + 5), fill=tuple(min(255, int(c * flicker)) for c in SHIP_ENGINE_HOT))
+        angle = self.barrel_roll * self.roll_dir if self.barrel_rolling else self.bank * 0.35
+        draw_arwing(draw_ctx, sx, sy, angle, frame, self.boost)
 
         # Barrel roll shield
         if self.barrel_rolling:
@@ -290,7 +261,7 @@ class _Enemy:
     def should_fire(self):
         if self._fire_cd <= 0 and self.z < 8 and self.z > 2:
             self._fire_cd = random.randint(int(50 * self.fire_scale),
-                                            int(120 * self.fire_scale))
+                                           int(120 * self.fire_scale))
             return True
         return False
 
@@ -317,6 +288,7 @@ class _Enemy:
         nose = (c[0], c[1] - size)
         left = (c[0] - size, c[1] + size // 2)
         right = (c[0] + size, c[1] + size // 2)
+        draw_ctx.polygon([nose, left, right], fill=tuple(ch // 2 for ch in color))
         draw_ctx.line([nose, left], fill=color)
         draw_ctx.line([nose, right], fill=color)
         draw_ctx.line([left, right], fill=color)
@@ -368,10 +340,10 @@ class _Obstacle:
             if base and top:
                 draw_ctx.line([base, top], fill=color)
                 for frac in [0.3, 0.6]:
-                    l = self._proj(self.x - 0.4, 1.5 - 2.7 * frac, self.z, bank_offset)
-                    r = self._proj(self.x + 0.4, 1.5 - 2.7 * frac, self.z, bank_offset)
-                    if l and r:
-                        draw_ctx.line([l, r], fill=color)
+                    left = self._proj(self.x - 0.4, 1.5 - 2.7 * frac, self.z, bank_offset)
+                    right = self._proj(self.x + 0.4, 1.5 - 2.7 * frac, self.z, bank_offset)
+                    if left and right:
+                        draw_ctx.line([left, right], fill=color)
         elif self.kind == "ring":
             center = self._proj(self.x, self.y, self.z, bank_offset)
             if center:
@@ -560,7 +532,7 @@ def _check_laser_boss(laser, boss):
         return None
     if (abs(laser.wx - boss.x) < 0.7
             and abs(laser.wy - (boss.y + boss.CORE_DY)) < 0.7):
-        return "core"
+        return "core" if boss.state == "fight" else "body"
     if abs(laser.wx - boss.x) < 2.4 and abs(laser.wy - boss.y) < 1.3:
         return "body"
     return None
@@ -634,6 +606,10 @@ class _Boss:
         w = max(6, int(f * 2.2))
         body = (255, 255, 255) if self.hit_flash else (170, 70, 190)
         dark = tuple(c // 2 for c in body)
+        draw_ctx.polygon([(cx - w, cy), (cx - w + 2, cy - 3),
+                          (cx - 2, cy - 1), (cx + 2, cy - 1),
+                          (cx + w - 2, cy - 3), (cx + w, cy),
+                          (cx + 3, cy + 3), (cx - 3, cy + 3)], fill=dark)
         # Wing bar + upswept tips
         draw_ctx.line([(cx - w, cy), (cx + w, cy)], fill=body)
         draw_ctx.line([(cx - w, cy + 1), (cx + w, cy + 1)], fill=dark)
@@ -646,6 +622,8 @@ class _Boss:
         pulse = 0.55 + 0.45 * math.sin(frame * 0.25)
         core = ((255, 255, 255) if self.core_flash
                 else (int(255 * pulse), int(210 * pulse), 40))
+        if self.state == "approach":
+            core = (75, 110, 155)
         for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
             px, py = ccx + dx, ccy + dy
             if 0 <= px < WIDTH and 0 <= py < HEIGHT:
@@ -711,7 +689,7 @@ class _AI:
     - Fires rapidly while lined up
     - Breaks away to dodge incoming fire (barrel roll)
     - Slides through rings for bonus points
-    - Moves with purpose — always heading toward a target
+    - Moves with purpose, always heading toward a target
     """
 
     def __init__(self):
@@ -729,13 +707,22 @@ class _AI:
         # --- Barrel roll to dodge incoming fire (highest priority) ---
         if self._dodge_cd > 0:
             self._dodge_cd -= 1
-        incoming = [el for el in enemy_lasers
-                    if el.y > HEIGHT * 0.4 and abs(el.x - sx) < 8]
+        incoming = []
+        for laser in enemy_lasers:
+            vx, vy = laser.tx - laser.x, laser.ty - laser.y
+            length = math.hypot(vx, vy)
+            if length == 0:
+                continue
+            vx, vy = vx / length, vy / length
+            along = (sx - laser.x) * vx + (sy - laser.y) * vy
+            miss = abs((sx - laser.x) * vy - (sy - laser.y) * vx)
+            if 0 < along < 24 and miss < 7:
+                incoming.append(laser)
         if incoming and not ship.barrel_rolling and self._dodge_cd <= 0:
             threat_x = sum(el.x for el in incoming) / len(incoming)
-            roll = 1 if threat_x > sx else -1
+            roll = -1 if threat_x > sx else 1
             self._dodge_cd = 60
-            return dx, dy, fire, roll  # Don't aim while rolling
+            return roll * 1.4, -0.4, fire, roll
 
         # --- Pick a target ---
         # Aiming mirrors _ship_aim_world: the laser line hits world (wx, wy)
@@ -778,8 +765,8 @@ class _AI:
 
         diff_x = target_x - sx
         diff_y = target_y - sy
-        dx = max(-2.2, min(2.2, diff_x * 0.18))
-        dy = max(-1.4, min(1.4, diff_y * 0.10))
+        dx = max(-2.2, min(2.2, diff_x * 0.18 - ship.vx * 0.65))
+        dy = max(-1.4, min(1.4, diff_y * 0.16 - ship.vy * 0.65))
 
         return dx, dy, fire, roll
 
@@ -869,6 +856,102 @@ class _WaveManager:
 # Rendering helpers
 # ===========================================================================
 
+
+class _CorneriaMission:
+    OPENING_FRAMES = 90
+    EXIT_FRAMES = 120
+    WAVE_GAP = 75
+
+    def __init__(self):
+        self.phase = "opening"
+        self.phase_frame = 0
+        self.wave_num = 0
+        self.wave_timer = 0
+        self.awaiting_clear = False
+        self.message = "CORNERIA"
+
+    @property
+    def cinematic(self):
+        return self.phase in ("opening", "victory", "complete")
+
+    def boss_defeated(self):
+        if self.phase == "boss":
+            self.phase = "victory"
+            self.phase_frame = 0
+            self.message = "ALL CLEAR"
+
+    def update(self, enemies, obstacles, boss=None):
+        self.message = None
+        self.phase_frame += 1
+        if self.phase == "opening":
+            if self.phase_frame < self.OPENING_FRAMES:
+                return False, False
+            self.phase = "waves"
+            self.phase_frame = 0
+            self.message = "FALCO: GO!"
+        if self.phase == "victory":
+            if self.phase_frame >= self.EXIT_FRAMES:
+                self.phase = "complete"
+            return False, False
+        if self.phase in ("boss", "complete"):
+            return False, False
+        if self.awaiting_clear:
+            if any(not enemy.is_dead() for enemy in enemies):
+                return False, False
+            self.awaiting_clear = False
+            self.wave_timer = self.WAVE_GAP
+            self.message = "NICE WORK"
+            return False, True
+        self.wave_timer -= 1
+        if self.wave_timer > 0:
+            return False, False
+        self.wave_num += 1
+        if self.wave_num == 4:
+            self.phase = "boss"
+            self.phase_frame = 0
+            obstacles.clear()
+            self.message = "BOSS AHEAD"
+            return True, False
+        behavior = (_Enemy.STRAIGHT, _Enemy.SINE, _Enemy.DIVE)[self.wave_num - 1]
+        for index in range(3):
+            enemy = _Enemy(behavior)
+            enemy.x = enemy._init_x = (index - 1) * 1.6
+            enemy.y = enemy._init_y = -0.5 + abs(index - 1) * 0.4
+            enemy.z = 13.0 + index * 1.8
+            enemy.speed = 0.075 + self.wave_num * 0.008
+            enemy.phase = index * 0.8
+            enemy.color = (235, 90, 60)
+            enemies.append(enemy)
+        ring = _Obstacle("ring")
+        ring.x = (-1, 1, 0)[self.wave_num - 1]
+        ring.z = 22
+        ring.gold = True
+        ring.color = (255, 200, 50)
+        obstacles.append(ring)
+        if self.wave_num == 2:
+            pylon = _Obstacle("pylon")
+            pylon.x = -2.8
+            obstacles.append(pylon)
+            self.message = "KEEP LOW!"
+        self.awaiting_clear = True
+        return False, False
+
+    def draw_flyby(self, draw, frame):
+        if self.phase == "opening":
+            progress = min(1.0, self.phase_frame / self.OPENING_FRAMES)
+            y = 70 - 22 * progress
+            scale = 0.6 + progress * 0.4
+        else:
+            progress = min(1.0, self.phase_frame / self.EXIT_FRAMES)
+            y = 48 - 23 * progress
+            scale = max(0.12, 1.0 - progress * 0.85)
+        draw_arwing(draw, CX, y, math.sin(progress * math.pi) * 0.3,
+                    frame, 1.0, scale)
+        for side in (-1, 1):
+            draw_arwing(draw, CX + side * (19 - progress * 6), y - 6,
+                        side * 0.15, frame, 0.4, scale * 0.5)
+
+
 def _draw_ground(draw, scroll_z, bank_offset, stage):
     vanish_x = CX + int(bank_offset * 0.35)
     for sy in range(HORIZON_Y + 1, HEIGHT):
@@ -892,23 +975,24 @@ def _draw_ground(draw, scroll_z, bank_offset, stage):
 
 
 def _draw_hud(draw, frame, ship, aim_target, score, callout, firing,
-              boss=None, combo_mult=1):
-    # Reticle
-    if aim_target:
-        rx, ry = max(4, min(WIDTH - 4, aim_target[0])), max(4, min(HEIGHT - 16, aim_target[1]))
-    else:
-        rx, ry = CX, CY - 8
-    rc = RETICLE_FIRE if firing else (RETICLE_LOCK if aim_target else RETICLE_NORMAL)
-    s = 3
-    draw.line([(rx - s, ry - s), (rx - 1, ry - s)], fill=rc)
-    draw.line([(rx + 1, ry - s), (rx + s, ry - s)], fill=rc)
-    draw.line([(rx - s, ry + s), (rx - 1, ry + s)], fill=rc)
-    draw.line([(rx + 1, ry + s), (rx + s, ry + s)], fill=rc)
-    draw.line([(rx - s, ry - s), (rx - s, ry - 1)], fill=rc)
-    draw.line([(rx + s, ry - s), (rx + s, ry - 1)], fill=rc)
-    draw.line([(rx - s, ry + 1), (rx - s, ry + s)], fill=rc)
-    draw.line([(rx + s, ry + 1), (rx + s, ry + s)], fill=rc)
-    draw.point((rx, ry), fill=rc)
+              boss=None, combo_mult=1, show_reticle=True):
+    if show_reticle:
+        # Reticle
+        if aim_target:
+            rx, ry = max(4, min(WIDTH - 4, aim_target[0])), max(4, min(HEIGHT - 16, aim_target[1]))
+        else:
+            rx, ry = CX, CY - 8
+        rc = RETICLE_FIRE if firing else (RETICLE_LOCK if aim_target else RETICLE_NORMAL)
+        s = 3
+        draw.line([(rx - s, ry - s), (rx - 1, ry - s)], fill=rc)
+        draw.line([(rx + 1, ry - s), (rx + s, ry - s)], fill=rc)
+        draw.line([(rx - s, ry + s), (rx - 1, ry + s)], fill=rc)
+        draw.line([(rx + 1, ry + s), (rx + s, ry + s)], fill=rc)
+        draw.line([(rx - s, ry - s), (rx - s, ry - 1)], fill=rc)
+        draw.line([(rx + s, ry - s), (rx + s, ry - 1)], fill=rc)
+        draw.line([(rx - s, ry + 1), (rx - s, ry + s)], fill=rc)
+        draw.line([(rx + s, ry + 1), (rx + s, ry + s)], fill=rc)
+        draw.point((rx, ry), fill=rc)
 
     # Score
     s_str = str(score)
@@ -920,9 +1004,9 @@ def _draw_hud(draw, frame, ship, aim_target, score, callout, firing,
         draw.point((2 + i * 3, 1), fill=HUD_GREEN)
         draw.point((3 + i * 3, 1), fill=HUD_GREEN)
 
-    # Combo multiplier (under the shield pips)
+    # Combo multiplier beside the shield pips, above the radio line
     if combo_mult > 1:
-        _draw_text(draw, "x{}".format(combo_mult), 2, 7, (255, 220, 80),
+        _draw_text(draw, "x{}".format(combo_mult), 14, 1, (255, 220, 80),
                    scale=1, spacing=1)
 
     # Boost meter (bottom-left; hidden when full)
@@ -973,7 +1057,7 @@ def run(matrix, duration=60, controller=None):
     ai = _AI() if not interactive else None
     stars = _StarField()
     terrain = _Terrain()
-    wave_mgr = _WaveManager()
+    wave_mgr = _WaveManager() if interactive else _CorneriaMission()
     boss = None
     enemies = []
     obstacles = []
@@ -992,6 +1076,20 @@ def run(matrix, duration=60, controller=None):
                 break
             frame_start = time.time()
             frame += 1
+
+            if not interactive and (wave_mgr.phase == "complete" or not ship.alive):
+                retry = not ship.alive
+                ship = _Ship()
+                ai = _AI()
+                wave_mgr = _CorneriaMission()
+                boss = None
+                enemies.clear()
+                obstacles.clear()
+                lasers.clear()
+                enemy_lasers.clear()
+                explosions.clear()
+                score = combo = combo_timer = fire_cooldown = 0
+                callout = ["RETRY" if retry else "CORNERIA", 60]
 
             # --- Input ---
             move_dx, move_dy = 0.0, 0.0
@@ -1030,11 +1128,15 @@ def run(matrix, duration=60, controller=None):
                     ship, enemies, obstacles, enemy_lasers, bank_offset_preview,
                     frame, boss=boss)
 
+            if not interactive and wave_mgr.cinematic:
+                move_dx = move_dy = 0.0
+                want_fire = want_roll = False
+
             # --- Apply input to ship ---
             ship.move(move_dx, move_dy)
             if want_roll:
                 if ship.do_barrel_roll(want_roll):
-                    callout = ["BARREL ROLL!", 25]
+                    callout = ["DO A ROLL!", 25]
 
             # Boost stretches world speed while the meter lasts
             speed_mult = 1.45 if (ship.boosting and ship.boost_meter > 0) else 1.0
@@ -1042,7 +1144,7 @@ def run(matrix, duration=60, controller=None):
 
             # --- Stage transitions ---
             elapsed = time.time() - start_time
-            new_stage = int(elapsed / stage_duration) % len(STAGES)
+            new_stage = int(elapsed / stage_duration) % len(STAGES) if interactive else 0
             if new_stage != stage_idx:
                 stage_idx = new_stage
                 callout = [STAGES[stage_idx]["name"], 50]
@@ -1061,10 +1163,14 @@ def run(matrix, duration=60, controller=None):
             spawn_boss, wave_cleared = wave_mgr.update(enemies, obstacles, boss)
             if spawn_boss:
                 boss = _Boss(level=max(1, wave_mgr.wave_num // _WaveManager.BOSS_EVERY))
+                if not interactive:
+                    boss.hp = boss.max_hp = 40
                 callout = ["WARNING!", 45]
             if wave_cleared:
                 score += 50
-                callout = ["WAVE CLEAR +50", 30]
+                callout = ["WAVE CLEAR", 30]
+            if not interactive and wave_mgr.message:
+                callout = [wave_mgr.message, 50]
 
             # Enemy fire aims at the ship; spread tightens as waves progress
             spread = max(2, 12 - wave_mgr.wave_num)
@@ -1091,9 +1197,9 @@ def run(matrix, duration=60, controller=None):
                 o.update(speed_mult)
             obstacles = [o for o in obstacles if not o.is_dead()]
 
-            for l in lasers:
-                l.update()
-            lasers = [l for l in lasers if not l.is_dead()]
+            for laser in lasers:
+                laser.update()
+            lasers = [laser for laser in lasers if not laser.is_dead()]
 
             for el in enemy_lasers:
                 el.update()
@@ -1136,8 +1242,14 @@ def run(matrix, duration=60, controller=None):
                             score += 200
                             combo += 3
                             combo_timer = 120
-                            callout = ["BOSS DOWN! +200", 45]
+                            callout = ["BOSS DOWN!", 45]
                             boss = None
+                            if not interactive:
+                                wave_mgr.boss_defeated()
+                                enemies.clear()
+                                obstacles.clear()
+                                enemy_lasers.clear()
+                                callout = ["ALL CLEAR", wave_mgr.EXIT_FRAMES]
                             if interactive:
                                 safe_rumble(controller, 1.0, 300)
                         continue
@@ -1218,31 +1330,22 @@ def run(matrix, duration=60, controller=None):
                     show_banner(matrix, ["GAME OVER", f"SCORE {score}"],
                                 color=(255, 80, 80), hold=3.0)
                     return
-                else:
-                    # Demo: restart
-                    ship = _Ship()
-                    score = 0
-                    combo = 0
-                    combo_timer = 0
-                    boss = None
-                    enemies.clear(); obstacles.clear(); lasers.clear()
-                    enemy_lasers.clear(); explosions.clear()
-                    wave_mgr = _WaveManager()
-                    callout = ["RETRY", 30]
 
             # --- Render ---
             image = Image.new("RGB", (WIDTH, HEIGHT), stage["sky_top"])
             draw = ImageDraw.Draw(image)
 
-            # Sky gradient
-            for y in range(HORIZON_Y):
-                t = y / max(1, HORIZON_Y)
-                draw.line([(0, y), (WIDTH - 1, y)], fill=tuple(
-                    int(stage["sky_top"][i] * (1 - t) + stage["sky_bottom"][i] * t) for i in range(3)))
-
-            stars.draw(draw)
-            terrain.draw(draw, stage)
-            _draw_ground(draw, scroll_z, bank_offset, stage)
+            if stage_idx == 0:
+                draw_corneria(draw, scroll_z, bank_offset, WIDTH, HEIGHT, HORIZON_Y)
+            else:
+                for y in range(HORIZON_Y):
+                    t = y / max(1, HORIZON_Y)
+                    draw.line([(0, y), (WIDTH - 1, y)], fill=tuple(
+                        int(stage["sky_top"][i] * (1 - t) + stage["sky_bottom"][i] * t)
+                        for i in range(3)))
+                stars.draw(draw)
+                terrain.draw(draw, stage)
+                _draw_ground(draw, scroll_z, bank_offset, stage)
 
             for o in sorted(obstacles, key=lambda o: -o.z):
                 o.draw(draw, bank_offset)
@@ -1250,8 +1353,8 @@ def run(matrix, duration=60, controller=None):
                 boss.draw(draw, frame)
             for e in sorted(enemies, key=lambda e: -e.z):
                 e.draw(draw, bank_offset)
-            for l in lasers:
-                l.draw(draw)
+            for laser in lasers:
+                laser.draw(draw)
             for el in enemy_lasers:
                 el.draw(draw)
             for ex in explosions:
@@ -1272,9 +1375,12 @@ def run(matrix, duration=60, controller=None):
             reticle_y = int((CY - 5) + wy * (30.0 / tz))
             _draw_hud(draw, frame, ship, (reticle_x, reticle_y), score, callout,
                       firing_this_frame, boss=boss,
-                      combo_mult=min(4, 1 + combo // 3) if combo >= 3 else 1)
+                      combo_mult=min(4, 1 + combo // 3) if combo >= 3 else 1,
+                      show_reticle=interactive or not wave_mgr.cinematic)
 
-            if ship.alive:
+            if not interactive and wave_mgr.cinematic:
+                wave_mgr.draw_flyby(draw, frame)
+            elif ship.alive:
                 ship.draw(draw, frame)
 
             matrix.SetImage(image)

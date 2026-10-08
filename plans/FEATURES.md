@@ -436,3 +436,16 @@ Pinball correctness review (2026-10-08):
 - [x] Pinball coverage: 83.3% overall; all 48 changed executable lines covered.
 - [x] Independent read-only diff review: no blocking findings.
 - [ ] Full repository suite is not green: 1,587 passed, 12 failed. Eleven existing input tests fail after simulator initialization (reproduced with original pinball); one sequence-sync test fails because the pre-existing local config omits zelda_woods. These unrelated files were left unchanged.
+
+
+## Star Fox: Corneria rebuild (2026-10-08)
+
+- [x] Shaded low-poly Arwing, bank/roll animation, twin blue exhaust; filled enemy and boss hulls.
+- [x] Corneria daylight landscape with layered hills, moving river/road, and perspective city structures.
+- [x] Demo-only mission: wingmate fly-in, three authored formations with rings/pylon, armored boss approach/fight, victory flyout, clean replay/retry. Demo no longer changes locations mid-battle.
+- [x] Velocity-damped aiming, predictive threat dodging, short callouts, and non-overlapping radio/combo HUD. Controller entry and controls retained; boss approach armor also applies in interactive play.
+- [x] 45 focused tests pass, including five seeded 1,800-frame real-render loops; changed-code lint and full Python compileall pass.
+- [x] Real run() preview generated and contact sheet inspected. Seed 0 mission lasts 28.6 seconds at 30 FPS.
+- [x] Independent review found no blocking issues; one cosmetic callout mismatch recorded in the plan.
+- [ ] Full suite is not green: 1,614 passed, 11 existing input/event-order failures, no new failing test IDs. User approved publishing the previewed slice; device installation remains unverified.
+- Scope and verification: plans/starfox_corneria.md. Other locations are deferred for the next review checkpoint.
