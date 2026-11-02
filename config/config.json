@@ -314,12 +314,12 @@
     {
       "name": "pumpkin",
       "type": "effect",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "skeleton",
       "type": "effect",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "zelda_quest",
