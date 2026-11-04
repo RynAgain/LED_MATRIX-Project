@@ -10,7 +10,7 @@ A self-managing Raspberry Pi display system for a 64x64 RGB LED matrix. Cycles t
 | Feature | Description |
 |---------|-------------|
 | Tic Tac Toe | AI vs AI on a 3x3 grid |
-| Snake | Autonomous AI pathfinding |
+| Snake | Third-person 3D chase camera, AI demo or gamepad; tap left/right to turn, release to rearm |
 | Pong | AI vs AI with increasing difficulty |
 | Breakout | Autonomous brick-breaking with AI paddle |
 | Billiards | Physics simulation with AI player |

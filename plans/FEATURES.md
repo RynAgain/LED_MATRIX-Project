@@ -49,7 +49,7 @@
 
 ### Games (10)
 - [x] Tic Tac Toe (AI vs AI)
-- [x] Snake (autonomous AI)
+- [x] Snake (third-person 3D chase camera, shaded segments, overview map, AI demo and relative gamepad steering; see `plans/snake_3d.md`)
 - [x] Pong (AI vs AI)
 - [x] Breakout (autonomous AI)
 - [x] Billiards (physics simulation)

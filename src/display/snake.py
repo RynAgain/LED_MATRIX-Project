@@ -1,42 +1,16 @@
+"""Third-person 3D Snake with autonomous demo and controller play.
+
+Left/right turn relative to the chase camera once per press; release to rearm.
+Up or neutral continues forward, and down cannot reverse into the neck.
+Start+Select (or hold Start) returns to the menu. Interactive play is one round;
+the demo restarts automatically. Movement remains on the classic flat board.
 """
-Snake -- AI-driven (demo) or controller-playable (interactive) on a 64x64 LED
-matrix.
 
-Features:
-- Uniform 1x1 pixel segments for classic snake look
-- Head distinguished by bright white color, body gradient green
-- Pulsing food effect (color pulse, 1x1 pixel)
-- Food color: bright red, occasional golden food worth double points
-- Death animation (body turns red one segment at a time)
-- Score/length display in corner using small pixel font
-- Faster frame rate for smoother movement
-- Autonomous AI gameplay (DEMO) or gamepad control (INTERACTIVE)
-
-Control scheme (INTERACTIVE mode, ``controller is not None``)
-------------------------------------------------------------
-- **D-pad / analog stick** steers the snake (UP / DOWN / LEFT / RIGHT). A
-  180-degree reversal into the snake's own neck is rejected (the input is
-  ignored and the snake keeps its current heading), reusing ``_opposite``.
-- **A / B** are unused this phase (directions are the core mechanic); reserved
-  so future tweaks (e.g. a speed boost) don't break the contract.
-- **Start + Select** (or hold Start ~1.5s) quits to the menu at any time, via
-  :func:`src.input.controller.wants_quit`.
-- On **game over** (wall / self collision) the death animation plays once, a
-  brief "GAME OVER" banner is shown, then ``run()`` returns -- handing control
-  back to the state machine. A single round is played per interactive launch
-  (no auto-restart), unlike demo mode which loops rounds.
-
-DEMO mode (``controller is None``) is unchanged: the autonomous pathfinding AI
-plays, rounds auto-restart, and the feature ends only when ``duration`` elapses
-or ``should_stop()`` fires. Existing tests calling ``run(matrix, duration)``
-behave exactly as before.
-"""
+from collections import deque
 
 import random
 import logging
 import time
-import math
-from PIL import Image, ImageDraw
 from src.display._shared import (
     should_stop,
     interruptible_sleep,
@@ -44,7 +18,7 @@ from src.display._shared import (
     safe_rumble,
     show_banner,
 )
-from src.display._utils import _draw_digit, _draw_number, _lerp_color
+from src.display.snake_scene import render
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +26,7 @@ logger = logging.getLogger(__name__)
 SIZE = 64
 FPS = 15  # Faster than original 10fps for smoother movement
 FRAME_DUR = 1.0 / FPS
-BG_COLOR = (0, 0, 0)
-
-# Snake colors (gradient from head to tail)
-HEAD_COLOR = (255, 255, 255)  # Bright white head for visibility
-BODY_COLOR_HEAD = (0, 255, 50)  # Bright green near head
-TAIL_COLOR = (0, 60, 15)
-
-# Food colors
-FOOD_RED = (255, 20, 20)
-FOOD_GOLD = (255, 215, 0)
-
-# Death color
-DEATH_COLOR = (200, 0, 0)
-
+INPUT_INTERVAL = 1.0 / 120
 # Directions
 UP = (0, -1)
 DOWN = (0, 1)
@@ -117,7 +78,6 @@ class SnakeGame:
         fx, fy = self.food
 
         # Score each possible direction
-        snake_set = set(self.snake)
         best_dir = self.direction
         best_score = -999
 
@@ -200,75 +160,17 @@ class SnakeGame:
             self.snake.pop()
 
     def draw(self, matrix, pulse_phase=0.0):
-        """Render the game state."""
-        image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
-
-        # Draw snake body with gradient (all 1x1 pixels)
-        num_segments = len(self.snake)
-        for i, (sx, sy) in enumerate(self.snake):
-            if i == 0:
-                continue  # head drawn separately with distinct color
-            t = i / max(num_segments - 1, 1)
-            color = _lerp_color(BODY_COLOR_HEAD, TAIL_COLOR, t)
-            if 0 <= sx < SIZE and 0 <= sy < SIZE:
-                image.putpixel((sx, sy), color)
-
-        # Draw head as 1x1 pixel with bright white color
-        hx, hy = self.snake[0]
-        if 0 <= hx < SIZE and 0 <= hy < SIZE:
-            image.putpixel((hx, hy), HEAD_COLOR)
-
-        # Draw food as 1x1 pixel with pulsing color
-        if self.food:
-            fx, fy = self.food
-            base_color = FOOD_GOLD if self.food_is_gold else FOOD_RED
-            pulse = 0.6 + 0.4 * math.sin(pulse_phase)
-            food_color = tuple(int(c * pulse) for c in base_color)
-
-            if 0 <= fx < SIZE and 0 <= fy < SIZE:
-                image.putpixel((fx, fy), food_color)
-
-        # Draw score in top-left corner
-        score_color = (200, 200, 200)
-        _draw_number(image, self.score, 1, 1, score_color)
-
-        matrix.SetImage(image)
+        matrix.SetImage(render(self, pulse_phase, board_size=SIZE))
 
     def draw_death(self, matrix):
-        """Animate death: snake body turns red one segment at a time."""
-        image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
-
-        # Draw full snake in current colors first
-        num_segments = len(self.snake)
-        colors = [HEAD_COLOR]  # head color
-        for i in range(1, num_segments):
-            t = i / max(num_segments - 1, 1)
-            colors.append(_lerp_color(BODY_COLOR_HEAD, TAIL_COLOR, t))
-
-        # Animate each segment turning red
-        segments_per_frame = max(1, num_segments // 20)  # complete in ~20 frames
+        segments_per_frame = max(1, len(self.snake) // 20)
         red_count = 0
-
-        while red_count < num_segments:
+        while red_count < len(self.snake):
             if should_stop():
-                break
-            image = Image.new("RGB", (SIZE, SIZE), BG_COLOR)
-            red_count = min(red_count + segments_per_frame, num_segments)
-
-            for i, (sx, sy) in enumerate(self.snake):
-                if i < red_count:
-                    color = DEATH_COLOR
-                else:
-                    color = colors[i]
-                if 0 <= sx < SIZE and 0 <= sy < SIZE:
-                    image.putpixel((sx, sy), color)
-
-            # Score
-            _draw_number(image, self.score, 1, 1, (200, 200, 200))
-            matrix.SetImage(image)
-            time.sleep(FRAME_DUR)
-
-        # Hold death frame briefly
+                return
+            red_count = min(red_count + segments_per_frame, len(self.snake))
+            matrix.SetImage(render(self, red_count=red_count, board_size=SIZE))
+            interruptible_sleep(FRAME_DUR)
         interruptible_sleep(0.5)
 
 
@@ -314,32 +216,37 @@ def _run_interactive(matrix, controller, start_time):
 
     game = SnakeGame()
     pulse_phase = 0.0
-    requested = game.direction
+    held_turn = None
+    turns = deque()
+    next_step = time.monotonic()
 
     while game.alive and time.time() - start_time < _INTERACTIVE_MAX_SECONDS:
         if should_stop():
             return
-        # Pump input every frame, then check the quit gesture.
         controller.poll_events()
         if wants_quit(controller):
             return
 
-        frame_start = time.time()
-
-        # Latest held direction wins; falls back to current heading when centered
-        # so the snake never stalls. read_direction collapses diagonals to a
-        # cardinal axis for the four-direction snake.
         d = read_direction(controller, cardinal_only=True)
-        if d is not None:
-            requested = d
-        game.step(direction=requested)
-        game.draw(matrix, pulse_phase)
-        pulse_phase += 0.4
+        turn = d if d in (LEFT, RIGHT) else None
+        if turn is not None and turn != held_turn and len(turns) < 2:
+            turns.append(turn)
+        held_turn = turn
 
-        elapsed = time.time() - frame_start
-        sleep_time = FRAME_DUR - elapsed
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+        now = time.monotonic()
+        if now >= next_step:
+            requested = game.direction
+            if turns:
+                dx, dy = game.direction
+                requested = (dy, -dx) if turns.popleft() == LEFT else (-dy, dx)
+            game.step(direction=requested)
+            game.draw(matrix, pulse_phase)
+            pulse_phase += 0.4
+            next_step = now + FRAME_DUR
+
+        remaining = next_step - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(INPUT_INTERVAL, remaining))
 
     # Game over: animation + feedback, then return to the menu (no auto-restart).
     if not game.alive:
